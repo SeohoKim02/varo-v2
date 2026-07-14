@@ -7,8 +7,8 @@ DESIGN_TOKENS = {
     "app_bg": "#f6f7f9",
     "card_bg": "#ffffff",
     "text": "#1b2533",
-    "muted_text": "#667085",
-    "border": "#dfe5ec",
+    "muted_text": "#4b5563",
+    "border": "#c7d0dc",
     "accent": "#1f766d",
     "accent_soft": "#e8f4f2",
     "success": "#1f8a5b",
@@ -17,7 +17,7 @@ DESIGN_TOKENS = {
     "info": "#2d5f9a",
     "card_radius": "8px",
     "button_radius": "7px",
-    "shadow": "0 8px 22px rgba(21, 30, 42, 0.06)",
+    "shadow": "0 8px 22px rgba(21, 30, 42, 0.08)",
 }
 
 
@@ -74,6 +74,8 @@ def apply_global_styles() -> None:
         [data-testid="stExpander"] summary {{
             background: #ffffff !important;
             color: var(--varo-text) !important;
+            font-weight: 720 !important;
+            border-color: var(--varo-line) !important;
         }}
         [data-testid="stDataFrame"] canvas,
         [data-testid="stDataFrame"] [role="grid"] {{
@@ -111,7 +113,8 @@ def apply_global_styles() -> None:
         button[data-testid="baseButton-secondary"] {{
             background: #ffffff !important;
             color: var(--varo-text) !important;
-            border-color: var(--varo-line) !important;
+            border-color: #aeb9c7 !important;
+            font-weight: 680 !important;
         }}
         .block-container {{
             padding-top: 2.55rem !important;
@@ -143,6 +146,12 @@ def apply_global_styles() -> None:
             letter-spacing: 0;
             color: var(--varo-text);
         }}
+        .v2-page-context {{
+            margin-top: 0.12rem;
+            color: #3f4c5d;
+            font-size: 0.78rem;
+            font-weight: 680;
+        }}
         .v2-topbar-meta {{
             display: flex;
             flex-wrap: wrap;
@@ -157,6 +166,11 @@ def apply_global_styles() -> None:
             border-radius: 999px;
             padding: 0.22rem 0.56rem;
             background: #f8fafc;
+        }}
+        .v2-file-label {{
+            max-width: min(46vw, 620px);
+            white-space: normal;
+            overflow-wrap: anywhere;
         }}
         .v2-pill {{
             color: var(--varo-accent);
@@ -229,22 +243,29 @@ def apply_global_styles() -> None:
             margin-bottom: 0.65rem;
         }}
         .v2-kpi-card {{
-            padding: 0.68rem 0.75rem;
-            min-height: 112px;
+            padding: 0.95rem 1rem;
+            min-height: 120px;
         }}
         .v2-kpi-card-compact {{
-            min-height: 92px;
-            padding: 0.6rem 0.72rem;
+            min-height: 118px;
+            padding: 0.92rem 1rem;
             display: flex;
             flex-direction: column;
             justify-content: center;
+            overflow: visible;
         }}
         .v2-kpi-card-compact .v2-kpi-value {{
-            font-size: 1.72rem;
+            font-size: clamp(1.28rem, 1.65vw, 1.72rem);
             font-weight: 820;
-            margin-top: 0.2rem;
+            margin-top: 0.28rem;
         }}
-        .v2-kpi-card-compact:first-child .v2-kpi-value {{
+        .v2-kpi-value-file {{
+            font-size: clamp(1rem, 1.25vw, 1.24rem) !important;
+            line-height: 1.28 !important;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
             overflow-wrap: anywhere;
         }}
         .v2-card-title {{
@@ -255,7 +276,7 @@ def apply_global_styles() -> None:
         }}
         .v2-card-caption {{
             color: var(--varo-muted);
-            font-size: 0.84rem;
+            font-size: 0.86rem;
             line-height: 1.4;
         }}
         .v2-kpi-value {{
@@ -270,7 +291,7 @@ def apply_global_styles() -> None:
             justify-content: space-between;
             gap: 0.75rem;
             align-items: center;
-            margin: 0.58rem 0 0.32rem;
+            margin: 0.9rem 0 0.42rem;
         }}
         .v2-section-title {{
             font-size: 1.04rem;
@@ -309,9 +330,9 @@ def apply_global_styles() -> None:
             white-space: normal;
         }}
         .v2-badge-neutral {{ background: #f3f5f7; color: var(--varo-muted); }}
-        .v2-badge-accent {{ background: var(--varo-accent-soft); color: var(--varo-accent); border-color: #cde6e1; }}
-        .v2-badge-success {{ background: #e8f7ef; color: var(--varo-success); border-color: #c9ead8; }}
-        .v2-badge-warning {{ background: #fff7dc; color: #8a6400; border-color: #f1db8a; }}
+        .v2-badge-accent {{ background: var(--varo-accent-soft); color: #155f57; border-color: #9fcfc7; }}
+        .v2-badge-success {{ background: #e8f7ef; color: #176b47; border-color: #9fd5b8; }}
+        .v2-badge-warning {{ background: #fff6d7; color: #6f5000; border-color: #d8bb52; }}
         .v2-badge-error {{ background: #fff0ed; color: var(--varo-error); border-color: #f3c3ba; }}
         .v2-detail-row {{
             display: grid;
@@ -347,16 +368,34 @@ def apply_global_styles() -> None:
             overflow-wrap: anywhere;
         }}
         .v2-table-shell {{
-            border: 1px solid var(--varo-line);
+            border: 1.25px solid #b9c4d1;
             background: var(--varo-panel);
             border-radius: var(--varo-radius-card);
             overflow: visible;
         }}
+        [data-testid="stDataFrame"] {{
+            border: 1.25px solid #b9c4d1 !important;
+        }}
+        table thead tr, table thead th {{
+            background: #eef2f6 !important;
+            color: #1f2937 !important;
+            font-weight: 760 !important;
+            border-color: #b9c4d1 !important;
+        }}
+        .v2-quick-nav-card {{
+            min-height: 88px;
+            border: 1.25px solid #b8c7d8;
+            background: #ffffff;
+            border-radius: var(--varo-radius-card);
+            box-shadow: 0 5px 15px rgba(30, 58, 95, 0.07);
+            padding: 0.82rem 0.9rem;
+            margin-top: 0.12rem;
+        }}
         .v2-network-shell {{
             position: relative;
             width: 100%;
-            min-height: 660px;
-            border: 1px solid var(--varo-line);
+            min-height: 760px;
+            border: 1.4px solid #b9c4d1;
             border-radius: var(--varo-radius-card);
             background: radial-gradient(circle at 52% 46%, #ffffff 0, #f8fafb 58%, #f3f6f8 100%);
             overflow: hidden;
@@ -369,7 +408,7 @@ def apply_global_styles() -> None:
             text-align: center;
             padding: 1rem;
         }}
-        .v2-network-svg {{ display: block; width: 100%; height: 660px; }}
+        .v2-network-svg {{ display: block; width: 100%; height: 700px; margin-top: 0.2rem; }}
         .v2-network-svg text {{ font-family: inherit; fill: var(--varo-text); }}
         .v2-network-svg .node-label {{
             font-size: 14px;
@@ -384,42 +423,58 @@ def apply_global_styles() -> None:
         .v2-network-svg .network-node {{ filter: drop-shadow(0 2px 3px rgba(30, 41, 59, 0.06)); }}
         .v2-network-svg .recommended-node {{ filter: drop-shadow(0 3px 5px rgba(216, 131, 120, 0.18)); }}
         .v2-network-svg .v2-vehicle {{ filter: drop-shadow(0 3px 5px rgba(30, 41, 59, 0.20)); }}
+        .v2-network-svg .v2-vehicle-selected {{ opacity: 1; }}
+        .v2-network-svg .v2-vehicle-muted {{ opacity: 0.56; }}
         .v2-network-svg .vehicle-route {{ font-size: 11px; font-weight: 840; }}
         .v2-network-svg .vehicle-mode {{ font-size: 9.4px; font-weight: 780; }}
         .v2-network-svg .vehicle-type {{ font-size: 8px; font-weight: 800; fill: #ffffff; }}
         .v2-network-legend {{
             display: flex;
             flex-wrap: wrap;
-            gap: 0.45rem;
+            gap: 0.55rem 0.9rem;
             align-items: center;
-            padding: 0.52rem 0.65rem 0;
-            color: var(--varo-muted);
-            font-size: 0.78rem;
+            padding: 0.72rem 0.85rem 0.2rem;
+            color: #344154;
+            font-size: 0.84rem;
+            font-weight: 680;
         }}
-        .v2-legend-line {{ width: 28px; height: 0; border-top: 2px solid var(--varo-accent); }}
-        .v2-legend-line-dashed {{ border-top-style: dashed; }}
-        .v2-running-route {{
-            border: 1px solid var(--varo-line);
-            border-radius: 7px;
-            padding: 0.5rem 0.55rem;
-            margin-top: 0.42rem;
-            background: #fbfcfd;
-        }}
-        .v2-running-route-selected {{ border: 2px solid var(--varo-accent); }}
-        .v2-running-route strong {{ display: block; font-size: 0.88rem; line-height: 1.25; }}
-        .v2-running-route-meta {{
-            display: grid;
-            gap: 0.32rem;
-            margin-top: 0.28rem;
-            color: var(--varo-muted);
-            font-size: 0.76rem;
-        }}
+        .v2-legend-item {{ display: inline-flex; align-items: center; gap: 0.36rem; }}
+        .v2-legend-line {{ width: 32px; height: 0; border-top: 3px solid #2563a6; }}
+        .v2-legend-line-via {{ border-top-color: #c28a00; border-top-style: dashed; }}
+        .v2-legend-node {{ width: 21px; height: 14px; border-radius: 3px; display: inline-block; }}
+        .v2-legend-store {{ background: #eef5ff; border: 2px solid #78a9d8; }}
+        .v2-legend-dc {{ background: #fff8df; border: 2px solid #c28a00; }}
+        .v2-legend-truck {{ font-size: 1.08rem; line-height: 1; }}
         .v2-route-steps {{
             margin: 0;
             padding-left: 1.25rem;
             color: var(--varo-text);
             line-height: 1.75;
         }}
+        .v2-route-flow {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.7rem;
+            flex-wrap: wrap;
+            border: 1.25px solid #b9c4d1;
+            background: #f8fafc;
+            border-radius: var(--varo-radius-card);
+            padding: 1rem;
+            margin-bottom: 0.55rem;
+        }}
+        .v2-route-node {{
+            max-width: 280px;
+            padding: 0.58rem 0.8rem;
+            border: 2px solid #78a9d8;
+            background: #eef5ff;
+            border-radius: 7px;
+            color: #24364e;
+            font-weight: 740;
+            text-align: center;
+        }}
+        .v2-route-node-dc {{ border-color: #c28a00; background: #fff8df; color: #624900; }}
+        .v2-route-arrow {{ color: #526274; font-size: 1.35rem; font-weight: 800; }}
         .v2-route-code {{ color: var(--varo-muted); font-size: 0.7rem; margin-left: 0.25rem; }}
         .stButton button[kind="primary"],
         button[data-testid="stBaseButton-primary"],
@@ -442,43 +497,14 @@ def apply_global_styles() -> None:
             color: var(--varo-text);
             margin: 0.1rem 0 0.5rem;
         }}
-        /* Home result dashboard helpers */
-        .v2-home-badges {{ display: flex; flex-wrap: wrap; gap: 0.34rem; justify-content: flex-end; }}
-        .v2-home-badge {{
-            font-size: 0.72rem;
-            color: var(--varo-muted);
-            background: #f1f4f7;
-            border: 1px solid var(--varo-line);
-            border-radius: 999px;
-            padding: 0.12rem 0.55rem;
-            white-space: nowrap;
-        }}
-        .v2-home-value {{ font-size: 1.9rem; font-weight: 820; line-height: 1.05; }}
-        .v2-flow {{
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 0.5rem;
-            margin: 0.2rem 0 0.5rem;
-        }}
-        .v2-flow-step {{
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            border: 1px solid var(--varo-line);
-            background: var(--varo-panel);
-            border-radius: var(--varo-radius-card);
-            padding: 0.55rem 0.7rem;
-        }}
-        .v2-flow-icon {{ font-size: 1.2rem; }}
-        .v2-flow-label {{ font-size: 0.9rem; font-weight: 680; color: var(--varo-text); }}
-        .v2-flow-step-num {{ color: var(--varo-muted); font-size: 0.72rem; }}
-        @media (max-width: 820px) {{ .v2-flow {{ grid-template-columns: repeat(2, 1fr); }} }}
         .stTabs [data-baseweb="tab-list"] {{ flex-wrap: wrap; gap: 0.35rem; overflow-x: visible; }}
         .stTabs [data-baseweb="tab"] {{
             min-width: max-content;
             padding-left: 0.6rem;
             padding-right: 0.6rem;
             white-space: normal;
+            color: #344154 !important;
+            font-weight: 700 !important;
         }}
         @media (max-width: 1100px) {{
             .v2-kpi-card:not(.v2-kpi-card-compact) {{ min-height: 104px; }}

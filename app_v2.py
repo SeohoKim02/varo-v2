@@ -57,7 +57,7 @@ def initialize_session_state() -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="VARO V2", page_icon="V2", layout="wide", initial_sidebar_state="collapsed",
+        page_title="VARO V2", page_icon="V2", layout="wide", initial_sidebar_state="expanded",
     )
     initialize_session_state()
     apply_global_styles()

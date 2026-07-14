@@ -144,7 +144,7 @@ except Exception:  # pragma: no cover
 @unittest.skipIf(AppTest is None, "streamlit AppTest unavailable")
 class DqnDirectUploadPageTests(unittest.TestCase):
     HOME_TOP_COLUMNS = ["순위", "상품", "출발", "도착", "경로", "수량", "예상 절감액"]
-    MENUS = ["운영 현황", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"]
+    MENUS = ["홈", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"]
 
     @staticmethod
     def _state_for_sample(number: str) -> tuple[dict, Path]:
@@ -167,12 +167,13 @@ class DqnDirectUploadPageTests(unittest.TestCase):
     def test_sample_02_state_renders_home_kpis_top_routes_and_simulation(self):
         state, _ = self._state_for_sample("02")
         app = self._app_with_state(state)
-        app.session_state["current_menu"] = "운영 현황"
+        app.session_state["current_menu"] = "홈"
         app.run()
         self.assertFalse(app.exception)
         blob = " ".join(element.value for element in app.markdown)
         self.assertIn("추천 후보 수", blob)
-        self.assertIn("추천 Top 5", blob)
+        self.assertIn("재고 이동 네트워크 미리보기", blob)
+        self.assertNotIn("추천 Top 5", blob)
         self.assertEqual(blob.count('class="network-node dc-node"'), 1)
         self.assertEqual(blob.count('class="network-node store-node'), 4)
 
@@ -182,22 +183,17 @@ class DqnDirectUploadPageTests(unittest.TestCase):
             with self.subTest(sample=number):
                 state, path = self._state_for_sample(number)
                 recommendations = state["varo_recommendations"]
-                expected_top_count = min(5, len(recommendations))
+                expected_top_count = min(3, len(recommendations))
                 data_signature = state["data_signature"]
                 route_ids = {str(row["route_id"]) for row in recommendations}
 
                 app = self._app_with_state(state)
-                app.session_state["current_menu"] = "운영 현황"
+                app.session_state["current_menu"] = "홈"
                 app.run()
                 self.assertFalse(app.exception)
-                top_frame = next(
-                    item.value for item in app.dataframe
-                    if list(item.value.columns) == self.HOME_TOP_COLUMNS
-                )
-                self.assertEqual(len(top_frame), expected_top_count)
                 home_blob = " ".join(element.value for element in app.markdown)
                 self.assertEqual(home_blob.count('class="network-node dc-node"'), expected_dcs[number])
-                self.assertEqual(home_blob.count('class="v2-vehicle"'), expected_top_count)
+                self.assertEqual(home_blob.count('class="v2-vehicle '), expected_top_count)
                 self.assertNotIn("파일 구조를 확인해주세요", home_blob)
 
                 for menu in self.MENUS:

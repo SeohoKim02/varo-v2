@@ -28,7 +28,7 @@ from services.data_loader import SAMPLE_FILENAME, get_default_sample_path, load_
 from services.data_validator import validate_workbook_data
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "app_v2.py")
-MENUS = ["운영 현황", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"]
+MENUS = ["홈", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"]
 
 
 @unittest.skipUnless(_APPTEST_AVAILABLE, "streamlit AppTest unavailable")
@@ -98,7 +98,7 @@ class PageRenderTests(unittest.TestCase):
 
     def test_home_is_result_dashboard(self):
         app = self._new_app()
-        app.session_state["current_menu"] = "운영 현황"
+        app.session_state["current_menu"] = "홈"
         app.run()
         self.assertFalse(app.exception)
         blob = self._markdown_blob(app)
@@ -106,18 +106,19 @@ class PageRenderTests(unittest.TestCase):
         for required in (
             "Varo 운영 결과",
             "현재 데이터", "점포 / DC", "추천 후보 수", "예상 절감액", "평균 VHS",
-            "시뮬레이션", "현재 실행 경로 Top 3", "추천 Top 5", "선택 경로 요약",
+            "업로드된 재고 데이터를 바탕으로 악성재고 후보, 이동 추천, 검증 결과를 요약합니다.",
+            "다음에 볼 화면", "재고 이동 네트워크 미리보기",
+            "파란 실선 · 직접 이동", "노란 점선 · DC 경유",
         ):
             self.assertIn(required, blob, f"home must contain: {required}")
-        # page navigation lives in the collapsed sidebar, not a horizontal/bottom menu
+        # The sidebar and home body both expose clear page navigation.
         sidebar_nav = {b.label: b.key for b in app.sidebar.button}
         self.assertEqual(set(sidebar_nav), set(MENUS))
         for menu in MENUS:
             self.assertEqual(sidebar_nav[menu], f"nav_{menu}")
         button_labels = {b.label for b in app.button}
-        # the old bottom page-nav buttons are gone from the home body
-        for removed_btn in ("추천 실행 보기", "경로 상세 보기"):
-            self.assertNotIn(removed_btn, button_labels, f"home should not have button: {removed_btn}")
+        for quick_button in ("추천 실행 보기", "경로 상세 보기", "분석 및 검증 보기", "데이터 관리 보기"):
+            self.assertIn(quick_button, button_labels, f"home should have button: {quick_button}")
         # the top toolbar keeps only the data-replace toggle (no duplicate 데이터 관리 button)
         self.assertIn("데이터 교체", button_labels)
         self.assertIn("시뮬레이션 실행", button_labels)
@@ -141,36 +142,51 @@ class PageRenderTests(unittest.TestCase):
         # no download buttons on home
         self.assertNotIn("검증 리포트 Excel", button_labels)
         self.assertNotIn("추천 결과 CSV", button_labels)
-        # home Top table is result-only: exactly the 7 operator columns
-        columns = self._dataframe_columns(app)
-        for required_col in ("순위", "상품", "출발", "도착", "경로", "수량", "예상 절감액"):
-            self.assertIn(required_col, columns, f"home Top5 must have column: {required_col}")
-        for hidden in ("VHS", "VHS(재계산)", "DQN 상태", "Greedy", "신뢰도", "route_id", "상태"):
-            self.assertNotIn(hidden, columns)
+        for removed_section in ("현재 실행 경로 Top 3", "추천 Top 5", "선택 경로 요약"):
+            self.assertNotIn(removed_section, blob)
+        self.assertFalse(app.dataframe, "home must not contain recommendation or validation tables")
         self.assertIn('class="network-node dc-node"', blob)
         self.assertIn('class="network-node store-node', blob)
-        self.assertEqual(blob.count('class="v2-vehicle"'), 5)
-        self.assertEqual(blob.count('class="v2-wrap v2-card v2-running-route"'), 3)
-        # 전체 경로 보기 defaults OFF (Top 5 routes only)
+        self.assertEqual(blob.count('class="v2-vehicle'), 3)
+        self.assertNotIn('v2-running-route', blob)
+        # 전체 경로 보기 defaults OFF (representative Top 3 only)
         self.assertFalse(app.session_state["show_all_routes"])
         self.assertEqual(app.session_state["simulation_speed"], "보통")
 
     def test_sidebar_nav_navigates_to_every_page(self):
         for menu in MENUS:
             app = self._new_app()
-            app.session_state["current_menu"] = "운영 현황"
+            app.session_state["current_menu"] = "홈"
             app.run()
             button = next(item for item in app.sidebar.button if item.key == f"nav_{menu}")
             button.click().run()
             self.assertEqual(app.session_state["current_menu"], menu)
             self.assertFalse(app.exception)
 
+    def test_home_quick_navigation_only_changes_page(self):
+        targets = {
+            "추천 실행 보기": "추천 실행",
+            "경로 상세 보기": "경로 상세",
+            "분석 및 검증 보기": "분석 및 검증",
+            "데이터 관리 보기": "데이터 관리",
+        }
+        for label, menu in targets.items():
+            app = self._new_app()
+            app.session_state["current_menu"] = "홈"
+            app.run()
+            next(item for item in app.button if item.label == label).click().run()
+            self.assertFalse(app.exception, msg=f"{label}: {list(app.exception)}")
+            self.assertEqual(app.session_state["current_menu"], menu)
+            self.assertIsNone(app.session_state["dqn_training_result"])
+            self.assertIsNone(app.session_state["dqn_batch_result"])
+            self.assertIsNone(app.session_state["dqn_comparison_result"])
+
     def test_sidebar_nav_persists_selected_route_across_pages(self):
         app = self._new_app()
         app.session_state["selected_route_id"] = "R002"
-        app.session_state["current_menu"] = "운영 현황"
+        app.session_state["current_menu"] = "홈"
         app.run()
-        for menu in ("추천 실행", "경로 상세", "분석 및 검증", "데이터 관리", "운영 현황"):
+        for menu in ("추천 실행", "경로 상세", "분석 및 검증", "데이터 관리", "홈"):
             button = next(item for item in app.sidebar.button if item.key == f"nav_{menu}")
             button.click().run()
             self.assertFalse(app.exception, msg=f"{menu}: {list(app.exception)}")
@@ -205,9 +221,8 @@ class PageRenderTests(unittest.TestCase):
         self.assertFalse(app.exception)
         labels = {button.label for button in app.button}
         self.assertTrue({
-            "원본 학습", "균형형 생성 및 학습", "원본 vs 균형형 비교",
-            "원본 10개 진단", "균형형 10개 생성", "원본 10개 학습",
-            "균형형 10개 학습", "원본 vs 균형형 비교 리포트",
+            "현재 샘플 진단", "선택 샘플 원본 학습", "선택 샘플 균형형 학습",
+            "10개 원본 순차 학습", "10개 균형형 순차 학습", "원본 vs 균형형 비교 리포트",
         }.issubset(labels))
         self.assertIn("학습 결과", self._markdown_blob(app))
 
@@ -229,16 +244,16 @@ class PageRenderTests(unittest.TestCase):
         app.session_state["current_menu"] = "분석 및 검증"
         app.run()
 
-        next(button for button in app.button if button.label == "원본 학습").click().run(timeout=180)
+        next(button for button in app.button if button.label == "선택 샘플 원본 학습").click().run(timeout=180)
         self.assertFalse(app.exception)
         result = app.session_state["dqn_training_result"]
         self.assertTrue(Path(result["result_path"]).exists())
 
-        next(button for button in app.button if button.label == "원본 10개 학습").click().run(timeout=240)
+        next(button for button in app.button if button.label == "10개 원본 순차 학습").click().run(timeout=240)
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state["dqn_batch_result"]["count"], 10)
 
-        next(button for button in app.button if button.label == "원본 vs 균형형 비교").click().run(timeout=180)
+        next(button for button in app.button if button.label == "선택 샘플 원본 vs 균형형 비교").click().run(timeout=180)
         self.assertFalse(app.exception)
         self.assertEqual(len(app.session_state["dqn_comparison_result"]["rows"]), 2)
 
@@ -246,36 +261,53 @@ class PageRenderTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(len(app.session_state["dqn_batch_comparison_result"]["rows"]), 10)
 
-    def test_validation_has_three_tabs(self):
+    def test_validation_has_five_clear_tabs(self):
         app = self._new_app()
         app.session_state["current_menu"] = "분석 및 검증"
         app.run()
         self.assertFalse(app.exception)
         labels = [tab.label for tab in app.tabs]
-        self.assertEqual(labels, ["핵심 분석", "DQN 학습", "비교 검증"])
+        self.assertEqual(labels, ["VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증", "민감도/신뢰도"])
 
     def test_recommendation_page_has_compact_table_and_detail_expander(self):
         app = self._new_app()
         app.session_state["current_menu"] = "추천 실행"
         app.run()
         self.assertFalse(app.exception)
-        self.assertIn("추천 결과", self._markdown_blob(app))
+        blob = self._markdown_blob(app)
+        self.assertIn("추천 후보 Top 5", blob)
+        self.assertIn("선택한 추천 요약", blob)
         basic = next(item for item in app.dataframe if "순위" in item.value.columns and "추천 등급" in item.value.columns)
         self.assertEqual(list(basic.value.columns), ["순위", "상품", "출발 점포", "도착 점포", "경로 유형", "수량", "예상 절감액", "추천 등급"])
         self.assertIn("상세 비교", {item.label for item in app.expander})
-        self.assertTrue(any("1순위 선정 이유" in item.value for item in app.caption))
+        self.assertIn("추천 후보 선택", {item.label for item in app.selectbox})
         detail_columns = self._dataframe_columns(app)
         for required in (
             "추천 ID", "VHS 점수", "Greedy 전략", "DQN action", "DQN confidence",
             "DQN 참고 점수", "Pareto 상태", "Varo 최종 추천", "판단 근거",
         ):
             self.assertIn(required, detail_columns)
-        blob = self._markdown_blob(app)
         self.assertNotIn("필터", blob)
         self.assertNotIn("1순위 추천", blob)
         button_labels = {button.label for button in app.button}
         self.assertNotIn("현재 추천 CSV", button_labels)
         self.assertNotIn("현재 추천 Excel", button_labels)
+
+    def test_recommendation_selector_updates_shared_route(self):
+        from services.analysis_pipeline import sort_recommendations
+
+        app = self._new_app()
+        app.session_state["current_menu"] = "추천 실행"
+        app.run()
+        selector = next(item for item in app.selectbox if item.key == "recommendation_route_select")
+        self.assertGreaterEqual(len(selector.options), 2)
+        selected_route = sort_recommendations(self.payload["varo_recommendations"])[1]["route_id"]
+        selector.set_value(selected_route).run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.session_state["selected_route_id"], selected_route)
+        self.assertEqual(next(
+            item for item in app.selectbox if item.key == "recommendation_route_select"
+        ).value, selected_route)
 
     def test_route_detail_keeps_only_operator_summary(self):
         app = self._new_app()
@@ -283,9 +315,9 @@ class PageRenderTests(unittest.TestCase):
         app.session_state["current_menu"] = "경로 상세"
         app.run()
         blob = self._markdown_blob(app)
-        for required in ("출발 점포", "도착 점포", "경로 유형", "추천 수량", "예상 절감액", "이동 거리", "예상 시간", "이동 방식"):
+        for required in ("출발 점포", "도착 점포", "DC 경유 여부", "경로 유형", "추천 수량", "예상 절감액", "이동 거리", "예상 시간", "이동 방식", "경로 설명", "이동 단계"):
             self.assertIn(required, blob)
-        for removed in ("경로 단계", "직접 이동과 DC 경유 비교", "VHS 구성", "route_id"):
+        for removed in ("직접 이동과 DC 경유 비교", "VHS 구성", "route_id"):
             self.assertNotIn(removed, blob)
         self.assertEqual(app.session_state["selected_route_id"], "R002")
 
@@ -383,7 +415,7 @@ class PageRenderTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         checklist = (root / "DEPLOY_CHECKLIST.md").read_text(encoding="utf-8")
         for required in (
-            "http://localhost:8501", "운영 현황", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리",
+            "http://localhost:8501", "홈", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리",
             "샘플 01", "샘플 10", "10점포·2DC", "Console", "검은", "DQN 원본 10개",
             "DQN 균형형 10개", "VHS/Greedy/DQN/Pareto", "DIRECT", "VIA_DC", "DC01/DC02", "원본 보호",
         ):
@@ -416,7 +448,6 @@ class PageRenderTests(unittest.TestCase):
             "검토 필요": "비교 전 데이터 확인 필요",
             "학습 필요": "학습 후 비교 가능",
             "PyTorch 미설치": "DQN 학습 실행 환경 필요",
-            "SDK 미연결": "지도 키 설정 시 표시 가능",
             "DQN 반영 안 함": "최종 추천에는 참고 제외",
         }
         for raw, display in expected.items():

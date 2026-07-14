@@ -54,15 +54,19 @@ def render_kpi_card(
     caption: str = "",
     status: str = "neutral",
     compact: bool = False,
+    tooltip: str = "",
+    value_class: str = "",
 ) -> None:
     compact_class = " v2-kpi-card-compact" if compact else ""
-    caption_html = f'<div class="v2-card-caption">{_safe(caption)}</div>' if caption and not compact else ""
-    status_html = f'<div style="margin-top:0.45rem;">{badge_html(status, "neutral")}</div>' if not compact else ""
+    caption_html = f'<div class="v2-card-caption">{_safe(caption)}</div>' if caption else ""
+    status_html = f'<div style="margin-top:0.45rem;">{badge_html(status, "neutral")}</div>' if status and not compact else ""
+    tooltip_attr = f' title="{html.escape(str(tooltip), quote=True)}"' if tooltip else ""
+    safe_value_class = html.escape(str(value_class), quote=True)
     st.markdown(
         f"""
         <div class="v2-wrap v2-card v2-kpi-card{compact_class}">
           <div class="v2-card-caption">{_safe(title)}</div>
-          <div class="v2-kpi-value">{_safe(value)}</div>
+          <div class="v2-kpi-value {safe_value_class}"{tooltip_attr}>{_safe(value)}</div>
           {caption_html}
           {status_html}
         </div>

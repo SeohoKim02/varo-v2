@@ -5,7 +5,7 @@ import html
 
 import streamlit as st
 
-from components.cards import render_empty_state, render_page_header, render_recommendation_summary, render_section_header
+from components.cards import render_empty_state, render_page_header, render_section_header
 from components.status import badge_html, route_type_badge, user_status_label
 from components.tables import build_recommendation_rows, format_currency, format_number, render_recommendation_table
 from services import export_service, upload_quality, v2_summaries
@@ -88,8 +88,15 @@ def _render_filters(recommendations: list[dict]) -> dict[str, str]:
     return {"product": product, "source": source, "target": target, "route_type": route_type, "grade": grade, "transport": transport}
 
 
-def _render_best_recommendation(recommendation: dict) -> None:
-    render_section_header(st, "1순위 추천", "")
+def _render_selected_recommendation(recommendation: dict | None) -> None:
+    render_section_header(
+        st,
+        "선택한 추천 요약",
+        "위 선택 항목과 연결된 운영 정보입니다. 내부 비교값은 아래 상세 비교에서 확인합니다.",
+    )
+    if not recommendation:
+        render_empty_state(st, "선택한 추천이 없습니다", compact=True)
+        return
     st.markdown(
         f"""
         <div class="v2-wrap v2-card">
@@ -146,10 +153,26 @@ def _apply_route_selection() -> None:
     st.session_state["simulation_snapshot"] = None
 
 
+def _selection_label(recommendation: dict | None) -> str:
+    if not recommendation:
+        return "추천 후보"
+    if recommendation.get("route_type") == "DIRECT":
+        route_type = "직접 이동"
+    else:
+        dc = recommendation.get("dc_name") or recommendation.get("dc_id") or "물류센터"
+        route_type = f"DC 경유 · {dc}"
+    product = recommendation.get("product_name") or recommendation.get("product_id") or "상품"
+    source = recommendation.get("source_name") or recommendation.get("source_id") or "출발"
+    target = recommendation.get("target_name") or recommendation.get("target_id") or "도착"
+    quantity = format_number(recommendation.get("recommended_qty"), "개")
+    return f"{product} · {source} → {target} · {route_type} · {quantity}"
+
+
 def _render_selection(filtered: list[dict]) -> dict | None:
     if not filtered:
         return None
     options = [str(rec["route_id"]) for rec in filtered]
+    rank_by_id = {route_id: index for index, route_id in enumerate(options, start=1)}
     current = st.session_state.get("selected_route_id")
     index = options.index(current) if current in options else 0
     if (
@@ -158,8 +181,11 @@ def _render_selection(filtered: list[dict]) -> dict | None:
     ):
         st.session_state.pop("recommendation_route_select", None)
     selected = st.selectbox(
-        "상세 확인할 추천", options, index=index,
-        format_func=lambda route_id: f"{route_id} · {find_recommendation(filtered, route_id).get('product_name') if find_recommendation(filtered, route_id) else route_id}",
+        "추천 후보 선택", options, index=index,
+        format_func=lambda route_id: (
+            f"{rank_by_id.get(route_id, '-')}순위 · "
+            f"{_selection_label(find_recommendation(filtered, route_id))}"
+        ),
         key="recommendation_route_select",
         on_change=_apply_route_selection,
     )
@@ -212,7 +238,7 @@ def render_recommendations_page() -> None:
     recommendations = _all_recommendations()
     data_available = has_app_data(data, recommendations)
     render_page_header(
-        st, "추천 실행", "",
+        st, "추천 실행", "추천 후보를 비교하고 선택한 추천의 수량·절감액·경로를 확인합니다.",
         badge=badge_html(current_data_status(st.session_state), "accent" if data_available else "neutral"),
     )
     if not data_available:
@@ -223,20 +249,18 @@ def render_recommendations_page() -> None:
         st.session_state["selected_route_id"] = selected_route_id
 
     filtered = recommendations
-    render_section_header(st, "추천 결과", "")
-    top = filtered[0] if filtered else {}
-    reason_detail = _reason_detail(top)
-    top_reason = (
-        reason_detail.get("summary")
-        or top.get("final_reason")
-        or top.get("reason")
-        or next(iter(reason_detail.get("sentences") or []), None)
-    )
-    if top_reason:
-        st.caption(f"1순위 선정 이유: {top_reason}")
+    render_section_header(st, "추천 후보 Top 5", "VHS 우선순위가 높은 추천 5개를 기본표로 표시합니다.")
     render_recommendation_table(
-        build_recommendation_rows(filtered, include_route_id=False, include_status=False),
+        build_recommendation_rows(filtered[:5], include_route_id=False, include_status=False),
         key="recommendations_table",
     )
+    render_section_header(st, "추천 후보 선택", "표의 추천을 선택해 요약과 상세 비교를 연결합니다.")
+    selected = _render_selection(filtered)
+    _render_selected_recommendation(selected)
     with st.expander("상세 비교", expanded=False):
-        st.dataframe(_detailed_comparison_rows(filtered), hide_index=True, width="stretch")
+        selected_id = str((selected or {}).get("route_id") or "")
+        detail_rows = [
+            row for row in _detailed_comparison_rows(filtered)
+            if str(row.get("추천 ID") or "") == selected_id
+        ]
+        st.dataframe(detail_rows, hide_index=True, width="stretch")

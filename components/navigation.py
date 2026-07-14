@@ -9,7 +9,7 @@ from services.app_state import current_data_status, has_app_data
 from services.dqn_service import get_dqn_status
 
 MENU_ITEMS = [
-    "운영 현황",
+    "홈",
     "추천 실행",
     "경로 상세",
     "분석 및 검증",
@@ -68,7 +68,10 @@ def render_app_shell() -> None:
     st.markdown(
         f"""
         <div class="v2-topbar">
-            <div class="v2-brand">VARO V2</div>
+            <div>
+                <div class="v2-brand">VARO V2</div>
+                <div class="v2-page-context">현재 페이지 · {current_menu}</div>
+            </div>
             <div class="v2-topbar-meta">
                 <span class="v2-pill">{_analysis_status()}</span>
                 <span class="v2-file-label">{_file_label()}</span>

@@ -32,7 +32,7 @@ from services.vhs_score_engine import apply_auto_vhs, build_strategy_comparison
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-TABS = ["핵심 분석", "DQN 학습", "비교 검증"]
+TABS = ["VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증", "민감도/신뢰도"]
 
 _WEIGHT_LABELS = {
     "savings_score": "절감 효과",
@@ -105,6 +105,7 @@ def _render_vhs(pipeline: dict) -> None:
     if not summary and not recommendations:
         render_empty_state(st, "VHS 계산 결과가 없습니다", compact=True)
         return
+    st.caption("VHS는 최종 우선순위의 기준이며 Greedy, DQN, Pareto 결과는 비교·보조 검증에 사용합니다.")
     uploaded_avg = _as_number(analysis.get("uploaded_average"))
     recalculated_avg = _as_number(analysis.get("recalculated_average", summary.get("avg_vhs")))
     difference = (
@@ -328,7 +329,7 @@ def _render_dqn() -> None:
     torch_ok, torch_message = get_torch_status()
     torch_label = torch_message if torch_ok else "DQN 학습 실행 환경 필요"
     st.markdown(badge_html(torch_label, "success" if torch_ok else "warning"), unsafe_allow_html=True)
-    st.caption("원본·균형형 비교는 데이터 품질 진단 및 학습 안정성 비교입니다.")
+    st.caption("원본 라벨 편향을 진단하고 균형형 학습 데이터로 비교 검증합니다.")
     sample_id, store_count, dc_count = _dqn_context()
     current_diagnosis = diagnose_dqn_training_sets([{
         "sample_id": sample_id,
@@ -336,15 +337,23 @@ def _render_dqn() -> None:
         "mode": "original",
         "recommendations": recommendations,
     }])[0] if recommendations else {}
-    render_section_header(st, "현재 샘플 진단", "")
+    render_section_header(st, "현재 샘플 진단", "학습을 시작하기 전에 후보 수와 라벨 편향을 확인합니다.")
+    if st.button(
+        "현재 샘플 진단",
+        key="dqn_current_sample_diagnosis",
+        type="primary",
+        disabled=not recommendations,
+        width="stretch",
+    ):
+        st.success("현재 샘플 진단을 갱신했습니다.")
     diagnostic_cols = st.columns(3, gap="small")
     diagnostic_cols[0].metric("후보 수", current_diagnosis.get("candidate_count", 0))
     diagnostic_cols[1].metric("라벨 종류", current_diagnosis.get("target_type_count", 0))
     diagnostic_cols[2].metric("상태", user_status_label(current_diagnosis.get("status", "학습 필요")))
 
-    render_section_header(st, "선택 샘플 학습", "")
+    render_section_header(st, "선택 샘플 학습", "버튼을 누른 경우에만 선택된 데이터의 학습 또는 비교를 실행합니다.")
     actions = st.columns(3, gap="small")
-    if actions[0].button("원본 학습", type="primary", disabled=not recommendations or not torch_ok, width="stretch"):
+    if actions[0].button("선택 샘플 원본 학습", type="primary", disabled=not recommendations or not torch_ok, width="stretch"):
         result = train_dqn(
             prepare_dqn_recommendations(recommendations, "original"),
             data_signature=data_signature,
@@ -361,8 +370,9 @@ def _render_dqn() -> None:
         _refresh_recommendations_with_dqn(st.session_state["dqn_training_result"])
         st.session_state["dqn_notice"] = "완료"
         st.rerun()
+    actions[0].caption("현재 추천 라벨을 그대로 사용해 학습합니다.")
 
-    if actions[1].button("균형형 생성 및 학습", disabled=not recommendations or not torch_ok, width="stretch"):
+    if actions[1].button("선택 샘플 균형형 학습", disabled=not recommendations or not torch_ok, width="stretch"):
         balanced = balanced_recommendations(recommendations)
         save_balanced_recommendations(
             balanced, sample_id, store_count, dc_count,
@@ -384,8 +394,9 @@ def _render_dqn() -> None:
         _refresh_recommendations_with_dqn(st.session_state["dqn_training_result"])
         st.session_state["dqn_notice"] = "완료"
         st.rerun()
+    actions[1].caption("라벨 균형을 보정한 파생 데이터로 학습합니다.")
 
-    if actions[2].button("원본 vs 균형형 비교", disabled=not recommendations or not torch_ok, width="stretch"):
+    if actions[2].button("선택 샘플 원본 vs 균형형 비교", disabled=not recommendations or not torch_ok, width="stretch"):
         balanced = balanced_recommendations(recommendations)
         save_balanced_recommendations(balanced, sample_id, store_count, dc_count)
         comparison = compare_dqn_training_sets(
@@ -401,17 +412,19 @@ def _render_dqn() -> None:
         _refresh_recommendations_with_dqn(selected)
         st.session_state["dqn_notice"] = "완료"
         st.rerun()
+    actions[2].caption("두 학습 결과의 안정성을 같은 기준으로 비교합니다.")
 
-    render_section_header(st, "DQN 샘플 10개", "")
+    render_section_header(st, "DQN 샘플 10개", "원본 10개와 균형형 10개를 순차 학습하고 결과를 비교합니다.")
     batch_actions = st.columns(3, gap="small")
-    if batch_actions[0].button("원본 10개 진단", width="stretch"):
+    if batch_actions[0].button("10개 원본 진단", width="stretch"):
         st.session_state["dqn_sample_diagnosis"] = diagnose_dqn_training_sets(
             build_dqn_training_sets(mode="original")
         )
         st.session_state["dqn_notice"] = "완료"
         st.rerun()
+    batch_actions[0].caption("원본 샘플 10개의 라벨 분포를 진단합니다.")
 
-    if batch_actions[1].button("균형형 10개 생성", width="stretch"):
+    if batch_actions[1].button("10개 균형형 데이터 생성", width="stretch"):
         balanced_sets = build_dqn_training_sets(mode="balanced")
         generated = []
         for item in balanced_sets:
@@ -425,8 +438,9 @@ def _render_dqn() -> None:
         st.session_state["dqn_balanced_files"] = generated
         st.session_state["dqn_notice"] = "완료"
         st.rerun()
+    batch_actions[1].caption("원본은 유지하고 균형형 파생 데이터를 만듭니다.")
 
-    if batch_actions[2].button("원본 10개 학습", disabled=not torch_ok, width="stretch"):
+    if batch_actions[2].button("10개 원본 순차 학습", disabled=not torch_ok, width="stretch"):
         progress = st.progress(0.0, text="원본 학습 준비")
         callback = lambda index, total, label, result: progress.progress(
             index / max(1, total), text=f"{label} · {result.get('status', '-')}"
@@ -438,9 +452,10 @@ def _render_dqn() -> None:
         st.session_state["dqn_batch_result"] = batch
         st.session_state["dqn_notice"] = "완료"
         st.rerun()
+    batch_actions[2].caption("원본 샘플 10개를 차례로 학습합니다.")
 
     batch_actions_2 = st.columns(2, gap="small")
-    if batch_actions_2[0].button("균형형 10개 학습", disabled=not torch_ok, width="stretch"):
+    if batch_actions_2[0].button("10개 균형형 순차 학습", disabled=not torch_ok, width="stretch"):
         training_sets = build_dqn_training_sets(mode="balanced")
         progress = st.progress(0.0, text="균형형 학습 준비")
         callback = lambda index, total, label, result: progress.progress(
@@ -451,6 +466,7 @@ def _render_dqn() -> None:
         st.session_state["dqn_batch_result"] = batch
         st.session_state["dqn_notice"] = "완료"
         st.rerun()
+    batch_actions_2[0].caption("균형형 샘플 10개를 차례로 학습합니다.")
 
     if batch_actions_2[1].button("원본 vs 균형형 비교 리포트", width="stretch"):
         report = build_dqn_batch_comparison_report(
@@ -460,6 +476,7 @@ def _render_dqn() -> None:
         st.session_state["dqn_batch_comparison_result"] = report
         st.session_state["dqn_notice"] = "완료" if report.get("rows") else "비교 결과 없음"
         st.rerun()
+    batch_actions_2[1].caption("두 배치 결과를 하나의 비교표로 정리합니다.")
 
     notice = st.session_state.pop("dqn_notice", None)
     if notice == "완료":
@@ -484,9 +501,9 @@ def _render_dqn() -> None:
     if display and can_apply_dqn_to_current_data(display, data_signature):
         st.success("DQN 참고 점수가 낮은 비중으로 반영되었습니다.")
     elif display:
-        st.info("DQN 결과는 최종 추천에는 참고 제외됩니다.")
+        st.info("DQN은 비교표에만 표시되며 최종 추천에는 반영하지 않습니다.")
     else:
-        st.info("DQN은 학습 후 비교 가능합니다.")
+        st.info("DQN은 학습 후 비교할 수 있습니다.")
 
     comparison = st.session_state.get("dqn_comparison_result") or {}
     if comparison.get("rows"):
@@ -742,6 +759,7 @@ def _render_core_analysis(pipeline: dict) -> None:
     confidence = pipeline.get("confidence_analysis") or {}
     sensitivity_rows = (pipeline.get("sensitivity_analysis") or {}).get("rows") or []
 
+    st.caption("VHS는 최종 우선순위의 기준이며 Greedy, DQN, Pareto 결과는 비교·보조 검증에 사용합니다.")
     render_section_header(st, "VHS 자동 가중치", "현재 데이터 분포를 기준으로 계산합니다.")
     active_weights = [(key, float(value or 0)) for key, value in weights.items() if float(value or 0) > 0]
     cols = st.columns(3, gap="small")
@@ -785,8 +803,8 @@ def _render_comparison_results(pipeline: dict) -> None:
     recommendations = st.session_state.get("varo_recommendations") or []
     render_section_header(
         st,
-        "VHS · Greedy · DQN · Pareto",
-        "VHS는 최종 우선순위, Greedy는 단순 기준 비교, DQN은 데이터 품질·학습 안정성 참고, Pareto는 후보 간 보조 검증입니다.",
+        "Pareto 보조 검증",
+        "VHS 최종 순위와 Greedy·DQN 참고값을 함께 보며 후보 간 Pareto 우위를 확인합니다.",
     )
     rows = []
     for item in build_strategy_comparison(recommendations):
@@ -816,12 +834,20 @@ def _render_comparison_results(pipeline: dict) -> None:
     cols[3].metric("비교 비용", f"{float(optimality.get('opt_total') or 0):,.0f}원")
 
 
+def _render_sensitivity_confidence(pipeline: dict) -> None:
+    render_section_header(st, "민감도 분석", "비용·거리·수량·VHS 변화에 따른 순위 안정성을 확인합니다.")
+    _render_sensitivity(pipeline)
+    render_section_header(st, "추천 신뢰도", "현재 데이터 품질을 기준으로 추천 신뢰도를 확인합니다.")
+    _render_confidence(pipeline)
+
+
 def render_validation_page() -> None:
     status = _validation_status()
     pipeline = _pipeline()
     has_data = bool(st.session_state.get("varo_data")) and bool(st.session_state.get("varo_recommendations"))
     render_page_header(
-        st, "분석 및 검증", "",
+        st, "분석 및 검증",
+        "데이터 품질 진단 및 학습 안정성 비교를 위해 VHS, Greedy, DQN 학습·비교, Pareto, 민감도·신뢰도를 확인합니다.",
         badge=badge_html(status, _badge_variant(status)),
     )
     if not has_data:
@@ -830,12 +856,14 @@ def render_validation_page() -> None:
     tabs = st.tabs(TABS)
     renderers = (
         lambda: _render_core_analysis(pipeline),
+        lambda: _render_greedy(pipeline),
         _render_dqn,
         lambda: _render_comparison_results(pipeline),
+        lambda: _render_sensitivity_confidence(pipeline),
     )
     for tab, title, renderer in zip(tabs, TABS, renderers):
         with tab:
-            if has_data or title == "DQN 학습":
+            if has_data or title == "DQN 학습·비교":
                 renderer()
             else:
                 render_empty_state(st, "데이터가 없습니다", compact=True)

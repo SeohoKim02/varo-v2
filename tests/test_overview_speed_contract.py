@@ -36,8 +36,10 @@ class OverviewSpeedContractTests(unittest.TestCase):
         self.assertEqual(side_lane[0][1], 18.0)
 
     def test_top5_lanes_are_wide_and_paths_are_curved(self):
-        self.assertEqual(_ROUTE_LANES, (-64.0, -32.0, 0.0, 32.0, 64.0))
-        self.assertGreaterEqual(min(b - a for a, b in zip(_ROUTE_LANES, _ROUTE_LANES[1:])), 32.0)
+        self.assertEqual(_ROUTE_LANES, (-54.0, 0.0, 54.0, -27.0, 27.0))
+        ordered_lanes = sorted(_ROUTE_LANES)
+        self.assertGreaterEqual(min(b - a for a, b in zip(ordered_lanes, ordered_lanes[1:])), 24.0)
+        self.assertEqual(_ROUTE_LANES[:3], (-54.0, 0.0, 54.0))
         path = _route_path_d([(100.0, 100.0), (600.0, 300.0), (1000.0, 500.0)], 20.0)
         self.assertEqual(path.count(" Q "), 2)
 

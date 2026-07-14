@@ -141,7 +141,7 @@ except Exception:  # pragma: no cover
 
 @unittest.skipIf(AppTest is None, "streamlit AppTest unavailable")
 class SimulationSamplePageTests(unittest.TestCase):
-    def test_dual_dc_home_renders_two_centers_ten_stores_and_five_vehicles(self):
+    def test_dual_dc_home_renders_two_centers_ten_stores_and_three_vehicles(self):
         dual = next(sample for sample in SAMPLE_WORKBOOKS if sample.key == "dual_dc_10stores_2dc")
         state: dict = {}
         self.assertTrue(load_and_apply(state, sample_path(dual), dual.filename, "샘플 추천 데이터"))
@@ -150,13 +150,13 @@ class SimulationSamplePageTests(unittest.TestCase):
         app.run()
         for key in CANONICAL_DATA_KEYS:
             app.session_state[key] = state.get(key)
-        app.session_state["current_menu"] = "운영 현황"
+        app.session_state["current_menu"] = "홈"
         app.run()
         self.assertFalse(app.exception)
         blob = " ".join(element.value for element in app.markdown)
         self.assertEqual(blob.count('class="network-node dc-node"'), 2)
         self.assertEqual(blob.count('class="network-node store-node'), 10)
-        self.assertEqual(blob.count('class="v2-vehicle"'), 5)
+        self.assertEqual(blob.count('class="v2-vehicle'), 3)
         self.assertFalse(app.session_state["show_all_routes"])
 
     def test_vehicle_marker_is_a_truck_icon_not_a_dot(self):
@@ -175,7 +175,7 @@ class SimulationSamplePageTests(unittest.TestCase):
         app.run()
         for key in CANONICAL_DATA_KEYS:
             app.session_state[key] = state.get(key)
-        app.session_state["current_menu"] = "운영 현황"
+        app.session_state["current_menu"] = "홈"
         for key, value in session_overrides.items():
             app.session_state[key] = value
         app.run()
@@ -208,20 +208,20 @@ class SimulationSamplePageTests(unittest.TestCase):
         # 130-route workbook stays capped instead of drawing every pair
         self.assertLessEqual(background, 2 * _MAX_BACKGROUND_ROUTES)
 
-    def test_top5_paths_use_curves_wide_lanes_and_separate_vehicle_phases(self):
+    def test_top3_paths_use_curves_wide_lanes_and_separate_vehicle_phases(self):
         _, parked_blob = self._render_dual_dc_home()
-        for lane in ("-64", "-32", "0", "32", "64"):
+        for lane in ("-54", "0", "54"):
             self.assertIn(f'data-lane="{lane}"', parked_blob)
-        self.assertGreaterEqual(parked_blob.count(" Q "), 5)
-        parked = re.findall(r'class="v2-vehicle" transform="translate\(([^)]+)\)', parked_blob)
-        self.assertEqual(len(parked), 5)
-        self.assertEqual(len(set(parked)), 5)
-        self.assertLess(parked_blob.find('class="v2-vehicle"'), parked_blob.find('class="network-node dc-node"'))
+        self.assertGreaterEqual(parked_blob.count(" Q "), 4)
+        parked = re.findall(r'class="v2-vehicle [^"]+" transform="translate\(([^)]+)\)', parked_blob)
+        self.assertEqual(len(parked), 3)
+        self.assertEqual(len(set(parked)), 3)
+        self.assertLess(parked_blob.find('class="v2-vehicle '), parked_blob.find('class="network-node dc-node"'))
 
         _, playing_blob = self._render_dual_dc_home(home_sim_playing=True)
         phases = re.findall(r'<animateMotion[^>]+begin="([^"]+)"', playing_blob)
-        self.assertEqual(len(phases), 5)
-        self.assertEqual(len(set(phases)), 5)
+        self.assertEqual(len(phases), 3)
+        self.assertEqual(len(set(phases)), 3)
 
     def test_data_management_dqn_selector_loads_selected_sample(self):
         from services.dqn_samples import dqn_sample_options

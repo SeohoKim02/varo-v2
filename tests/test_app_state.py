@@ -97,7 +97,7 @@ class AppStateTests(unittest.TestCase):
         state = {}
         apply_state_payload(state, payload)
         state["selected_route_id"] = PERSISTED_ROUTE_ID
-        for menu in ("데이터 관리", "운영 현황", "추천 실행", "경로 상세", "분석 및 검증"):
+        for menu in ("데이터 관리", "홈", "추천 실행", "경로 상세", "분석 및 검증"):
             state["current_menu"] = menu
             self.assertEqual(state["selected_route_id"], PERSISTED_ROUTE_ID)
             self.assertEqual(len(state["varo_recommendations"]), EXPECTED_RECOMMENDATION_COUNT)

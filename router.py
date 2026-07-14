@@ -11,7 +11,7 @@ from pages.route_detail import render_route_detail_page
 from pages.validation import render_validation_page
 
 _PAGE_RENDERERS = {
-    "운영 현황": render_overview_page,
+    "홈": render_overview_page,
     "추천 실행": render_recommendations_page,
     "경로 상세": render_route_detail_page,
     "분석 및 검증": render_validation_page,
