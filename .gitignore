@@ -1,0 +1,32 @@
+# Python caches
+__pycache__/
+**/__pycache__/
+**pycache**/
+*.pyc
+.pytest_cache/
+node_modules/
+.claude/
+
+# Local secrets and environment files
+.streamlit/secrets.toml
+.env
+.env.*
+
+# Local DQN and QA artifacts
+outputs/
+*.pt
+*.pth
+*.pkl
+*.log
+*.zip
+*.inspect.ndjson
+
+# Local one-off checks and root export artifacts
+/_run_app.py
+/varo_v2_*.xlsx
+/varo_v2_*.csv
+
+# OS metadata
+.D/
+.DS_Store
+Thumbs.db

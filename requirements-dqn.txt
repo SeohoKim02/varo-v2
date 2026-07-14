@@ -1,0 +1,3 @@
+# Optional DQN training runtime
+-r requirements.txt
+torch>=2.2
