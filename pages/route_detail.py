@@ -66,8 +66,8 @@ def _route_description(route: dict) -> str:
     source = route.get("source_name") or route.get("source_id") or "출발 점포"
     target = route.get("target_name") or route.get("target_id") or "도착 점포"
     if route.get("route_type") == "VIA_DC":
-        return f"{source}의 재고를 {_route_dc_label(route)}에서 확인한 뒤 {target}로 이동합니다."
-    return f"{source}의 재고를 물류센터 경유 없이 {target}로 직접 이동합니다."
+        return f"{source} 재고를 {_route_dc_label(route)}에서 확인한 뒤 {target}까지 이동합니다."
+    return f"{source} 재고를 물류센터 경유 없이 {target}까지 직접 이동합니다."
 
 
 def _render_route_summary(route: dict) -> None:
@@ -103,12 +103,12 @@ def _render_route_steps(route: dict) -> None:
     if route.get("route_type") == "VIA_DC":
         dc = _route_dc_label(route)
         steps = (
-            f"{source}에서 {dc}로 운송",
+            f"{source} 출발 → {dc} 도착",
             f"{dc}에서 도착 물량 확인",
-            f"{dc}에서 {target}로 운송",
+            f"{dc} 출발 → {target} 도착",
         )
     else:
-        steps = (f"{source}에서 {target}로 직접 운송 (DIRECT)",)
+        steps = (f"{source} 출발 → {target} 도착 (DIRECT)",)
     nodes = [source, target]
     if route.get("route_type") == "VIA_DC":
         nodes = [source, _route_dc_label(route), target]

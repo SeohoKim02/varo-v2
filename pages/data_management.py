@@ -215,7 +215,9 @@ def render_data_management_page() -> None:
                 st.session_state["dqn_selected_sample"] = selected.label
             st.rerun()
 
-    st.caption("원본은 수정하지 않고, 균형형 파생 샘플은 outputs/dqn 폴더에만 저장됩니다.")
+    st.caption(
+        "원본은 수정하지 않고, 학습·균형형 파생 산출물은 outputs 하위 로컬 폴더에만 저장되며 Git에는 포함되지 않습니다."
+    )
     with st.expander("DQN 샘플 10개 목록", expanded=False):
         st.dataframe(pd.DataFrame(dqn_sample_table_rows()), hide_index=True, width="stretch")
 

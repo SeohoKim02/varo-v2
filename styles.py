@@ -215,11 +215,12 @@ def apply_global_styles() -> None:
             margin: 0.48rem 0 0.62rem;
         }}
         .v2-page-title {{
-            font-size: 1.42rem;
+            font-size: 1.42rem !important;
             font-weight: 760;
-            line-height: 1.22;
+            line-height: 1.22 !important;
             color: var(--varo-text);
-            margin: 0;
+            margin: 0 !important;
+            padding: 0 !important;
         }}
         .v2-page-desc {{
             margin-top: 0.2rem;

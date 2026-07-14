@@ -10,9 +10,9 @@ py -m streamlit run app_v2.py
 ```
 
 - 접속 주소: `http://localhost:8501`
-- 지정 포트 검증: `py -m streamlit run app_v2.py --server.headless true --server.port 8528`
-- 지정 포트 주소: `http://localhost:8528`
-- 상태 확인: `http://localhost:8528/_stcore/health`
+- 지정 포트 검증: `py -m streamlit run app_v2.py --server.headless true --server.port 8533`
+- 지정 포트 주소: `http://localhost:8533`
+- 상태 확인: `http://localhost:8533/_stcore/health`
 
 ## 2. GitHub·Streamlit Cloud 준비
 
@@ -26,7 +26,8 @@ py -m streamlit run app_v2.py
 ## 3. 홈 화면 확인
 
 - [ ] 현재 데이터명, 점포/DC 수, 추천 후보 수, 예상 절감액, 평균 VHS가 표시된다.
-- [ ] 큰 네트워크 시뮬레이션, 실행 경로 Top3, 추천 Top5, 선택 경로 요약이 표시된다.
+- [ ] 빠른 이동 카드 4개와 범례가 포함된 상위 1~3개 네트워크 미리보기가 표시된다.
+- [ ] 홈에 추천 Top5 표나 선택한 추천 요약이 중복 표시되지 않는다.
 - [ ] 시뮬레이션 속도와 전체 경로 보기 ON/OFF가 동작한다.
 - [ ] 모든 페이지가 밝은 배경이며 검은 카드·표·expander·버튼·사이드바가 없다.
 - [ ] 화면에 traceback, 내부 함수명, 디버그 정보가 보이지 않는다.
@@ -45,11 +46,11 @@ py -m streamlit run app_v2.py
 - [ ] 홈, 추천 실행, 경로 상세, 분석 및 검증, 데이터 관리 5개 페이지가 모두 열린다.
 - [ ] 페이지 이동 후 현재 데이터와 선택 경로가 유지된다.
 - [ ] 추천 실행 표에 순위·상품·출발·도착·경로·수량·절감액·등급이 표시된다.
-- [ ] 추천 실행에 Varo 1순위 선정 이유가 한 줄로 표시된다.
+- [ ] 추천 후보 선택 UI와 선택한 추천 요약이 같은 추천을 가리킨다.
 - [ ] 추천 실행의 상세 비교 영역은 접힌 상태이며 VHS/Greedy/DQN/Pareto 비교를 확인할 수 있다.
 - [ ] 경로 상세에서 DIRECT 이동 단계가 자연스러운 문장으로 표시된다.
 - [ ] VIA_DC 경로에서 선택된 DC와 이동 단계가 일치한다.
-- [ ] 분석 및 검증에서 핵심 분석, DQN 학습, 비교 검증 탭이 열린다.
+- [ ] 분석 및 검증에서 VHS 분석, Greedy 비교, DQN 학습·비교, Pareto 검증, 민감도/신뢰도 탭이 열린다.
 - [ ] DQN 학습·샘플 10개 학습·원본 vs 균형형 비교 버튼이 보인다.
 - [ ] 페이지 진입만으로 DQN 학습이 자동 실행되지 않는다.
 - [ ] 데이터 관리에서 접힌 `DQN 샘플 10개 목록`을 열 수 있다.

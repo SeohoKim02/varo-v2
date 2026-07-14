@@ -349,7 +349,11 @@ def _render_dqn() -> None:
     diagnostic_cols = st.columns(3, gap="small")
     diagnostic_cols[0].metric("후보 수", current_diagnosis.get("candidate_count", 0))
     diagnostic_cols[1].metric("라벨 종류", current_diagnosis.get("target_type_count", 0))
-    diagnostic_cols[2].metric("상태", user_status_label(current_diagnosis.get("status", "학습 필요")))
+    diagnosis_status = user_status_label(current_diagnosis.get("status", "학습 필요"))
+    compact_status = "확인 필요" if diagnosis_status == "비교 전 데이터 확인 필요" else diagnosis_status
+    diagnostic_cols[2].metric("상태", compact_status)
+    if compact_status != diagnosis_status:
+        diagnostic_cols[2].caption(diagnosis_status)
 
     render_section_header(st, "선택 샘플 학습", "버튼을 누른 경우에만 선택된 데이터의 학습 또는 비교를 실행합니다.")
     actions = st.columns(3, gap="small")
