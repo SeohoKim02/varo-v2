@@ -128,6 +128,12 @@ def apply_state_payload(state: MutableMapping[str, Any], payload: Mapping[str, A
     state["dqn_baseline_pipeline"] = None
     state["dqn_sample_training_mode"] = "original"
     state["dqn_selected_sample"] = None
+    state["sensitivity_settings"] = {}
+    state["sensitivity_result"] = None
+    state["sensitivity_summary"] = None
+    state["sensitivity_data_signature"] = None
+    state["sensitivity_is_running"] = False
+    state["sensitivity_last_error"] = None
 
 
 def data_status_label(

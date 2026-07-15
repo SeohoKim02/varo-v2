@@ -126,6 +126,12 @@ class AppStateTests(unittest.TestCase):
             "dqn_balanced_files": object(),
             "dqn_baseline_recommendations": object(),
             "dqn_baseline_pipeline": object(),
+            "sensitivity_settings": {"variables": ["transport_cost"]},
+            "sensitivity_result": object(),
+            "sensitivity_summary": object(),
+            "sensitivity_data_signature": "OLD",
+            "sensitivity_is_running": True,
+            "sensitivity_last_error": "OLD",
         }
         for key in TRANSIENT_VIEW_KEYS:
             state[key] = "OLD"
@@ -143,6 +149,12 @@ class AppStateTests(unittest.TestCase):
         self.assertIsNone(state["dqn_balanced_batch_result"])
         self.assertIsNone(state["dqn_batch_comparison_result"])
         self.assertIsNone(state["dqn_sample_diagnosis"])
+        self.assertEqual(state["sensitivity_settings"], {})
+        self.assertIsNone(state["sensitivity_result"])
+        self.assertIsNone(state["sensitivity_summary"])
+        self.assertIsNone(state["sensitivity_data_signature"])
+        self.assertFalse(state["sensitivity_is_running"])
+        self.assertIsNone(state["sensitivity_last_error"])
         self.assertIsNone(state["dqn_balanced_files"])
         self.assertIsNone(state["dqn_baseline_recommendations"])
         self.assertIsNone(state["dqn_baseline_pipeline"])

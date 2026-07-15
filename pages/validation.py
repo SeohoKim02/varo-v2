@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 import re
 import copy
+from datetime import datetime
 
 from components.cards import render_empty_state, render_page_header, render_section_header
 from components.status import badge_html, user_status_label
@@ -30,6 +31,20 @@ from services.dqn_samples import (
     save_balanced_recommendations,
 )
 from services.vhs_score_engine import apply_auto_vhs, build_strategy_comparison
+from services.sensitivity_service import (
+    DEFAULT_VARIABLES,
+    MAX_ANALYSIS_CANDIDATES,
+    VARIABLE_LABELS,
+    build_sensitivity_settings,
+    run_detailed_sensitivity,
+    sensitivity_detail_frame,
+    sensitivity_summary_frame,
+)
+
+try:
+    import altair as alt
+except ImportError:  # pragma: no cover - Altair is normally bundled with Streamlit
+    alt = None
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -233,30 +248,332 @@ _SENSITIVITY_HEADERS = {
 
 
 def _render_sensitivity(pipeline: dict) -> None:
-    st.info(
-        "상세 민감도 계산은 추가 입력 기준이 필요해 보류되었습니다. "
-        "현재는 비용·거리·수량·VHS·절감액 기준의 V2 민감도 요약을 제공합니다."
-    )
+    render_section_header(st, "빠른 민감도 요약", "현재 후보 간 지표 차이로 순위 변동 위험을 빠르게 확인합니다.")
     recommendations = st.session_state.get("varo_recommendations") or []
     analysis = pipeline.get("sensitivity_analysis") or {}
     rows = analysis.get("rows") or v2_summaries.sensitivity_summary(recommendations)
     if not rows:
         render_empty_state(st, "민감도 요약을 생성할 데이터가 없습니다", compact=True)
+    else:
+        counts = {"높음": 0, "보통": 0, "낮음": 0, "제한적": 0}
+        for row in rows:
+            level = row.get("overall_sensitivity", "제한적")
+            counts[level] = counts.get(level, 0) + 1
+        cols = st.columns(4, gap="small")
+        cols[0].metric("종합 높음", counts["높음"])
+        cols[1].metric("종합 보통", counts["보통"])
+        cols[2].metric("종합 낮음", counts["낮음"])
+        cols[3].metric("제한적", counts["제한적"])
+        st.dataframe(
+            pd.DataFrame(rows).rename(columns=_SENSITIVITY_HEADERS),
+            hide_index=True,
+            width="stretch",
+        )
+        st.caption("민감도는 다른 후보와의 지표 차이를 기준으로 한 순위 변동 위험입니다.")
+    _render_detailed_sensitivity(pipeline, recommendations)
+
+
+def _clean_chart_frame(frame: pd.DataFrame, numeric_columns: list[str]) -> pd.DataFrame:
+    cleaned = frame.copy()
+    for column in numeric_columns:
+        if column in cleaned.columns:
+            cleaned[column] = pd.to_numeric(cleaned[column], errors="coerce")
+    required = [column for column in numeric_columns if column in cleaned.columns]
+    cleaned = cleaned.dropna(subset=required)
+    for column in required:
+        cleaned = cleaned[cleaned[column].map(lambda value: float("-inf") < float(value) < float("inf"))]
+    return cleaned
+
+
+def _render_sensitivity_line_chart(
+    frame: pd.DataFrame,
+    *,
+    y_column: str,
+    y_title: str,
+    reverse_y: bool = False,
+    currency: bool = False,
+) -> None:
+    chart_frame = _clean_chart_frame(frame, ["change_pct", y_column])
+    if chart_frame.empty:
+        st.info("표시할 차트 데이터가 없습니다.")
         return
-    counts = {"높음": 0, "보통": 0, "낮음": 0, "제한적": 0}
-    for row in rows:
-        counts[row.get("overall_sensitivity", "제한적")] = counts.get(row.get("overall_sensitivity", "제한적"), 0) + 1
-    cols = st.columns(4, gap="small")
-    cols[0].metric("종합 높음", counts["높음"])
-    cols[1].metric("종합 보통", counts["보통"])
-    cols[2].metric("종합 낮음", counts["낮음"])
-    cols[3].metric("제한적", counts["제한적"])
-    st.dataframe(
-        pd.DataFrame(rows).rename(columns=_SENSITIVITY_HEADERS),
-        hide_index=True,
-        width="stretch",
+    if chart_frame["change_pct"].nunique() <= 1 or alt is None:
+        st.dataframe(chart_frame[["change_pct", "route_id", y_column]], hide_index=True, width="stretch")
+        return
+    chart_data = chart_frame[["change_pct", y_column, "route_id", "product_name", "variable"]].copy()
+    chart_data["change_pct"] = chart_data["change_pct"].astype(float)
+    chart_data[y_column] = chart_data[y_column].astype(float)
+    for column in ("route_id", "product_name", "variable"):
+        chart_data[column] = chart_data[column].fillna("-").astype(str)
+    records = chart_data.to_dict("records")
+    y_format = ",.0f" if currency else ".2f"
+    y_scale = alt.Scale(reverse=True, zero=False) if reverse_y else alt.Scale(zero=False)
+    lines = alt.Chart(alt.Data(values=records)).mark_line(point=True).encode(
+        x=alt.X("change_pct:Q", title="변화율 (%)"),
+        y=alt.Y(f"{y_column}:Q", title=y_title, scale=y_scale, axis=alt.Axis(format=y_format)),
+        color=alt.Color("route_id:N", title="후보"),
+        tooltip=[
+            alt.Tooltip("variable:N", title="변수"),
+            alt.Tooltip("route_id:N", title="route_id"),
+            alt.Tooltip("product_name:N", title="상품"),
+            alt.Tooltip("change_pct:Q", title="변화율", format="+.1f"),
+            alt.Tooltip(f"{y_column}:Q", title=y_title, format=y_format),
+        ],
     )
-    st.caption("민감도는 다른 후보와의 지표 차이를 기준으로 한 순위 변동 위험입니다.")
+    baseline = alt.Chart(alt.Data(values=[{"change_pct": 0.0}])).mark_rule(
+        color="#64748b", strokeDash=[5, 4], opacity=0.8,
+    ).encode(x=alt.X("change_pct:Q"))
+    st.altair_chart((lines + baseline).properties(height=320), width="stretch")
+
+
+def _render_detailed_sensitivity_results(result: dict) -> None:
+    summary = result.get("summary") or {}
+    first = st.columns(3, gap="small")
+    first[0].metric("분석 변수 수", summary.get("variable_count", 0))
+    first[1].metric("총 시나리오 수", summary.get("scenario_count", 0))
+    first[2].metric("Top1 유지율", f"{float(summary.get('top1_retention_rate') or 0):.1f}%")
+    second = st.columns(3, gap="small")
+    second[0].metric("Top3 유지율", f"{float(summary.get('top3_retention_rate') or 0):.1f}%")
+    second[1].metric("최대 순위 변동", summary.get("max_rank_change", 0))
+    second[2].metric(
+        "상세 민감도 안정성 점수",
+        f"{float(summary.get('score') or 0):.1f} / 100",
+        summary.get("rating") or "-",
+    )
+    st.caption(
+        "기존 추천 신뢰도는 데이터 품질과 알고리즘 일치도를 기준으로 계산하고, "
+        "상세 민감도 안정성은 입력 조건 변화에 대한 순위 유지 정도를 기준으로 계산합니다."
+    )
+
+    detail = pd.DataFrame(result.get("detail_rows") or [])
+    variable_summary = pd.DataFrame(result.get("variable_summary") or [])
+    tab_names = ["종합 요약", "순위 변화", "VHS 점수 변화", "절감액 변화"]
+    if result.get("weight_rows"):
+        tab_names.append("가중치 민감도")
+    tab_names.append("전체 시나리오")
+    tabs = st.tabs(tab_names)
+    tab_map = dict(zip(tab_names, tabs))
+
+    with tab_map["종합 요약"]:
+        overview = pd.DataFrame([
+            {"항목": "가장 민감한 변수", "결과": summary.get("most_sensitive_variable", "-")},
+            {"항목": "가장 안정적인 변수", "결과": summary.get("most_stable_variable", "-")},
+            {"항목": "Top1 추천이 처음 변경된 조건", "결과": summary.get("first_top1_change", "변경 없음")},
+            {"항목": "전체 예상 절감액 최소", "결과": f"{float(summary.get('total_saving_min') or 0):,.0f}원"},
+            {"항목": "전체 예상 절감액 최대", "결과": f"{float(summary.get('total_saving_max') or 0):,.0f}원"},
+            {"항목": "계산 제외 시나리오", "결과": str(summary.get("excluded_scenario_count", 0))},
+        ])
+        st.dataframe(overview, hide_index=True, width="stretch")
+        if not variable_summary.empty:
+            rename = {
+                "variable": "변수", "scenario_count": "시나리오 수",
+                "top1_retention_rate": "Top1 유지율(%)", "top3_retention_rate": "Top3 유지율(%)",
+                "average_abs_rank_change": "평균 절대 순위 변화", "max_rank_change": "최대 순위 변화",
+                "max_abs_vhs_change": "최대 VHS 변화", "saving_min": "절감액 최소", "saving_max": "절감액 최대",
+            }
+            st.dataframe(variable_summary.rename(columns=rename), hide_index=True, width="stretch")
+        with st.expander("계산 기준", expanded=False):
+            st.markdown(
+                "Top1 유지율 40% + Top3 유지율 20% + 평균 순위 안정성 20% + "
+                "VHS 점수 변동 안정성 10% + 예상 절감액 변동 안정성 10%로 계산합니다."
+            )
+            st.caption("0% 기준 시나리오는 기준 일치 확인에 사용하고 안정성 평균에서는 제외합니다.")
+            st.caption("85 이상 매우 안정 · 70 이상 안정 · 50 이상 조건에 따라 변동 · 50 미만 민감")
+
+    chart_variables = list(dict.fromkeys(detail.get("variable", pd.Series(dtype=str)).dropna().astype(str)))
+    with tab_map["순위 변화"]:
+        columns = [
+            "variable", "change_pct", "product_name", "base_rank", "changed_rank",
+            "rank_delta", "top3_retained", "grade_changed",
+        ]
+        if not detail.empty:
+            table = detail[[column for column in columns if column in detail.columns]].rename(columns={
+                "variable": "변수", "change_pct": "변화율(%)", "product_name": "상품",
+                "base_rank": "기준 순위", "changed_rank": "변화 후 순위", "rank_delta": "순위 변화",
+                "top3_retained": "Top3 유지", "grade_changed": "추천 등급 변화",
+            })
+            st.dataframe(table, hide_index=True, width="stretch")
+        if chart_variables:
+            selected = st.selectbox("순위 차트 분석 변수", chart_variables, key="sensitivity_rank_chart_variable")
+            top_routes = list(
+                detail.loc[detail["variable"] == selected]
+                .sort_values("base_rank", kind="mergesort")["route_id"].drop_duplicates().head(5)
+            )
+            _render_sensitivity_line_chart(
+                detail[(detail["variable"] == selected) & detail["route_id"].isin(top_routes)],
+                y_column="changed_rank", y_title="변화 후 순위", reverse_y=True,
+            )
+
+    with tab_map["VHS 점수 변화"]:
+        if chart_variables:
+            selected = st.selectbox("VHS 차트 분석 변수", chart_variables, key="sensitivity_vhs_chart_variable")
+            filtered = detail[detail["variable"] == selected]
+            top_routes = list(filtered.sort_values("base_rank", kind="mergesort")["route_id"].drop_duplicates().head(5))
+            _render_sensitivity_line_chart(
+                filtered[filtered["route_id"].isin(top_routes)],
+                y_column="changed_vhs", y_title="VHS 점수",
+            )
+            ranges = filtered.groupby(["route_id", "product_name"], as_index=False).agg(
+                VHS_최소=("changed_vhs", "min"), VHS_기준=("base_vhs", "first"), VHS_최대=("changed_vhs", "max"),
+            )
+            st.dataframe(ranges, hide_index=True, width="stretch")
+
+    with tab_map["절감액 변화"]:
+        if chart_variables:
+            selected = st.selectbox("절감액 차트 분석 변수", chart_variables, key="sensitivity_saving_chart_variable")
+            filtered = detail[detail["variable"] == selected]
+            top_routes = list(filtered.sort_values("base_rank", kind="mergesort")["route_id"].drop_duplicates().head(5))
+            _render_sensitivity_line_chart(
+                filtered[filtered["route_id"].isin(top_routes)],
+                y_column="changed_saving", y_title="예상 절감액 (원)", currency=True,
+            )
+            ranges = filtered.groupby(["route_id", "product_name"], as_index=False).agg(
+                절감액_최소=("changed_saving", "min"), 절감액_기준=("base_saving", "first"), 절감액_최대=("changed_saving", "max"),
+            )
+            st.dataframe(ranges, hide_index=True, width="stretch")
+
+    if "가중치 민감도" in tab_map:
+        with tab_map["가중치 민감도"]:
+            weight_frame = pd.DataFrame(result.get("weight_rows") or [])
+            columns = [
+                "variable", "change_pct", "base_weight", "requested_weight", "normalized_weight",
+                "top1_retained", "max_rank_change", "weight_sum",
+            ]
+            st.dataframe(
+                weight_frame[[column for column in columns if column in weight_frame.columns]].rename(columns={
+                    "variable": "요소명", "change_pct": "변화율(%)", "base_weight": "기준 가중치",
+                    "requested_weight": "변화된 가중치", "normalized_weight": "정규화 후 가중치",
+                    "top1_retained": "Top1 유지", "max_rank_change": "최대 순위 변화", "weight_sum": "가중치 합",
+                }),
+                hide_index=True, width="stretch",
+            )
+
+    with tab_map["전체 시나리오"]:
+        st.dataframe(sensitivity_detail_frame(result), hide_index=True, width="stretch")
+        with st.expander("내부 메타데이터", expanded=False):
+            st.json(result.get("metadata") or {})
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    downloads = st.columns(2, gap="small")
+    detail_bytes = sensitivity_detail_frame(result).to_csv(index=False).encode("utf-8-sig")
+    summary_bytes = sensitivity_summary_frame(result).to_csv(index=False).encode("utf-8-sig")
+    downloads[0].download_button(
+        "상세 민감도 결과 CSV", detail_bytes,
+        file_name=f"varo_v2_sensitivity_detail_{timestamp}.csv", mime="text/csv", width="stretch",
+    )
+    downloads[1].download_button(
+        "변수별 요약 CSV", summary_bytes,
+        file_name=f"varo_v2_sensitivity_summary_{timestamp}.csv", mime="text/csv", width="stretch",
+    )
+
+
+def _render_detailed_sensitivity(pipeline: dict, recommendations: list[dict]) -> None:
+    render_section_header(
+        st, "상세 민감도 계산",
+        "주요 입력값과 VHS 가중치를 변화시켜 추천 순위와 절감액의 안정성을 확인합니다. 계산 결과는 현재 추천을 변경하지 않습니다.",
+    )
+    st.info("변수와 변화 범위를 선택한 뒤 상세 민감도 계산을 실행할 수 있습니다.")
+    data = st.session_state.get("varo_data") or {}
+    weights = (pipeline.get("vhs_analysis") or {}).get("weights") or {}
+    available_probe = build_sensitivity_settings(recommendations, data, weights, variables=[])
+    available = available_probe.get("available_variables") or []
+    available_labels = [VARIABLE_LABELS[key] for key in available]
+    default_labels = [VARIABLE_LABELS[key] for key in DEFAULT_VARIABLES if key in available]
+
+    st.selectbox("분석 방식", ["개별 변수 분석"], disabled=True, key="sensitivity_method_ui")
+    st.caption("한 번에 한 변수씩 분석합니다. 복합 시나리오는 향후 확장 항목입니다.")
+    selected_labels = st.multiselect(
+        "분석 변수", available_labels, default=default_labels, key="sensitivity_variables_ui",
+    )
+    unavailable = [VARIABLE_LABELS[key] for key in VARIABLE_LABELS if key not in available]
+    if unavailable:
+        st.caption("현재 데이터에서 사용할 수 없음: " + ", ".join(unavailable))
+    range_name = st.selectbox(
+        "변화 범위", ["±5%", "±10%", "±20%", "직접 설정"], index=1, key="sensitivity_range_ui",
+    )
+    if range_name == "직접 설정":
+        custom = st.columns(3, gap="small")
+        minimum = custom[0].number_input("최소 변화율 (%)", min_value=-100.0, max_value=100.0, value=-20.0, step=1.0)
+        maximum = custom[1].number_input("최대 변화율 (%)", min_value=-100.0, max_value=200.0, value=20.0, step=1.0)
+        step_count = custom[2].number_input("단계 수", min_value=2, max_value=41, value=9, step=1)
+    else:
+        bound = {"±5%": 5.0, "±10%": 10.0, "±20%": 20.0}[range_name]
+        minimum, maximum, step_count = -bound, bound, 5
+    candidate_name = st.radio(
+        "분석 후보", ["상위 5개", "상위 10개", "전체 후보"], index=1, horizontal=True,
+        key="sensitivity_candidates_ui",
+    )
+    candidate_limit = {"상위 5개": 5, "상위 10개": 10, "전체 후보": None}[candidate_name]
+    if candidate_limit is None and len(recommendations) > MAX_ANALYSIS_CANDIDATES:
+        st.caption(
+            f"Streamlit Cloud 응답성을 위해 전체 {len(recommendations)}개 중 상위 {MAX_ANALYSIS_CANDIDATES}개까지 분석합니다."
+        )
+    selected_keys = [key for key, label in VARIABLE_LABELS.items() if label in selected_labels]
+    settings = build_sensitivity_settings(
+        recommendations, data, weights, variables=selected_keys,
+        minimum_pct=minimum, maximum_pct=maximum, step_count=int(step_count), candidate_limit=candidate_limit,
+    )
+
+    current_signature = str(st.session_state.get("data_signature") or "")
+    if (
+        st.session_state.get("sensitivity_result") is not None
+        and str(st.session_state.get("sensitivity_data_signature") or "") != current_signature
+    ):
+        st.session_state["sensitivity_result"] = None
+        st.session_state["sensitivity_summary"] = None
+        st.session_state["sensitivity_last_error"] = None
+
+    actions = st.columns([2, 1], gap="small")
+    execute = actions[0].button(
+        "상세 민감도 계산 실행", type="primary", width="stretch",
+        disabled=not selected_keys or bool(st.session_state.get("sensitivity_is_running")),
+    )
+    clear = actions[1].button("최근 계산 결과 지우기", width="stretch")
+    if clear:
+        st.session_state["sensitivity_settings"] = {}
+        st.session_state["sensitivity_result"] = None
+        st.session_state["sensitivity_summary"] = None
+        st.session_state["sensitivity_data_signature"] = None
+        st.session_state["sensitivity_last_error"] = None
+
+    if execute:
+        status = st.status("기준 결과 준비 중", expanded=True)
+        progress = st.progress(0.0, text="0 / 0")
+        st.session_state["sensitivity_is_running"] = True
+        st.session_state["sensitivity_last_error"] = None
+        baseline_recommendations = copy.deepcopy(recommendations)
+
+        def update_progress(stage: str, completed: int, total: int, variable: str) -> None:
+            ratio = completed / max(1, total)
+            progress.progress(ratio, text=f"{variable} · {completed} / {total}")
+            status.update(label=stage, state="running", expanded=True)
+
+        try:
+            result = run_detailed_sensitivity(
+                baseline_recommendations, data, weights, settings, current_signature,
+                progress_callback=update_progress,
+            )
+            st.session_state["sensitivity_settings"] = copy.deepcopy(settings)
+            st.session_state["sensitivity_result"] = result
+            st.session_state["sensitivity_summary"] = copy.deepcopy(result.get("summary") or {})
+            st.session_state["sensitivity_data_signature"] = current_signature
+            progress.progress(1.0, text="계산 완료")
+            cache_text = " · 동일 조건 캐시 사용" if (result.get("metadata") or {}).get("cache_hit") else ""
+            status.update(label=f"상세 민감도 계산 완료{cache_text}", state="complete", expanded=False)
+        except Exception as exc:
+            st.session_state["sensitivity_last_error"] = str(exc)
+            status.update(label="상세 민감도 계산 실패", state="error", expanded=False)
+        finally:
+            st.session_state["sensitivity_is_running"] = False
+
+    error = st.session_state.get("sensitivity_last_error")
+    if error:
+        st.error(f"상세 민감도 계산을 완료하지 못했습니다: {error}")
+    result = st.session_state.get("sensitivity_result")
+    if result and str(st.session_state.get("sensitivity_data_signature") or "") == current_signature:
+        _render_detailed_sensitivity_results(result)
+    elif not execute:
+        st.caption("분석 조건을 선택한 뒤 상세 민감도 계산을 실행하세요.")
 
 
 def _render_greedy(pipeline: dict) -> None:

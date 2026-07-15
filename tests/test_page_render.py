@@ -231,6 +231,36 @@ class PageRenderTests(unittest.TestCase):
         for required in ("VHS 자동 가중치", "민감도 · 추천 신뢰도", "제한 탐색 기반 검증"):
             self.assertIn(required, blob)
 
+    def test_detailed_sensitivity_is_on_demand_and_renders_results(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "분석 및 검증"
+        with patch("pages.validation.run_detailed_sensitivity") as calculation:
+            app.run()
+        calculation.assert_not_called()
+        self.assertFalse(app.exception)
+        self.assertIn("분석 변수", {item.label for item in app.multiselect})
+        self.assertIn("변화 범위", {item.label for item in app.selectbox})
+        self.assertIn("분석 후보", {item.label for item in app.radio})
+        recommendations_before = [dict(item) for item in app.session_state["varo_recommendations"]]
+        execute = next(button for button in app.button if button.label == "상세 민감도 계산 실행")
+        execute.click().run(timeout=90)
+        self.assertFalse(app.exception)
+        self.assertEqual([dict(item) for item in app.session_state["varo_recommendations"]], recommendations_before)
+        metric_labels = {item.label for item in app.metric}
+        self.assertTrue({
+            "분석 변수 수", "총 시나리오 수", "Top1 유지율", "Top3 유지율",
+            "최대 순위 변동", "상세 민감도 안정성 점수",
+        }.issubset(metric_labels))
+        tab_labels = {item.label for item in app.tabs}
+        self.assertTrue({"종합 요약", "순위 변화", "VHS 점수 변화", "절감액 변화", "전체 시나리오"}.issubset(tab_labels))
+
+    def test_home_does_not_show_detailed_sensitivity_controls(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "홈"
+        app.run()
+        self.assertFalse(app.exception)
+        self.assertNotIn("상세 민감도 계산 실행", {button.label for button in app.button})
+
     def test_validation_page_has_required_dqn_actions(self):
         app = self._new_app()
         app.session_state["current_menu"] = "분석 및 검증"

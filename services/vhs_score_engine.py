@@ -107,6 +107,48 @@ def _bounded(values: pd.Series, neutral: float = 50.0) -> pd.Series:
     return pd.to_numeric(values, errors="coerce").clip(0, 100).fillna(neutral)
 
 
+def normalize_vhs_values(
+    values: pd.Series | Sequence[float],
+    *,
+    higher_is_better: bool = True,
+    neutral: float = 50.0,
+) -> pd.Series:
+    """Apply the same min/max normalization used by the production VHS engine."""
+    series = values if isinstance(values, pd.Series) else pd.Series(values, dtype="float64")
+    if higher_is_better:
+        return _normalize_high(series, neutral=neutral)
+    return _normalize_low(series, neutral=neutral)
+
+
+def calculate_weighted_vhs_scores(
+    component_frame: pd.DataFrame,
+    weights: Mapping[str, float],
+) -> pd.Series:
+    """Calculate VHS scores without optimizing or mutating the supplied weights."""
+    weighted = pd.Series(0.0, index=component_frame.index, dtype="float64")
+    for component in COMPONENTS:
+        weight = max(0.0, float(weights.get(component, 0.0) or 0.0))
+        neutral = 0.0 if component == "dqn_reference_score" and weight == 0 else 50.0
+        values = (
+            pd.to_numeric(component_frame[component], errors="coerce")
+            if component in component_frame.columns
+            else pd.Series(neutral, index=component_frame.index, dtype="float64")
+        )
+        weighted += values.fillna(neutral).clip(0, 100) * weight
+    return weighted.clip(0, 100).round(2)
+
+
+def rank_vhs_scores(scores: pd.Series | Sequence[float]) -> pd.Series:
+    """Use the production stable tie rule: current candidate order wins ties."""
+    series = scores if isinstance(scores, pd.Series) else pd.Series(scores, dtype="float64")
+    return pd.to_numeric(series, errors="coerce").rank(method="first", ascending=False).astype(int)
+
+
+def vhs_grade(score: float) -> str:
+    """Return the production recommendation grade for a VHS score."""
+    return _grade(float(score))
+
+
 def _column_coverage(df: pd.DataFrame, columns: Sequence[str]) -> float:
     present = [column for column in columns if column in df.columns]
     if not present:
@@ -479,13 +521,10 @@ def apply_auto_vhs(
 
     meta = _component_meta(frame, scores, source_columns, dqn_enabled=dqn_enabled)
     weights = optimize_weights(scores, meta, dqn_enabled=dqn_enabled)
-    weighted = pd.Series(0.0, index=frame.index, dtype="float64")
-    for component in COMPONENTS:
-        weighted += pd.to_numeric(frame[component], errors="coerce").fillna(50) * weights[component]
-    frame["auto_vhs_score"] = weighted.clip(0, 100).round(2)
+    frame["auto_vhs_score"] = calculate_weighted_vhs_scores(frame, weights)
     frame["vhs_score"] = frame["auto_vhs_score"]
     frame["recalculated_vhs_score"] = frame["auto_vhs_score"]
-    frame["vhs_rank"] = frame["auto_vhs_score"].rank(method="first", ascending=False).astype(int)
+    frame["vhs_rank"] = rank_vhs_scores(frame["auto_vhs_score"])
     frame["varo_final_rank"] = frame["vhs_rank"]
     frame["rank"] = frame["vhs_rank"]
     frame["recommendation_grade"] = frame["auto_vhs_score"].apply(_grade)
