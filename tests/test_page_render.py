@@ -238,19 +238,120 @@ class PageRenderTests(unittest.TestCase):
         self.assertFalse(app.exception)
         labels = {button.label for button in app.button}
         self.assertTrue({
-            "현재 샘플 진단", "선택 샘플 원본 학습", "선택 샘플 균형형 학습",
-            "10개 원본 순차 학습", "10개 균형형 순차 학습", "원본 vs 균형형 비교 리포트",
+            "DQN 학습 실행", "DQN 원본 학습 실행", "DQN 균형형 학습 실행",
+            "DQN 원본 vs 균형형 비교", "최근 학습 결과 불러오기", "현재 샘플 진단",
+            "원본 10개 데이터 진단", "균형형 10개 데이터 생성",
+            "DQN 원본 10개 순차 학습", "DQN 균형형 10개 순차 학습",
+            "원본 vs 균형형 비교 리포트",
         }.issubset(labels))
-        self.assertIn("학습 결과", self._markdown_blob(app))
+        blob = self._markdown_blob(app)
+        self.assertIn("DQN 학습 실행", blob)
+        self.assertIn("학습 결과", blob)
+        self.assertEqual(next(item for item in app.number_input if item.label == "학습 에피소드").value, 80)
+        self.assertEqual(
+            next(item for item in app.radio if item.label == "학습 데이터 선택").options,
+            ["원본 데이터", "균형형 데이터"],
+        )
 
     def test_validation_does_not_start_dqn_before_button_click(self):
         app = self._new_app()
         app.session_state["current_menu"] = "분석 및 검증"
-        app.run()
+        with (
+            patch("pages.validation.train_dqn") as single_train,
+            patch("pages.validation.train_dqn_batch") as batch_train,
+        ):
+            app.run()
+        single_train.assert_not_called()
+        batch_train.assert_not_called()
         self.assertFalse(app.exception)
         self.assertIsNone(app.session_state["dqn_training_result"])
         self.assertIsNone(app.session_state["dqn_batch_result"])
         self.assertIsNone(app.session_state["dqn_comparison_result"])
+
+    def test_dqn_primary_button_follows_original_and_balanced_selection(self):
+        from services.dqn_service import DqnTrainingResult
+
+        runtime = {
+            "available": True,
+            "status": "DQN 학습 실행 가능",
+            "device": "CPU",
+            "version": "test",
+            "message": "test",
+        }
+
+        def fake_result(recommendations, **kwargs):
+            mode = kwargs["training_mode"]
+            return DqnTrainingResult(
+                status="검토 필요",
+                final_status="검토 필요",
+                stability_status="검토 필요",
+                data_signature=kwargs["data_signature"],
+                episodes=kwargs["episodes"],
+                training_mode=mode,
+                variant=mode,
+                candidate_count=len(recommendations),
+            )
+
+        for selection, expected_mode in (("원본 데이터", "original"), ("균형형 데이터", "balanced")):
+            app = self._new_app()
+            app.session_state["current_menu"] = "분석 및 검증"
+            with patch("pages.validation.get_torch_runtime_info", return_value=runtime):
+                app.run()
+                next(item for item in app.radio if item.label == "학습 데이터 선택").set_value(selection).run()
+                with patch("pages.validation.train_dqn", side_effect=fake_result) as trainer:
+                    next(item for item in app.button if item.key == "dqn_primary_train").click().run()
+            self.assertFalse(app.exception)
+            trainer.assert_called_once()
+            self.assertEqual(trainer.call_args.kwargs["training_mode"], expected_mode)
+            self.assertEqual(trainer.call_args.kwargs["episodes"], 80)
+            self.assertEqual(app.session_state["dqn_training_result"]["training_mode"], expected_mode)
+
+    def test_dqn_runtime_state_controls_primary_button(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "분석 및 검증"
+        unavailable = {
+            "available": False,
+            "status": "DQN 학습 실행 환경 필요",
+            "device": "-",
+            "version": "-",
+            "message": "배포 환경에 PyTorch가 설치되지 않아 현재 학습을 실행할 수 없습니다.",
+        }
+        with patch("pages.validation.get_torch_runtime_info", return_value=unavailable):
+            app.run()
+        self.assertFalse(app.exception)
+        primary = next(item for item in app.button if item.key == "dqn_primary_train")
+        self.assertTrue(primary.disabled)
+        visible = self._markdown_blob(app) + " " + " ".join(item.value for item in app.caption)
+        self.assertIn("DQN 학습 실행 환경 필요", visible)
+        self.assertIn("배포 환경에 PyTorch가 설치되지 않아", visible)
+
+    def test_dqn_training_failure_keeps_page_and_previous_recommendations(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "분석 및 검증"
+        runtime = {
+            "available": True,
+            "status": "DQN 학습 실행 가능",
+            "device": "CPU",
+            "version": "test",
+            "message": "test",
+        }
+        with patch("pages.validation.get_torch_runtime_info", return_value=runtime):
+            app.run()
+            before = [dict(item) for item in app.session_state["varo_recommendations"]]
+            with patch("pages.validation.train_dqn", side_effect=RuntimeError("boom")):
+                next(item for item in app.button if item.key == "dqn_primary_train").click().run()
+        self.assertFalse(app.exception)
+        self.assertIsNone(app.session_state["dqn_training_result"])
+        self.assertEqual([dict(item) for item in app.session_state["varo_recommendations"]], before)
+        self.assertTrue(app.error)
+
+    def test_home_never_calls_dqn_training(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "홈"
+        with patch("pages.validation.train_dqn") as trainer:
+            app.run()
+        trainer.assert_not_called()
+        self.assertFalse(app.exception)
 
     def test_dqn_buttons_run_training_batch_and_comparison(self):
         from services.dqn_service import get_torch_status
@@ -261,16 +362,19 @@ class PageRenderTests(unittest.TestCase):
         app.session_state["current_menu"] = "분석 및 검증"
         app.run()
 
-        next(button for button in app.button if button.label == "선택 샘플 원본 학습").click().run(timeout=180)
+        next(button for button in app.button if button.key == "dqn_primary_train").click().run(timeout=180)
         self.assertFalse(app.exception)
         result = app.session_state["dqn_training_result"]
-        self.assertTrue(Path(result["result_path"]).exists())
+        self.assertEqual(result["training_mode"], "original")
+        self.assertEqual(result["episodes"], 80)
+        if result.get("result_path"):
+            self.assertTrue(Path(result["result_path"]).exists())
 
-        next(button for button in app.button if button.label == "10개 원본 순차 학습").click().run(timeout=240)
+        next(button for button in app.button if button.label == "DQN 원본 10개 순차 학습").click().run(timeout=240)
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state["dqn_batch_result"]["count"], 10)
 
-        next(button for button in app.button if button.label == "선택 샘플 원본 vs 균형형 비교").click().run(timeout=180)
+        next(button for button in app.button if button.label == "DQN 원본 vs 균형형 비교").click().run(timeout=180)
         self.assertFalse(app.exception)
         self.assertEqual(len(app.session_state["dqn_comparison_result"]["rows"]), 2)
 
@@ -413,16 +517,17 @@ class PageRenderTests(unittest.TestCase):
         self.assertNotIn("components.html", route_source)
         self.assertNotIn("zipfile", other_source)
 
-    def test_deployment_files_split_lightweight_and_dqn_dependencies(self):
+    def test_deployment_files_include_cloud_dqn_dependency(self):
         root = Path(__file__).resolve().parents[1]
         basic = (root / "requirements.txt").read_text(encoding="utf-8")
         dqn = (root / "requirements-dqn.txt").read_text(encoding="utf-8")
         readme = (root / "README_V2.md").read_text(encoding="utf-8")
         for required in ("streamlit", "pandas", "numpy", "openpyxl", "scipy", "scikit-learn"):
             self.assertIn(required, basic)
-        self.assertNotIn("torch", basic.lower())
+        self.assertIn("torch>=2.2,<3", basic.lower())
         self.assertIn("-r requirements.txt", dqn)
-        self.assertIn("torch", dqn.lower())
+        for unnecessary in ("torchvision", "torchaudio", "nvidia-"):
+            self.assertNotIn(unnecessary, (basic + dqn).lower())
         for required in ("requirements.txt", "requirements-dqn.txt", "PyTorch"):
             self.assertIn(required, readme)
         for exaggerated in ("논문급", "State of the Art", "완전한 최적화"):

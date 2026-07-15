@@ -17,7 +17,7 @@ from services.dqn_service import (
     can_apply_dqn_to_current_data,
     compare_dqn_training_sets,
     dqn_result_summary,
-    get_torch_status,
+    get_torch_runtime_info,
     load_latest_dqn_result,
     train_dqn,
     train_dqn_batch,
@@ -362,104 +362,278 @@ def _dqn_context() -> tuple[str, int, int]:
     return sample_id, int((node_types == "STORE").sum()), int((node_types == "DC").sum())
 
 
+def _dqn_mode(selection: str) -> str:
+    return "balanced" if selection == "균형형 데이터" else "original"
+
+
+def _restore_dqn_page_state(snapshot: dict) -> None:
+    for key, value in snapshot.items():
+        st.session_state[key] = value
+
+
+def _run_single_dqn(
+    recommendations: list[dict],
+    data_signature: str | None,
+    mode: str,
+    episodes: int,
+    sample_id: str,
+    store_count: int,
+    dc_count: int,
+) -> bool:
+    """Connect the explicit UI action to the existing guarded trainer."""
+    protected_keys = (
+        "varo_recommendations", "analysis_result", "varo_pipeline_result", "pipeline_summary",
+        "connected_algorithms", "dqn_training_result", "dqn_baseline_recommendations",
+        "dqn_baseline_pipeline",
+    )
+    snapshot = {key: copy.deepcopy(st.session_state.get(key)) for key in protected_keys}
+    status = st.status("학습 준비 중", expanded=True)
+    storage_warning = False
+    try:
+        status.update(label="데이터 구성 중", state="running")
+        prepared = prepare_dqn_recommendations(recommendations, mode)
+        if mode == "balanced":
+            try:
+                save_balanced_recommendations(
+                    prepared,
+                    sample_id,
+                    store_count,
+                    dc_count,
+                    derived_from=st.session_state.get("uploaded_filename"),
+                )
+            except Exception:
+                storage_warning = True
+
+        def update_stage(label: str) -> None:
+            status.update(label=label, state="running")
+
+        result = train_dqn(
+            prepared,
+            data_signature=data_signature,
+            episodes=episodes,
+            learning_rate=0.001,
+            reflection_mode="DQN 참고만",
+            sample_id=sample_id,
+            training_mode=mode,
+            store_count=store_count,
+            dc_count=dc_count,
+            seed=17,
+            progress_callback=update_stage,
+        ).to_dict()
+        status.update(label="결과 적용 중", state="running")
+        st.session_state["dqn_training_result"] = result
+        _refresh_recommendations_with_dqn(result)
+        if (result.get("diagnostics") or {}).get("storage_status") in {"session_only", "result_only"}:
+            storage_warning = True
+        st.session_state["dqn_notice"] = "학습 완료"
+        st.session_state["dqn_storage_notice"] = storage_warning
+        status.update(label="DQN 학습 완료", state="complete", expanded=False)
+        return True
+    except Exception:
+        _restore_dqn_page_state(snapshot)
+        st.session_state["dqn_notice"] = "학습 실패"
+        status.update(label="DQN 학습 실패", state="error", expanded=False)
+        return False
+
+
+def _run_dqn_comparison(
+    recommendations: list[dict],
+    data_signature: str | None,
+    episodes: int,
+    sample_id: str,
+    store_count: int,
+    dc_count: int,
+) -> bool:
+    protected_keys = (
+        "varo_recommendations", "analysis_result", "varo_pipeline_result", "pipeline_summary",
+        "connected_algorithms", "dqn_training_result", "dqn_comparison_result",
+        "dqn_baseline_recommendations", "dqn_baseline_pipeline",
+    )
+    snapshot = {key: copy.deepcopy(st.session_state.get(key)) for key in protected_keys}
+    status = st.status("원본·균형형 비교 준비 중", expanded=True)
+    try:
+        balanced = balanced_recommendations(recommendations)
+        try:
+            save_balanced_recommendations(balanced, sample_id, store_count, dc_count)
+        except Exception:
+            st.session_state["dqn_storage_notice"] = True
+        status.update(label="DQN 원본·균형형 학습 중", state="running")
+        comparison = compare_dqn_training_sets(
+            recommendations,
+            balanced,
+            str(data_signature or ""),
+            episodes=episodes,
+            sample_id=sample_id,
+            store_count=store_count,
+            dc_count=dc_count,
+        )
+        selected = (
+            comparison.get("balanced_result")
+            if comparison.get("preferred") == "균형형"
+            else comparison.get("original_result")
+        ) or comparison.get("balanced_result") or comparison.get("original_result")
+        st.session_state["dqn_comparison_result"] = comparison
+        if selected:
+            st.session_state["dqn_training_result"] = selected
+            _refresh_recommendations_with_dqn(selected)
+        if comparison.get("storage_status") == "session_only":
+            st.session_state["dqn_storage_notice"] = True
+        st.session_state["dqn_notice"] = "비교 완료"
+        status.update(label="DQN 비교 완료", state="complete", expanded=False)
+        return True
+    except Exception:
+        _restore_dqn_page_state(snapshot)
+        st.session_state["dqn_notice"] = "비교 실패"
+        status.update(label="DQN 비교 실패", state="error", expanded=False)
+        return False
+
+
+def _format_loss(value) -> str:
+    try:
+        return f"{float(value):.6f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
 def _render_dqn() -> None:
     recommendations = st.session_state.get("varo_recommendations") or []
     data_signature = st.session_state.get("data_signature")
-    torch_ok, torch_message = get_torch_status()
-    torch_label = torch_message if torch_ok else "DQN 학습 실행 환경 필요"
-    st.markdown(badge_html(torch_label, "success" if torch_ok else "warning"), unsafe_allow_html=True)
-    st.caption("원본 라벨 편향을 진단하고 균형형 학습 데이터로 비교 검증합니다.")
+    runtime = get_torch_runtime_info()
+    torch_ok = bool(runtime["available"])
     sample_id, store_count, dc_count = _dqn_context()
+
+    render_section_header(
+        st,
+        "DQN 학습 실행",
+        "현재 적용된 데이터로 DQN을 학습합니다. 원본 또는 균형형 데이터를 선택할 수 있습니다.",
+    )
+    setup_cols = st.columns([1.25, 0.8, 1.0], gap="small")
+    with setup_cols[0]:
+        training_data = st.radio(
+            "학습 데이터 선택",
+            ("원본 데이터", "균형형 데이터"),
+            horizontal=True,
+            key="dqn_single_training_data",
+        )
+    with setup_cols[1]:
+        episodes = int(st.number_input(
+            "학습 에피소드",
+            min_value=20,
+            max_value=500,
+            value=80,
+            step=10,
+            key="dqn_single_episodes",
+        ))
+    with setup_cols[2]:
+        st.markdown("**학습 상태**")
+        st.markdown(
+            badge_html(str(runtime["status"]), "success" if torch_ok else "warning"),
+            unsafe_allow_html=True,
+        )
+        if torch_ok:
+            st.caption(f"실행 장치: {runtime['device']} · PyTorch {runtime['version']}")
+        else:
+            st.caption(str(runtime["message"]))
+
+    selected_mode = _dqn_mode(training_data)
+    actions = st.columns([1.4, 1.0, 1.0], gap="small")
+    if actions[0].button(
+        "DQN 학습 실행",
+        key="dqn_primary_train",
+        type="primary",
+        disabled=not recommendations or not torch_ok,
+        width="stretch",
+    ):
+        _run_single_dqn(
+            recommendations, data_signature, selected_mode, episodes,
+            sample_id, store_count, dc_count,
+        )
+        st.rerun()
+    if actions[1].button(
+        "DQN 원본 vs 균형형 비교",
+        key="dqn_primary_compare",
+        disabled=not recommendations or not torch_ok,
+        width="stretch",
+    ):
+        _run_dqn_comparison(
+            recommendations, data_signature, episodes, sample_id, store_count, dc_count,
+        )
+        st.rerun()
+    if actions[2].button(
+        "최근 학습 결과 불러오기",
+        key="dqn_load_latest",
+        disabled=not recommendations,
+        width="stretch",
+    ):
+        latest = load_latest_dqn_result(data_signature, selected_mode)
+        if latest:
+            st.session_state["dqn_training_result"] = latest
+            _refresh_recommendations_with_dqn(latest)
+            st.session_state["dqn_notice"] = "최근 결과 불러오기 완료"
+        else:
+            st.session_state["dqn_notice"] = "최근 결과 없음"
+        st.rerun()
+
+    with st.expander("고급 학습 옵션", expanded=False):
+        advanced = st.columns(2, gap="small")
+        if advanced[0].button(
+            "DQN 원본 학습 실행",
+            key="dqn_advanced_original",
+            disabled=not recommendations or not torch_ok,
+            width="stretch",
+        ):
+            _run_single_dqn(
+                recommendations, data_signature, "original", episodes,
+                sample_id, store_count, dc_count,
+            )
+            st.rerun()
+        if advanced[1].button(
+            "DQN 균형형 학습 실행",
+            key="dqn_advanced_balanced",
+            disabled=not recommendations or not torch_ok,
+            width="stretch",
+        ):
+            _run_single_dqn(
+                recommendations, data_signature, "balanced", episodes,
+                sample_id, store_count, dc_count,
+            )
+            st.rerun()
+
     current_diagnosis = diagnose_dqn_training_sets([{
         "sample_id": sample_id,
         "sample_name": st.session_state.get("uploaded_filename") or "현재 데이터",
-        "mode": "original",
-        "recommendations": recommendations,
+        "mode": selected_mode,
+        "recommendations": prepare_dqn_recommendations(recommendations, selected_mode),
     }])[0] if recommendations else {}
     render_section_header(st, "현재 샘플 진단", "학습을 시작하기 전에 후보 수와 라벨 편향을 확인합니다.")
     if st.button(
         "현재 샘플 진단",
         key="dqn_current_sample_diagnosis",
-        type="primary",
         disabled=not recommendations,
         width="stretch",
     ):
         st.success("현재 샘플 진단을 갱신했습니다.")
     diagnostic_cols = st.columns(3, gap="small")
     diagnostic_cols[0].metric("후보 수", current_diagnosis.get("candidate_count", 0))
-    diagnostic_cols[1].metric("라벨 종류", current_diagnosis.get("target_type_count", 0))
+    diagnostic_cols[1].metric("학습 라벨 종류", current_diagnosis.get("target_type_count", 0))
     diagnosis_status = user_status_label(current_diagnosis.get("status", "학습 필요"))
     compact_status = "확인 필요" if diagnosis_status == "비교 전 데이터 확인 필요" else diagnosis_status
-    diagnostic_cols[2].metric("상태", compact_status)
+    diagnostic_cols[2].metric("데이터 상태", compact_status)
     if compact_status != diagnosis_status:
         diagnostic_cols[2].caption(diagnosis_status)
 
-    render_section_header(st, "선택 샘플 학습", "버튼을 누른 경우에만 선택된 데이터의 학습 또는 비교를 실행합니다.")
-    actions = st.columns(3, gap="small")
-    if actions[0].button("선택 샘플 원본 학습", type="primary", disabled=not recommendations or not torch_ok, width="stretch"):
-        result = train_dqn(
-            prepare_dqn_recommendations(recommendations, "original"),
-            data_signature=data_signature,
-            episodes=180,
-            learning_rate=0.001,
-            reflection_mode="DQN 참고만",
-            sample_id=sample_id,
-            training_mode="original",
-            store_count=store_count,
-            dc_count=dc_count,
-            seed=17,
-        )
-        st.session_state["dqn_training_result"] = result.to_dict()
-        _refresh_recommendations_with_dqn(st.session_state["dqn_training_result"])
-        st.session_state["dqn_notice"] = "완료"
-        st.rerun()
-    actions[0].caption("현재 추천 라벨을 그대로 사용해 학습합니다.")
+    if selected_mode == "original" and current_diagnosis.get("status") == "검토 필요":
+        st.warning("원본 데이터의 학습 라벨이 한쪽으로 치우쳐 있습니다.")
+    elif selected_mode == "balanced" and current_diagnosis.get("status") == "비교 가능":
+        st.success("균형형 데이터로 안정적인 비교가 가능합니다.")
 
-    if actions[1].button("선택 샘플 균형형 학습", disabled=not recommendations or not torch_ok, width="stretch"):
-        balanced = balanced_recommendations(recommendations)
-        save_balanced_recommendations(
-            balanced, sample_id, store_count, dc_count,
-            derived_from=st.session_state.get("uploaded_filename"),
-        )
-        result = train_dqn(
-            balanced,
-            data_signature=data_signature,
-            episodes=180,
-            learning_rate=0.001,
-            reflection_mode="DQN 참고만",
-            sample_id=sample_id,
-            training_mode="balanced",
-            store_count=store_count,
-            dc_count=dc_count,
-            seed=17,
-        )
-        st.session_state["dqn_training_result"] = result.to_dict()
-        _refresh_recommendations_with_dqn(st.session_state["dqn_training_result"])
-        st.session_state["dqn_notice"] = "완료"
-        st.rerun()
-    actions[1].caption("라벨 균형을 보정한 파생 데이터로 학습합니다.")
-
-    if actions[2].button("선택 샘플 원본 vs 균형형 비교", disabled=not recommendations or not torch_ok, width="stretch"):
-        balanced = balanced_recommendations(recommendations)
-        save_balanced_recommendations(balanced, sample_id, store_count, dc_count)
-        comparison = compare_dqn_training_sets(
-            recommendations, balanced, str(data_signature), episodes=180,
-            sample_id=sample_id, store_count=store_count, dc_count=dc_count,
-        )
-        st.session_state["dqn_comparison_result"] = comparison
-        preferred = comparison.get("preferred")
-        selected = comparison.get("balanced_result") if preferred == "균형형" else comparison.get("original_result")
-        if not selected:
-            selected = comparison.get("balanced_result")
-        st.session_state["dqn_training_result"] = selected
-        _refresh_recommendations_with_dqn(selected)
-        st.session_state["dqn_notice"] = "완료"
-        st.rerun()
-    actions[2].caption("두 학습 결과의 안정성을 같은 기준으로 비교합니다.")
-
-    render_section_header(st, "DQN 샘플 10개", "원본 10개와 균형형 10개를 순차 학습하고 결과를 비교합니다.")
+    render_section_header(
+        st,
+        "DQN 샘플 10개 일괄 검증",
+        "원본 10개와 균형형 10개를 별도로 진단·학습합니다. 순차 학습은 시간이 걸릴 수 있습니다.",
+    )
     batch_actions = st.columns(3, gap="small")
-    if batch_actions[0].button("10개 원본 진단", width="stretch"):
+    if batch_actions[0].button("원본 10개 데이터 진단", width="stretch"):
         st.session_state["dqn_sample_diagnosis"] = diagnose_dqn_training_sets(
             build_dqn_training_sets(mode="original")
         )
@@ -467,84 +641,117 @@ def _render_dqn() -> None:
         st.rerun()
     batch_actions[0].caption("원본 샘플 10개의 라벨 분포를 진단합니다.")
 
-    if batch_actions[1].button("10개 균형형 데이터 생성", width="stretch"):
-        balanced_sets = build_dqn_training_sets(mode="balanced")
+    if batch_actions[1].button("균형형 10개 데이터 생성", width="stretch"):
         generated = []
-        for item in balanced_sets:
-            generated.append(str(save_balanced_recommendations(
-                item.get("recommendations") or [],
-                str(item.get("sample_id") or "sample"),
-                int(item.get("store_count") or 0),
-                int(item.get("dc_count") or 0),
-                derived_from=str(item.get("filename") or "DQN sample"),
-            )))
-        st.session_state["dqn_balanced_files"] = generated
-        st.session_state["dqn_notice"] = "완료"
+        failed = 0
+        try:
+            balanced_sets = build_dqn_training_sets(mode="balanced")
+            for item in balanced_sets:
+                try:
+                    generated.append(str(save_balanced_recommendations(
+                        item.get("recommendations") or [],
+                        str(item.get("sample_id") or "sample"),
+                        int(item.get("store_count") or 0),
+                        int(item.get("dc_count") or 0),
+                        derived_from=str(item.get("filename") or "DQN sample"),
+                    )))
+                except Exception:
+                    failed += 1
+            st.session_state["dqn_balanced_files"] = generated
+            st.session_state["dqn_notice"] = "생성 완료" if not failed else "일부 저장 실패"
+        except Exception:
+            st.session_state["dqn_notice"] = "생성 실패"
         st.rerun()
     batch_actions[1].caption("원본은 유지하고 균형형 파생 데이터를 만듭니다.")
 
-    if batch_actions[2].button("10개 원본 순차 학습", disabled=not torch_ok, width="stretch"):
+    if batch_actions[2].button("DQN 원본 10개 순차 학습", disabled=not torch_ok, width="stretch"):
         progress = st.progress(0.0, text="원본 학습 준비")
         callback = lambda index, total, label, result: progress.progress(
             index / max(1, total), text=f"{label} · {result.get('status', '-')}"
         )
-        batch = train_dqn_batch(
-            build_dqn_training_sets(mode="original"), episodes=90, progress_callback=callback
-        )
-        st.session_state["dqn_original_batch_result"] = batch
-        st.session_state["dqn_batch_result"] = batch
-        st.session_state["dqn_notice"] = "완료"
+        try:
+            batch = train_dqn_batch(
+                build_dqn_training_sets(mode="original"), episodes=90, progress_callback=callback
+            )
+            st.session_state["dqn_original_batch_result"] = batch
+            st.session_state["dqn_batch_result"] = batch
+            st.session_state["dqn_notice"] = "일괄 학습 완료"
+        except Exception:
+            st.session_state["dqn_notice"] = "일괄 학습 실패"
         st.rerun()
     batch_actions[2].caption("원본 샘플 10개를 차례로 학습합니다.")
 
     batch_actions_2 = st.columns(2, gap="small")
-    if batch_actions_2[0].button("10개 균형형 순차 학습", disabled=not torch_ok, width="stretch"):
-        training_sets = build_dqn_training_sets(mode="balanced")
+    if batch_actions_2[0].button("DQN 균형형 10개 순차 학습", disabled=not torch_ok, width="stretch"):
         progress = st.progress(0.0, text="균형형 학습 준비")
         callback = lambda index, total, label, result: progress.progress(
             index / max(1, total), text=f"{label} · {result.get('status', '-')}"
         )
-        batch = train_dqn_batch(training_sets, episodes=90, progress_callback=callback)
-        st.session_state["dqn_balanced_batch_result"] = batch
-        st.session_state["dqn_batch_result"] = batch
-        st.session_state["dqn_notice"] = "완료"
+        try:
+            training_sets = build_dqn_training_sets(mode="balanced")
+            batch = train_dqn_batch(training_sets, episodes=90, progress_callback=callback)
+            st.session_state["dqn_balanced_batch_result"] = batch
+            st.session_state["dqn_batch_result"] = batch
+            st.session_state["dqn_notice"] = "일괄 학습 완료"
+        except Exception:
+            st.session_state["dqn_notice"] = "일괄 학습 실패"
         st.rerun()
     batch_actions_2[0].caption("균형형 샘플 10개를 차례로 학습합니다.")
 
     if batch_actions_2[1].button("원본 vs 균형형 비교 리포트", width="stretch"):
-        report = build_dqn_batch_comparison_report(
-            st.session_state.get("dqn_original_batch_result"),
-            st.session_state.get("dqn_balanced_batch_result"),
-        )
-        st.session_state["dqn_batch_comparison_result"] = report
-        st.session_state["dqn_notice"] = "완료" if report.get("rows") else "비교 결과 없음"
+        try:
+            report = build_dqn_batch_comparison_report(
+                st.session_state.get("dqn_original_batch_result"),
+                st.session_state.get("dqn_balanced_batch_result"),
+            )
+            st.session_state["dqn_batch_comparison_result"] = report
+            st.session_state["dqn_notice"] = "비교 완료" if report.get("rows") else "비교 결과 없음"
+        except Exception:
+            st.session_state["dqn_notice"] = "비교 실패"
         st.rerun()
     batch_actions_2[1].caption("두 배치 결과를 하나의 비교표로 정리합니다.")
 
     notice = st.session_state.pop("dqn_notice", None)
-    if notice == "완료":
-        st.success("완료")
+    if notice and ("완료" in notice):
+        st.success(notice)
+    elif notice == "최근 결과 없음":
+        st.info("현재 데이터와 선택 유형에 맞는 최근 학습 결과가 없습니다.")
     elif notice:
-        st.error("실패")
+        st.error("요청을 완료하지 못했습니다. 기존 추천 결과는 유지됩니다.")
+    if st.session_state.pop("dqn_storage_notice", False):
+        st.warning("파일 저장은 완료되지 않았지만 학습 결과는 현재 세션에서 확인할 수 있습니다.")
 
     active = st.session_state.get("dqn_training_result")
-    active_mode = str((active or {}).get("variant") or (active or {}).get("training_mode") or "original")
-    latest = load_latest_dqn_result(data_signature, active_mode)
-    display = active or latest
+    display = active
     if display:
         display = dict(display)
         if data_signature and display.get("data_signature") != data_signature:
             display["status"] = "과거 결과"
     summary = dqn_result_summary(display, recommendations)
     render_section_header(st, "학습 결과", "")
-    cols = st.columns(3, gap="small")
-    cols[0].metric("상태", user_status_label(summary["status"]))
-    cols[1].metric("후보 수", summary["candidate_count"])
-    cols[2].metric("평균 confidence", summary["average_confidence"] if summary["average_confidence"] is not None else "-")
-    if display and can_apply_dqn_to_current_data(display, data_signature):
-        st.success("DQN 참고 점수가 낮은 비중으로 반영되었습니다.")
+    result_mode = "균형형" if summary["variant"] == "balanced" else "원본"
+    losses = (display or {}).get("loss_history") or []
+    loss_summary = summary.get("loss_summary") or {}
+    predictions = summary.get("prediction_distribution") or summary.get("action_distribution") or {}
+    prediction_total = sum(int(value or 0) for value in predictions.values())
+    dominance = max((int(value or 0) for value in predictions.values()), default=0) / max(1, prediction_total)
+    applicable = bool(display and can_apply_dqn_to_current_data(display, data_signature))
+    result_cols = st.columns(3, gap="small")
+    result_cols[0].metric("학습 상태", user_status_label(summary["status"]))
+    result_cols[1].metric("사용 데이터", result_mode if display else "-")
+    result_cols[2].metric("에피소드", summary["episodes"] if display else "-")
+    result_cols_2 = st.columns(3, gap="small")
+    result_cols_2[0].metric("loss 시작값", _format_loss(losses[0] if losses else loss_summary.get("first")))
+    result_cols_2[1].metric("loss 종료값", _format_loss(losses[-1] if losses else loss_summary.get("last")))
+    result_cols_2[2].metric("예측 action 종류 수", len([value for value in predictions.values() if int(value or 0) > 0]))
+    result_cols_3 = st.columns(3, gap="small")
+    result_cols_3[0].metric("action 최대 쏠림 비율", f"{dominance * 100:.1f}%" if display else "-")
+    result_cols_3[1].metric("안정성 상태", user_status_label(summary["status"]) if display else "-")
+    result_cols_3[2].metric("VHS 참고 반영 여부", "반영" if applicable else "반영 안 함")
+    if applicable:
+        st.success("DQN 참고 점수가 최종 VHS에 낮은 비중으로 반영되었습니다.")
     elif display:
-        st.info("DQN은 비교표에만 표시되며 최종 추천에는 반영하지 않습니다.")
+        st.info("현재 결과는 비교표에만 표시되며 최종 추천에는 반영하지 않습니다.")
     else:
         st.info("DQN은 학습 후 비교할 수 있습니다.")
 
@@ -560,7 +767,7 @@ def _render_dqn() -> None:
     batch_comparison = st.session_state.get("dqn_batch_comparison_result") or {}
     if batch_comparison.get("rows"):
         st.dataframe(_display_frame(batch_comparison["rows"]), hide_index=True, width="stretch")
-    st.caption("학습 결과는 outputs/dqn, 균형형 파생 샘플은 outputs/dqn_balanced_samples에 저장됩니다.")
+    st.caption("학습 결과는 현재 세션에서 바로 확인할 수 있으며 로컬 저장 실패가 앱 실행을 중단하지 않습니다.")
 
 def _render_confidence(pipeline: dict) -> None:
     recommendations = st.session_state.get("varo_recommendations") or []

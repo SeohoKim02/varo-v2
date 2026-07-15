@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import warnings
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -169,9 +170,58 @@ def is_torch_available() -> bool:
 
 
 def get_torch_status() -> tuple[bool, str]:
-    if is_torch_available():
-        return True, "DQN 실행 가능"
-    return False, "DQN 학습은 실행 환경 설정 후 사용할 수 있습니다."
+    runtime = get_torch_runtime_info()
+    return bool(runtime["available"]), str(runtime["status"])
+
+
+def get_torch_training_device(torch_module=None) -> str:
+    """Select CUDA only when this wheel explicitly supports the installed GPU."""
+    torch = torch_module
+    if torch is None:
+        import torch as torch_module_import
+
+        torch = torch_module_import
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            if not bool(torch.cuda.is_available()):
+                return "cpu"
+            supported = set(torch.cuda.get_arch_list())
+            major, minor = torch.cuda.get_device_capability()
+        return "cuda" if f"sm_{major}{minor}" in supported else "cpu"
+    except Exception:
+        return "cpu"
+
+
+def get_torch_runtime_info() -> dict[str, Any]:
+    """Return user-facing runtime details without making PyTorch mandatory."""
+    if not is_torch_available():
+        return {
+            "available": False,
+            "status": "DQN 학습 실행 환경 필요",
+            "device": "-",
+            "version": "-",
+            "message": "배포 환경에 PyTorch가 설치되지 않아 현재 학습을 실행할 수 없습니다.",
+        }
+    try:
+        import torch
+
+        device = "GPU" if get_torch_training_device(torch) == "cuda" else "CPU"
+        return {
+            "available": True,
+            "status": "DQN 학습 실행 가능",
+            "device": device,
+            "version": str(torch.__version__),
+            "message": f"{device}에서 버튼을 누른 경우에만 DQN 학습을 실행합니다.",
+        }
+    except Exception:
+        return {
+            "available": False,
+            "status": "DQN 학습 실행 환경 필요",
+            "device": "-",
+            "version": "-",
+            "message": "배포 환경의 PyTorch를 확인할 수 없어 현재 학습을 실행할 수 없습니다.",
+        }
 
 
 def build_action_mapping() -> dict[str, int]:
@@ -479,6 +529,7 @@ def train_dqn(
     store_count: int | None = None,
     dc_count: int | None = None,
     seed: int = 17,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> DqnTrainingResult:
     """Train a small V2-only Q network after an explicit user action."""
     recs = [dict(row) for row in recommendations or []]
@@ -499,6 +550,9 @@ def train_dqn(
             seed,
         )
 
+    if progress_callback is not None:
+        progress_callback("데이터 구성 중")
+
     import torch
     from torch import nn
 
@@ -506,17 +560,20 @@ def train_dqn(
     rewards = calculate_rewards(recs)
     target_actions = _target_actions(recs)
     action_index = build_action_mapping()
-    x = torch.tensor(vectors, dtype=torch.float32)
-    y = torch.zeros((len(recs), len(ACTION_LABELS)), dtype=torch.float32)
+    device = torch.device(get_torch_training_device(torch))
+    x = torch.tensor(vectors, dtype=torch.float32, device=device)
+    y = torch.zeros((len(recs), len(ACTION_LABELS)), dtype=torch.float32, device=device)
     for row_index, (action, reward) in enumerate(zip(target_actions, rewards)):
         y[row_index, action_index.get(action, 0)] = float(reward)
 
     torch.manual_seed(int(seed))
-    model = _model(len(vectors[0]), len(ACTION_LABELS), seed=seed)
+    model = _model(len(vectors[0]), len(ACTION_LABELS), seed=seed).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=float(learning_rate))
     criterion = nn.MSELoss()
     losses: list[float] = []
     max_episodes = max(1, min(int(episodes), 1200))
+    if progress_callback is not None:
+        progress_callback("DQN 학습 중")
     for _ in range(max_episodes):
         optimizer.zero_grad()
         output = model(x)
@@ -554,13 +611,14 @@ def train_dqn(
             "avg": round(sum(clean) / len(clean), 6) if clean else None,
         })
 
+    if progress_callback is not None:
+        progress_callback("안정성 검사 중")
     status, message = evaluate_dqn_stability(
         losses, predicted_actions, rewards, candidate_count=len(recs), data_signature=signature,
         current_signature=signature, target_actions=target_actions,
     )
     if not logits_are_finite:
         status, message = NEEDS_REVIEW_STATUS, "DQN 출력 값이 안정적이지 않습니다."
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     trained_at, artifact_stamp = _now_parts()
     context_slug = _artifact_context(
         sample_id, training_mode, store_count, dc_count, max_episodes, float(learning_rate)
@@ -582,11 +640,16 @@ def train_dqn(
         "dc_count": int(dc_count or 0),
     }
     saved_model_path: str | None = None
+    artifact_error_type: str | None = None
     if status == NORMAL_STATUS and logits_are_finite:
-        torch.save(model_payload, model_path)
-        torch.save(model_payload, LATEST_MODEL_BY_VARIANT[variant])
-        torch.save(model_payload, LATEST_MODEL)
-        saved_model_path = str(model_path)
+        try:
+            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            torch.save(model_payload, model_path)
+            torch.save(model_payload, LATEST_MODEL_BY_VARIANT[variant])
+            torch.save(model_payload, LATEST_MODEL)
+            saved_model_path = str(model_path)
+        except Exception as exc:
+            artifact_error_type = type(exc).__name__
     result = DqnTrainingResult(
         status=status,
         final_status=status,
@@ -626,10 +689,20 @@ def train_dqn(
             "prediction_distribution": dict(Counter(predicted_actions)),
             "latest_model_path": str(LATEST_MODEL_BY_VARIANT[variant]) if saved_model_path else None,
             "seed": int(seed),
+            "device": str(device),
+            "storage_status": "session_only" if artifact_error_type else "pending",
+            "storage_error_type": artifact_error_type,
         },
         historical_artifacts_used=False,
     )
-    save_dqn_result(result)
+    try:
+        saved = save_dqn_result(result)
+        result.result_path = str(saved.get("result_path") or result_path)
+        result.diagnostics["storage_status"] = "result_only" if artifact_error_type else "saved"
+    except Exception as exc:
+        result.result_path = None
+        result.diagnostics["storage_status"] = "session_only"
+        result.diagnostics["storage_error_type"] = type(exc).__name__
     return result
 
 
@@ -661,6 +734,18 @@ def save_dqn_result(result: DqnTrainingResult | Mapping[str, Any]) -> dict[str, 
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
     return data
+
+
+def _save_json_payload_best_effort(payload: dict[str, Any], path: Path) -> None:
+    """Persist a report when possible while keeping the in-memory result usable."""
+    try:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload["storage_status"] = "saved"
+    except Exception as exc:
+        payload["result_path"] = None
+        payload["storage_status"] = "session_only"
+        payload["storage_error_type"] = type(exc).__name__
 
 
 def load_latest_dqn_result(
@@ -1010,8 +1095,7 @@ def compare_dqn_training_sets(
         "balanced_result": balanced,
         "result_path": str(LATEST_COMPARISON_JSON),
     }
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    LATEST_COMPARISON_JSON.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _save_json_payload_best_effort(payload, LATEST_COMPARISON_JSON)
     return payload
 
 
@@ -1035,10 +1119,7 @@ def build_dqn_batch_comparison_report(
         "balanced_count": len((balanced_batch or {}).get("results") or []),
         "result_path": str(LATEST_COMPARISON_JSON),
     }
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    LATEST_COMPARISON_JSON.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _save_json_payload_best_effort(payload, LATEST_COMPARISON_JSON)
     return payload
 
 
@@ -1094,6 +1175,5 @@ def train_dqn_batch(
         "results": results,
         "result_path": str(LATEST_BATCH_JSON),
     }
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    LATEST_BATCH_JSON.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _save_json_payload_best_effort(payload, LATEST_BATCH_JSON)
     return payload

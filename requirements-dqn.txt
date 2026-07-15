@@ -1,3 +1,2 @@
-# Optional DQN training runtime
+# Backward-compatible DQN install entry; torch is included by requirements.txt.
 -r requirements.txt
-torch>=2.2

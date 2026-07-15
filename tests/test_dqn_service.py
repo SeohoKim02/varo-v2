@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 import inspect
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from services.dqn_service import (
@@ -22,7 +23,9 @@ from services.dqn_service import (
     dqn_result_summary,
     evaluate_dqn_stability,
     get_dqn_status,
+    get_torch_runtime_info,
     get_torch_status,
+    get_torch_training_device,
     normalize_action,
     train_dqn_batch,
     train_dqn,
@@ -55,6 +58,22 @@ def _recommendations():
             "varo_action": "discount",
         },
     ]
+
+
+def _training_recommendations():
+    rows = _recommendations()
+    rows.append({
+        "route_id": "R003",
+        "recommended_qty": 4,
+        "distance_km": 5.0,
+        "expected_time_min": 20,
+        "move_cost": 7000,
+        "expected_saving": 17000,
+        "vhs_score": 75,
+        "confidence_score": 82,
+        "varo_action": "hold",
+    })
+    return rows
 
 
 class DqnServiceTests(unittest.TestCase):
@@ -101,7 +120,45 @@ class DqnServiceTests(unittest.TestCase):
         with patch("services.dqn_service.is_torch_available", return_value=False):
             available, message = get_torch_status()
         self.assertFalse(available)
-        self.assertEqual(message, "DQN 학습은 실행 환경 설정 후 사용할 수 있습니다.")
+        self.assertEqual(message, "DQN 학습 실행 환경 필요")
+
+    def test_torch_runtime_info_reports_device_and_version(self):
+        info = get_torch_runtime_info()
+        self.assertIn("available", info)
+        self.assertIn("status", info)
+        self.assertIn("device", info)
+        self.assertIn("version", info)
+        if info["available"]:
+            self.assertIn(info["device"], {"CPU", "GPU"})
+            self.assertNotEqual(info["version"], "-")
+
+    def test_unsupported_cuda_architecture_falls_back_to_cpu(self):
+        fake_torch = SimpleNamespace(cuda=SimpleNamespace(
+            is_available=lambda: True,
+            get_arch_list=lambda: ["sm_86", "sm_90"],
+            get_device_capability=lambda: (12, 0),
+        ))
+        self.assertEqual(get_torch_training_device(fake_torch), "cpu")
+
+    def test_training_progress_uses_real_service_stages(self):
+        if not get_torch_status()[0]:
+            self.skipTest("DQN runtime unavailable")
+        stages = []
+        result = train_dqn(
+            _training_recommendations(),
+            episodes=20,
+            progress_callback=stages.append,
+        )
+        self.assertEqual(stages, ["데이터 구성 중", "DQN 학습 중", "안정성 검사 중"])
+        self.assertEqual(result.episodes, 20)
+
+    def test_result_save_failure_keeps_in_memory_training_result(self):
+        if not get_torch_status()[0]:
+            self.skipTest("DQN runtime unavailable")
+        with patch("services.dqn_service.save_dqn_result", side_effect=OSError("read only")):
+            result = train_dqn(_training_recommendations(), episodes=20)
+        self.assertIsNone(result.result_path)
+        self.assertEqual(result.diagnostics["storage_status"], "session_only")
 
     def test_apply_mock_training_result_adds_detail_fields_without_scores(self):
         recommendations = _recommendations()
