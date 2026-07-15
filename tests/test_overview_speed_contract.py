@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tests.streamlit_log_silencer import quiet_streamlit_test_logs
 
@@ -11,6 +12,8 @@ quiet_streamlit_test_logs()
 from pages.overview import (
     _MAX_BACKGROUND_ROUTES,
     _ROUTE_LANES,
+    _layout_cached,
+    _network_markup_cached,
     _route_path_d,
     _route_path_points,
     animation_duration_seconds,
@@ -55,6 +58,35 @@ class OverviewSpeedContractTests(unittest.TestCase):
         self.assertIn("def _network_markup_cached", source)
         self.assertIn("@st.cache_data(show_spinner=False, max_entries=24)", source)
         self.assertIn("_data_signature()", source)
+
+    def test_speed_change_reuses_static_node_layout(self):
+        from pages import overview
+
+        nodes = [
+            {"node_id": "S01", "node_name": "출발점", "node_type": "STORE"},
+            {"node_id": "S02", "node_name": "도착점", "node_type": "STORE"},
+        ]
+        routes = [{
+            "route_id": "R01", "source_id": "S01", "target_id": "S02",
+            "route_type": "DIRECT", "transport_type": "일반",
+        }]
+        _layout_cached.clear()
+        _network_markup_cached.clear()
+        original = overview.compute_dynamic_layout
+        with patch.object(overview, "compute_dynamic_layout", wraps=original) as layout:
+            _network_markup_cached("sig", nodes, routes, [], False, 14.0, False, "R01")
+            _network_markup_cached("sig", nodes, routes, [], False, 8.0, False, "R01")
+        self.assertEqual(layout.call_count, 1)
+
+    def test_toolbar_and_legend_match_home_contract(self):
+        source = (Path(__file__).resolve().parents[1] / "pages" / "overview.py").read_text(encoding="utf-8")
+        self.assertIn("st.columns([1.25, 1.1, 0.35, 0.85, 0.9]", source)
+        self.assertIn('label_visibility="collapsed"', source)
+        for text in (
+            "실선: 점포 간 직접 이동", "점선: 물류센터 경유",
+            "파란 박스: 점포", "노란 박스: 물류센터", "차량 아이콘: 이동 경로",
+        ):
+            self.assertIn(text, source)
 
     def test_full_route_background_is_capped_for_home_speed(self):
         self.assertEqual(_MAX_BACKGROUND_ROUTES, 10)

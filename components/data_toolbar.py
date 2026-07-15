@@ -6,9 +6,6 @@ from pathlib import Path
 import streamlit as st
 
 from services.app_state import has_app_data
-from services.data_application import clear_pending, load_and_apply, uploaded_signature
-from services.data_loader import SAMPLE_FILENAME, get_default_sample_path
-
 
 def _go_to_data_management() -> None:
     st.session_state["current_menu"] = "데이터 관리"
@@ -18,16 +15,41 @@ def _toggle_replace_controls() -> None:
     st.session_state["quick_replace_open"] = not bool(st.session_state.get("quick_replace_open", False))
 
 
-def _load_sample() -> bool:
+def _load_sample(progress_callback=None) -> bool:
+    from services.data_application import clear_pending, load_and_apply
+    from services.data_loader import SAMPLE_FILENAME, get_default_sample_path
+
     sample_path = get_default_sample_path(Path(__file__).resolve().parents[1])
     if not sample_path.exists():
         clear_pending(st.session_state)
         st.session_state["pending_load_error"] = "V2 data 폴더에 기본 샘플 파일이 없습니다."
         return False
-    return load_and_apply(st.session_state, sample_path, SAMPLE_FILENAME, "샘플 추천 데이터")
+    return load_and_apply(
+        st.session_state, sample_path, SAMPLE_FILENAME, "샘플 추천 데이터",
+        progress_callback=progress_callback,
+    )
+
+
+def _run_with_load_status(loader) -> bool:
+    status = st.status("데이터 읽는 중", expanded=False)
+
+    def update(label: str) -> None:
+        status.update(
+            label=label,
+            state="complete" if label == "데이터 적용 완료" else "running",
+            expanded=False,
+        )
+
+    applied = bool(loader(update))
+    if not applied:
+        failed_stage = st.session_state.get("pending_load_stage") or "데이터 적용"
+        status.update(label=f"{failed_stage} 실패", state="error", expanded=False)
+    return applied
 
 
 def _render_load_controls(key_prefix: str) -> None:
+    from services.data_application import load_and_apply, uploaded_signature
+
     upload_col, sample_col = st.columns([3.4, 1], gap="small")
     with upload_col:
         uploaded_file = st.file_uploader(
@@ -41,11 +63,14 @@ def _render_load_controls(key_prefix: str) -> None:
         else:
             signature = uploaded_signature(uploaded_file)
             if st.session_state.get(f"_{key_prefix}_signature") != signature:
-                applied = load_and_apply(
-                    st.session_state,
-                    uploaded_file,
-                    uploaded_file.name,
-                    "업로드된 추천 결과",
+                applied = _run_with_load_status(
+                    lambda callback: load_and_apply(
+                        st.session_state,
+                        uploaded_file,
+                        uploaded_file.name,
+                        "업로드된 추천 결과",
+                        progress_callback=callback,
+                    )
                 )
                 st.session_state[f"_{key_prefix}_signature"] = signature
                 if applied:
@@ -53,7 +78,7 @@ def _render_load_controls(key_prefix: str) -> None:
                     st.rerun()
     with sample_col:
         if st.button("기본 샘플 불러오기", key=f"{key_prefix}_sample", width="stretch"):
-            if _load_sample():
+            if _run_with_load_status(_load_sample):
                 st.session_state["quick_replace_open"] = False
                 st.rerun()
 

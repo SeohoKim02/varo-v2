@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import MutableMapping
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
+import pickle
 import re
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
-from services.analysis_pipeline import build_v2_state
+from services.analysis_pipeline import PipelineResult, ensure_recommendations, run_analysis_pipeline
 from services.app_state import apply_state_payload, build_applied_state_payload
 from services.data_loader import DataLoadError, load_excel_data
 from services.data_validator import ValidationReport
@@ -21,6 +23,9 @@ PENDING_KEYS = (
     "pending_uploaded_filename", "pending_data_source_type", "pending_upload_report",
     "pending_validation_error",
 )
+
+LOAD_CACHE_VERSION = "v2-core-2026-07-15.1"
+ProgressCallback = Callable[[str], None]
 
 
 def clear_pending(state: MutableMapping[str, Any]) -> None:
@@ -112,6 +117,57 @@ def _has_user_warnings(validation: ValidationReport) -> bool:
     return any("동일 source_id/target_id 조합" not in message.message for message in warnings)
 
 
+@lru_cache(maxsize=8)
+def _cached_excel_blob(content: bytes, cache_version: str) -> bytes:
+    """Cache normalized workbook data by immutable file content."""
+    _ = cache_version
+    loaded = load_excel_data(BytesIO(content), return_report=True)
+    return pickle.dumps(loaded, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+@lru_cache(maxsize=8)
+def _cached_prepared_blob(content: bytes, cache_version: str) -> bytes:
+    """Cache candidate preparation and basic validation independently."""
+    data, load_report = pickle.loads(_cached_excel_blob(content, cache_version))
+    prepared, recommendation_source, candidate_info = ensure_recommendations(data)
+    from services.data_validator import validate_workbook_data
+
+    validation = validate_workbook_data(prepared)
+    return pickle.dumps(
+        (prepared, load_report, validation, recommendation_source, candidate_info),
+        protocol=pickle.HIGHEST_PROTOCOL,
+    )
+
+
+@lru_cache(maxsize=8)
+def _cached_core_pipeline_blob(content: bytes, cache_version: str) -> bytes:
+    """Cache only deterministic, load-time recommendation calculations."""
+    data, _, validation, _, _ = pickle.loads(_cached_prepared_blob(content, cache_version))
+    if validation.has_errors:
+        result = PipelineResult(status="validation_error")
+    else:
+        result = run_analysis_pipeline(
+            data, detail_level="core", validation_report=validation,
+        )
+    return pickle.dumps(result.to_dict(), protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def clear_load_caches() -> None:
+    """Clear deterministic workbook caches (primarily for regression tests)."""
+    _cached_core_pipeline_blob.cache_clear()
+    _cached_prepared_blob.cache_clear()
+    _cached_excel_blob.cache_clear()
+
+
+def load_cache_info() -> dict[str, object]:
+    """Expose cache counters without returning cached mutable objects."""
+    return {
+        "excel": _cached_excel_blob.cache_info(),
+        "prepared": _cached_prepared_blob.cache_info(),
+        "pipeline": _cached_core_pipeline_blob.cache_info(),
+    }
+
+
 def _store_failed_candidate(
     state: MutableMapping[str, Any], data: dict[str, pd.DataFrame], validation: ValidationReport,
     filename: str, source_type: str, upload_report: dict[str, Any] | None = None,
@@ -127,43 +183,66 @@ def _store_failed_candidate(
 
 def load_and_apply(
     state: MutableMapping[str, Any], source: Any, filename: str, source_type: str,
+    progress_callback: ProgressCallback | None = None,
 ) -> bool:
     """Load, validate, run approved algorithms, and apply canonical state.
 
     Hardened so a malformed upload never crashes the app: any unexpected error is
     converted into a user-facing load error and previous state is preserved.
     """
+    stage = "데이터 읽는 중"
+
+    def progress(label: str) -> None:
+        nonlocal stage
+        stage = label
+        state["load_progress_stage"] = label
+        if progress_callback:
+            progress_callback(label)
+
     try:
+        progress("데이터 읽는 중")
         content = _source_bytes(source)
         signature = hashlib.sha256(content).hexdigest()
-        data, load_report = load_excel_data(BytesIO(content), return_report=True)
-        pipeline_state = build_v2_state(data)
+        # Execute each user-visible stage against its corresponding real work.
+        pickle.loads(_cached_excel_blob(content, LOAD_CACHE_VERSION))
+        progress("데이터 확인 중")
+        data, load_report, validation, recommendation_source, candidate_info = pickle.loads(
+            _cached_prepared_blob(content, LOAD_CACHE_VERSION)
+        )
+        if validation.has_errors:
+            pipeline_result = PipelineResult(status="validation_error").to_dict()
+        else:
+            progress("추천 계산 중")
+            pipeline_result = pickle.loads(
+                _cached_core_pipeline_blob(content, LOAD_CACHE_VERSION)
+            )
     except DataLoadError as exc:
         clear_pending(state)
         state["pending_load_error"] = str(exc)
+        state["pending_load_stage"] = stage
         state["data_apply_message"] = None
         return False
     except Exception:  # pragma: no cover - defensive: never crash the upload
         clear_pending(state)
-        state["pending_load_error"] = "엑셀 파일을 처리할 수 없습니다."
+        state["pending_load_error"] = f"{stage}: 엑셀 파일을 처리할 수 없습니다."
+        state["pending_load_stage"] = stage
         state["data_apply_message"] = None
         return False
 
     state.pop("pending_load_error", None)
     state.pop("pending_validation_error", None)
-    validation = pipeline_state["validation"]
-    recommendations = pipeline_state["recommendations"]
-    pipeline_result = pipeline_state.get("pipeline_result", {})
-    recommendation_source = pipeline_state.get("recommendation_source", "uploaded")
-    candidate_info = pipeline_state.get("candidate_info", {})
+    recommendations = pipeline_result.get("recommendations", [])
     upload_report = build_upload_report(load_report, validation, recommendation_source, candidate_info, filename)
 
     if validation.has_errors:
         _store_failed_candidate(state, data, validation, filename, source_type, upload_report)
+        state["pending_load_stage"] = "데이터 확인 중"
         state["pending_validation_error"] = validation_error_message(validation, recommendation_source)
         return False
 
+    state.pop("pending_load_stage", None)
     effective_source = "V2 생성 후보" if recommendation_source == "generated" else source_type
+    progress("결과 적용 중")
     payload = build_applied_state_payload(
         data=data,
         validation=validation,
@@ -178,4 +257,7 @@ def load_and_apply(
     apply_state_payload(state, payload)
     clear_pending(state)
     state["data_apply_message"] = application_message(_has_user_warnings(validation))
+    state["load_progress_stage"] = "데이터 적용 완료"
+    if progress_callback:
+        progress_callback("데이터 적용 완료")
     return True

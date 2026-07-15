@@ -8,8 +8,7 @@ from typing import Mapping, Sequence
 import pandas as pd
 import streamlit as st
 
-from components.cards import render_empty_state, render_kpi_card, render_page_header, render_section_header
-from components.status import badge_html
+from components.cards import render_empty_state, render_kpi_card, render_section_header
 from components.tables import format_currency, format_number
 from services.analysis_pipeline import calculate_overview_kpis, sort_recommendations, top_recommendations
 from services.app_state import has_app_data, resolve_selected_route_id
@@ -63,7 +62,7 @@ def _data_signature() -> str:
 @st.cache_data(show_spinner=False, max_entries=8)
 def _layout_cached(nodes: list[dict], sim_routes: list[dict]):
     """Deterministic layout cached by node set + animated route set."""
-    return compute_dynamic_layout(nodes, sim_routes)
+    return compute_dynamic_layout(nodes, sim_routes, width=1200.0, height=760.0, margin=96.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -94,61 +93,32 @@ def _render_kpis() -> None:
     )
     summary = getattr(validation, "summary", {}) if validation else {}
     filename = str(st.session_state.get("uploaded_filename") or "데이터 없음")
-    data_name = filename.rsplit(".", 1)[0]
-    node_count = (
-        f"{int(summary.get('store_count') or 0)} / {int(summary.get('dc_count') or 0)}"
-        if data_available else "-"
-    )
-    values = [
-        ("현재 데이터", data_name if data_available else "데이터 없음", filename if data_available else "", "v2-kpi-value-file"),
-        ("점포 / DC", node_count, "점포 수 / 물류센터 수", ""),
-        ("추천 후보 수", format_number(len(recommendations)) if data_available else "-", "현재 비교 가능한 이동 후보", ""),
-        ("예상 절감액", _format_kpi_value("total_expected_saving", kpis.get("total_expected_saving")) if data_available else "-", "추천 후보 전체 기준", ""),
-        ("평균 VHS", _format_kpi_value("average_vhs_score", kpis.get("average_vhs_score")) if data_available else "-", "현재 추천 우선순위 평균", ""),
-    ]
-    first_row = st.columns([1.35, 1, 1], gap="medium")
-    second_row = st.columns(2, gap="medium")
-    for column, (title, display, caption, value_class) in zip(first_row + second_row, values):
-        with column:
-            render_kpi_card(
-                st,
-                title,
-                display,
-                caption=caption,
-                compact=True,
-                tooltip=filename if title == "현재 데이터" and data_available else "",
-                value_class=value_class,
-            )
-
-
-def _navigate_to(menu: str) -> None:
-    st.session_state["current_menu"] = menu
-
-
-def _render_quick_navigation() -> None:
-    render_section_header(
-        st,
-        "다음에 볼 화면",
-        "원하는 화면으로 이동합니다. 이동만 수행하며 분석이나 학습을 자동으로 실행하지 않습니다.",
-    )
-    items = (
-        ("추천 실행 보기", "추천 후보와 예상 절감액을 표로 확인", "추천 실행", "home_go_recommendations"),
-        ("경로 상세 보기", "선택한 이동 경로와 DC 경유 여부 확인", "경로 상세", "home_go_route_detail"),
-        ("분석 및 검증 보기", "VHS, Greedy, DQN, Pareto 비교 확인", "분석 및 검증", "home_go_validation"),
-        ("데이터 관리 보기", "샘플 데이터와 업로드 데이터 관리", "데이터 관리", "home_go_data"),
-    )
-    for row in (items[:2], items[2:]):
-        columns = st.columns(2, gap="medium")
-        for column, (label, description, menu, key) in zip(columns, row):
-            with column:
-                st.markdown(
-                    '<div class="v2-wrap v2-quick-nav-card">'
-                    f'<div class="v2-card-title">{_safe(label)}</div>'
-                    f'<div class="v2-card-caption">{_safe(description)}</div>'
-                    '</div>',
-                    unsafe_allow_html=True,
-                )
-                st.button(label, key=key, width="stretch", on_click=_navigate_to, args=(menu,))
+    store_count = int(summary.get("store_count") or 0) if data_available else 0
+    dc_count = int(summary.get("dc_count") or 0) if data_available else 0
+    product_count = int(summary.get("product_count") or 0) if data_available else 0
+    columns = st.columns([1.55, 1], gap="medium")
+    with columns[0]:
+        st.markdown(
+            '<div class="v2-wrap v2-card v2-kpi-card v2-kpi-card-compact v2-home-data-card">'
+            '<div class="v2-card-caption">현재 데이터 정보</div>'
+            f'<div class="v2-kpi-value v2-kpi-value-file" title="{_safe(filename)}">'
+            f'{_safe(filename if data_available else "데이터 없음")}</div>'
+            '<div class="v2-home-data-stats">'
+            f'<span>점포 <strong>{store_count}</strong></span>'
+            f'<span>DC <strong>{dc_count}</strong></span>'
+            f'<span>상품 <strong>{product_count}</strong></span>'
+            f'<span>추천 후보 <strong>{format_number(len(recommendations)) if data_available else "-"}</strong></span>'
+            '</div></div>',
+            unsafe_allow_html=True,
+        )
+    with columns[1]:
+        render_kpi_card(
+            st,
+            "전체 예상 절감액",
+            _format_kpi_value("total_expected_saving", kpis.get("total_expected_saving")) if data_available else "-",
+            caption=f"추천 후보 {format_number(len(recommendations))}건 기준" if data_available else "데이터 적용 후 계산됩니다",
+            compact=True,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -332,7 +302,7 @@ def _network_markup_cached(
     playing: bool, speed_seconds: float, show_all: bool, selected_id: str,
 ) -> dict[str, object]:
     _ = data_signature
-    layout = compute_dynamic_layout(nodes, sim_routes, width=1200.0, height=760.0, margin=96.0)
+    layout = _layout_cached(nodes, sim_routes)
     if not layout.is_valid:
         return {"ok": False, "errors": layout.errors, "html": ""}
 
@@ -409,11 +379,11 @@ def _network_markup_cached(
     network_html = (
         '<div class="v2-network-shell">'
         '<div class="v2-network-legend" aria-label="네트워크 범례">'
-        '<span class="v2-legend-item"><span class="v2-legend-line v2-legend-line-direct"></span>파란 실선 · 직접 이동</span>'
-        '<span class="v2-legend-item"><span class="v2-legend-line v2-legend-line-via"></span>노란 점선 · DC 경유</span>'
-        '<span class="v2-legend-item"><span class="v2-legend-node v2-legend-store"></span>파란 박스 · 점포</span>'
-        '<span class="v2-legend-item"><span class="v2-legend-node v2-legend-dc"></span>노란 박스 · 물류센터</span>'
-        '<span class="v2-legend-item"><span class="v2-legend-truck">🚚</span>차량 아이콘 · 이동 후보</span>'
+        '<span class="v2-legend-item"><span class="v2-legend-line v2-legend-line-direct"></span>실선: 점포 간 직접 이동</span>'
+        '<span class="v2-legend-item"><span class="v2-legend-line v2-legend-line-via"></span>점선: 물류센터 경유</span>'
+        '<span class="v2-legend-item"><span class="v2-legend-node v2-legend-store"></span>파란 박스: 점포</span>'
+        '<span class="v2-legend-item"><span class="v2-legend-node v2-legend-dc"></span>노란 박스: 물류센터</span>'
+        '<span class="v2-legend-item"><span class="v2-legend-truck">🚚</span>차량 아이콘: 이동 경로</span>'
         '</div>'
         f'<svg class="v2-network-svg" viewBox="0 0 {canvas["width"]} {canvas["height"]}" '
         'xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
@@ -466,20 +436,22 @@ def _set_sim_playing(value: bool) -> None:
 
 def _render_controls() -> bool:
     playing = bool(st.session_state.get("home_sim_playing", False))
-    c1, c2, c3, c4 = st.columns([1.4, 1, 1.1, 1.4], gap="small")
+    c1, c2, c3, c4, c5 = st.columns([1.25, 1.1, 0.35, 0.85, 0.9], gap="small")
     c1.button("시뮬레이션 실행", width="stretch", key="sim_start", disabled=playing,
               type="primary", on_click=_set_sim_playing, args=(True,))
     c2.button("다시 실행", width="stretch", key="sim_restart",
               on_click=_set_sim_playing, args=(True,))
+    c3.markdown('<div class="v2-speed-label">속도</div>', unsafe_allow_html=True)
     speed_options = ["느림", "보통", "빠름"]
     current_speed = st.session_state.get("simulation_speed", "보통")
-    speed = c3.selectbox(
-        "속도", speed_options,
+    speed = c4.selectbox(
+        "시뮬레이션 속도", speed_options,
         index=speed_options.index(current_speed) if current_speed in speed_options else 1,
         key="home_speed_select",
+        label_visibility="collapsed",
     )
     st.session_state["simulation_speed"] = speed
-    show_all = c4.toggle(
+    show_all = c5.toggle(
         "전체 경로 보기", value=bool(st.session_state.get("show_all_routes", False)),
         key="home_show_all",
         help="끄면 대표 경로 최대 3개, 켜면 최대 5개와 보조 연결선을 표시합니다.",
@@ -492,14 +464,7 @@ def render_overview_page() -> None:
     data = st.session_state.get("varo_data")
     recommendations = _recommendations()
     data_available = has_app_data(data, recommendations)
-    render_page_header(
-        st,
-        "Varo 운영 결과",
-        "업로드된 재고 데이터를 바탕으로 악성재고 후보, 이동 추천, 검증 결과를 요약합니다.",
-        badge=badge_html("홈", "accent"),
-    )
     _render_kpis()
-    _render_quick_navigation()
 
     if not data_available:
         render_empty_state(
@@ -514,8 +479,8 @@ def render_overview_page() -> None:
 
     render_section_header(
         st,
-        "재고 이동 네트워크 미리보기",
-        "상위 추천 경로를 네트워크로 표시합니다. 파란 실선은 직접 이동, 노란 점선은 DC 경유 이동입니다.",
+        "재고 이동 시뮬레이션",
+        "추천된 재고 이동 경로와 점포·물류센터 관계를 표시합니다.",
     )
     show_all = _render_controls()
     sim_routes = _simulation_routes(recommendations, show_all)

@@ -9,6 +9,7 @@ import copy
 from components.cards import render_empty_state, render_page_header, render_section_header
 from components.status import badge_html, user_status_label
 from services import export_service, v2_summaries
+from services.analysis_pipeline import run_analysis_pipeline
 from services.app_state import current_result_basis
 from services.dqn_service import (
     apply_dqn_reference_to_recommendations,
@@ -46,6 +47,44 @@ _WEIGHT_LABELS = {
     "confidence_score": "추천 신뢰도",
     "dqn_reference_score": "DQN 참고",
 }
+
+DETAILED_ANALYSIS_VERSION = "v2-validation-2026-07-15.1"
+
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def _detailed_pipeline_cached(
+    data_signature: str, data: dict, analysis_version: str,
+) -> dict:
+    """Build report-only analysis after the validation page is requested."""
+    _ = data_signature, analysis_version
+    copied = {
+        key: value.copy(deep=True) if isinstance(value, pd.DataFrame) else copy.deepcopy(value)
+        for key, value in data.items()
+    }
+    return run_analysis_pipeline(copied, detail_level="full").to_dict()
+
+
+def _ensure_detailed_pipeline() -> dict:
+    pipeline = _pipeline()
+    diagnostics = pipeline.get("diagnostics") or {}
+    if diagnostics.get("detail_level") == "full":
+        return pipeline
+    data = st.session_state.get("varo_data") or {}
+    if not data:
+        return pipeline
+    status = st.status("상세 검증 계산 중", expanded=False)
+    detailed = _detailed_pipeline_cached(
+        str(st.session_state.get("data_signature") or ""),
+        data,
+        DETAILED_ANALYSIS_VERSION,
+    )
+    st.session_state["analysis_result"] = detailed
+    st.session_state["varo_pipeline_result"] = detailed
+    st.session_state["pipeline_summary"] = dict(detailed.get("summary") or {})
+    st.session_state["connected_algorithms"] = list(detailed.get("connected_algorithms") or [])
+    st.session_state["deferred_algorithms"] = list(detailed.get("deferred_algorithms") or [])
+    status.update(label="상세 검증 계산 완료", state="complete", expanded=False)
+    return detailed
 
 
 def _pipeline() -> dict:
@@ -847,7 +886,6 @@ def _render_sensitivity_confidence(pipeline: dict) -> None:
 
 def render_validation_page() -> None:
     status = _validation_status()
-    pipeline = _pipeline()
     has_data = bool(st.session_state.get("varo_data")) and bool(st.session_state.get("varo_recommendations"))
     render_page_header(
         st, "분석 및 검증",
@@ -856,6 +894,7 @@ def render_validation_page() -> None:
     )
     if not has_data:
         render_empty_state(st, "데이터가 없습니다", compact=True)
+    pipeline = _ensure_detailed_pipeline() if has_data else _pipeline()
 
     tabs = st.tabs(TABS)
     renderers = (

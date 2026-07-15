@@ -186,10 +186,28 @@ def _render_sample_selector() -> None:
         if not path.exists():
             st.session_state["pending_load_error"] = f"샘플 파일이 없습니다: {selected.filename}"
             st.rerun()
-        if load_and_apply(st.session_state, path, selected.filename, "샘플 추천 데이터"):
+        if _load_with_progress(path, selected.filename, "샘플 추천 데이터"):
             st.session_state["current_menu"] = "홈"
-            st.rerun()
         st.rerun()
+
+
+def _load_with_progress(source, filename: str, source_type: str) -> bool:
+    status = st.status("데이터 읽는 중", expanded=False)
+
+    def update(label: str) -> None:
+        status.update(
+            label=label,
+            state="complete" if label == "데이터 적용 완료" else "running",
+            expanded=False,
+        )
+
+    applied = load_and_apply(
+        st.session_state, source, filename, source_type, progress_callback=update,
+    )
+    if not applied:
+        failed_stage = st.session_state.get("pending_load_stage") or "데이터 적용"
+        status.update(label=f"{failed_stage} 실패", state="error", expanded=False)
+    return applied
 
 def render_data_management_page() -> None:
     render_page_header(st, "데이터 관리", "")
@@ -199,7 +217,7 @@ def render_data_management_page() -> None:
         st.caption("일반 샘플")
         if st.button("기본 샘플 불러오기", key="data_default_sample", type="primary", width="stretch"):
             path = get_default_sample_path()
-            if load_and_apply(st.session_state, path, SAMPLE_FILENAME, "샘플 추천 데이터"):
+            if _load_with_progress(path, SAMPLE_FILENAME, "샘플 추천 데이터"):
                 st.session_state["dqn_sample_training_mode"] = "original"
                 st.session_state["dqn_selected_sample"] = "기본 샘플"
             st.rerun()
@@ -210,7 +228,7 @@ def render_data_management_page() -> None:
         selected = options[selected_label]
         if st.button("선택한 DQN 샘플 불러오기", key="load_dqn_sample", width="stretch"):
             path = dqn_sample_path(selected)
-            if load_and_apply(st.session_state, path, selected.workbook.filename, "DQN 샘플"):
+            if _load_with_progress(path, selected.workbook.filename, "DQN 샘플"):
                 st.session_state["dqn_sample_training_mode"] = selected.mode
                 st.session_state["dqn_selected_sample"] = selected.label
             st.rerun()

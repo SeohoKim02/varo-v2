@@ -383,14 +383,25 @@ def apply_global_styles() -> None:
             font-weight: 760 !important;
             border-color: #b9c4d1 !important;
         }}
-        .v2-quick-nav-card {{
-            min-height: 88px;
-            border: 1.25px solid #b8c7d8;
-            background: #ffffff;
-            border-radius: var(--varo-radius-card);
-            box-shadow: 0 5px 15px rgba(30, 58, 95, 0.07);
-            padding: 0.82rem 0.9rem;
-            margin-top: 0.12rem;
+        .v2-home-data-card {{ min-height: 118px; }}
+        .v2-home-data-stats {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.32rem 1rem;
+            margin-top: 0.48rem;
+            color: var(--varo-muted);
+            font-size: 0.82rem;
+        }}
+        .v2-home-data-stats strong {{ color: var(--varo-text); }}
+        .v2-speed-label {{
+            min-height: 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            color: var(--varo-text);
+            font-size: 0.88rem;
+            font-weight: 720;
+            white-space: nowrap;
         }}
         .v2-network-shell {{
             position: relative;

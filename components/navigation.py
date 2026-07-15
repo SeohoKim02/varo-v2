@@ -6,7 +6,6 @@ import streamlit as st
 from components.data_toolbar import render_quick_data_bar
 from components.status import user_status_label
 from services.app_state import current_data_status, has_app_data
-from services.dqn_service import get_dqn_status
 
 MENU_ITEMS = [
     "홈",
@@ -57,8 +56,12 @@ def render_sidebar_nav(current_menu: str) -> None:
                 on_click=_navigate_to,
                 args=(item,),
             )
+        training_result = st.session_state.get("dqn_training_result") or {}
         dqn_status = user_status_label(
-            get_dqn_status(st.session_state.get("dqn_training_result")).status
+            training_result.get("final_status")
+            or training_result.get("stability_status")
+            or training_result.get("status")
+            or "학습 필요"
         )
         st.caption(f"DQN {dqn_status}")
 

@@ -142,7 +142,9 @@ def _summary_call(runner: _Runner, module_name: str, function_name: str, frame: 
     return {}
 
 
-def _run_inventory_analysis(runner: _Runner, inventory: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+def _run_inventory_analysis(
+    runner: _Runner, inventory: pd.DataFrame, *, collect_details: bool = True,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
     current = strip_dqn_columns(inventory)
     summaries: dict[str, Any] = {}
     steps = (
@@ -161,7 +163,8 @@ def _run_inventory_analysis(runner: _Runner, inventory: pd.DataFrame) -> tuple[p
             current = strip_dqn_columns(output)
             summary = (
                 _summary_call(runner, module_name, summary_name, current)
-                if summary_name else {"analyzed_rows": int(len(current))}
+                if collect_details and summary_name
+                else {"analyzed_rows": int(len(current))} if collect_details else {}
             )
             summaries[key] = {
                 "status": "연결",
@@ -183,15 +186,18 @@ def _run_inventory_analysis(runner: _Runner, inventory: pd.DataFrame) -> tuple[p
     return current, summaries
 
 
-def _run_clustering(runner: _Runner, stores: pd.DataFrame, inventory: pd.DataFrame) -> tuple[dict[str, object], dict[str, Any]]:
+def _run_clustering(
+    runner: _Runner, stores: pd.DataFrame, inventory: pd.DataFrame, *, collect_details: bool = True,
+) -> tuple[dict[str, object], dict[str, Any]]:
     output = runner.call("store_clustering", "analyze_store_clustering", stores, inventory)
     if not isinstance(output, tuple) or len(output) < 3:
         return {}, {}
     stores_clustered, cluster_summary, cluster_map = output[:3]
-    return dict(cluster_map or {}), {
+    details = {
         "stores": _dataframe_records(stores_clustered),
         "summary": _dataframe_records(cluster_summary),
-    }
+    } if collect_details else {}
+    return dict(cluster_map or {}), details
 
 
 def _enrich_route_comparison(candidates: pd.DataFrame, transfer: pd.DataFrame | None) -> pd.DataFrame:
@@ -375,7 +381,9 @@ def _vhs_analysis(
     return provenance
 
 
-def _run_routes(runner: _Runner, data: dict[str, pd.DataFrame]) -> dict[str, Any]:
+def _run_routes(
+    runner: _Runner, data: dict[str, pd.DataFrame], *, collect_details: bool = True,
+) -> dict[str, Any]:
     stores, products, inventory, routes, config = (
         data["stores"], data["products"], data["inventory"], data["routes"], data["config"]
     )
@@ -400,16 +408,22 @@ def _run_routes(runner: _Runner, data: dict[str, pd.DataFrame]) -> dict[str, Any
         runner.result.warnings.append("직접/DC 경로 비교는 보류되었습니다.")
         transfer = pd.DataFrame()
 
-    route_output = runner.call("route_analyzer", "analyze_dc_retailer_routes", stores, routes)
-    dc_routes, best_dc = (route_output if isinstance(route_output, tuple) and len(route_output) >= 2 else (pd.DataFrame(), pd.DataFrame()))
-
     departure = config_time(config)
-    network = runner.call(
-        "network_path_analyzer", "analyze_multi_store_network_paths",
-        stores, products, routes, transfer, departure_time=departure,
-    )
-    if not isinstance(network, pd.DataFrame):
-        network = pd.DataFrame()
+    dc_routes, best_dc = pd.DataFrame(), pd.DataFrame()
+    network = pd.DataFrame()
+    if collect_details:
+        route_output = runner.call("route_analyzer", "analyze_dc_retailer_routes", stores, routes)
+        dc_routes, best_dc = (
+            route_output
+            if isinstance(route_output, tuple) and len(route_output) >= 2
+            else (pd.DataFrame(), pd.DataFrame())
+        )
+        network = runner.call(
+            "network_path_analyzer", "analyze_multi_store_network_paths",
+            stores, products, routes, transfer, departure_time=departure,
+        )
+        if not isinstance(network, pd.DataFrame):
+            network = pd.DataFrame()
 
     cutline_output = runner.call("cutline_analyzer", "analyze_product_distance_cutline", stores, products, inventory, routes)
     if isinstance(cutline_output, tuple):
@@ -425,11 +439,11 @@ def _run_routes(runner: _Runner, data: dict[str, pd.DataFrame]) -> dict[str, Any
     else:
         time_windows, time_message = pd.DataFrame(), ""
 
-    min_cost_output = runner.call("min_cost_network", "analyze_min_cost_network", inventory, stores, routes)
-    if isinstance(min_cost_output, tuple) and len(min_cost_output) >= 3:
-        flow, network_nodes, network_summary = min_cost_output[:3]
-    else:
-        flow, network_nodes, network_summary = pd.DataFrame(), pd.DataFrame(), {}
+    flow, network_nodes, network_summary = pd.DataFrame(), pd.DataFrame(), {}
+    if collect_details:
+        min_cost_output = runner.call("min_cost_network", "analyze_min_cost_network", inventory, stores, routes)
+        if isinstance(min_cost_output, tuple) and len(min_cost_output) >= 3:
+            flow, network_nodes, network_summary = min_cost_output[:3]
 
     return {
         "transfer_frame": transfer,
@@ -445,17 +459,17 @@ def _run_routes(runner: _Runner, data: dict[str, pd.DataFrame]) -> dict[str, Any
         "comparison_count": int(len(transfer)),
         "cutline_comparable_count": int(len(cutline_all)),
         "time_window_comparable_count": int(len(time_windows)),
-        "direct_vs_dc": _dataframe_records(transfer),
-        "dc_routes": _dataframe_records(dc_routes),
-        "best_dc_routes": _dataframe_records(best_dc),
-        "network_paths": _dataframe_records(network),
-        "cutline_best": _dataframe_records(cutline_best),
+        "direct_vs_dc": _dataframe_records(transfer) if collect_details else [],
+        "dc_routes": _dataframe_records(dc_routes) if collect_details else [],
+        "best_dc_routes": _dataframe_records(best_dc) if collect_details else [],
+        "network_paths": _dataframe_records(network) if collect_details else [],
+        "cutline_best": _dataframe_records(cutline_best) if collect_details else [],
         "cutline_failed_count": int(len(cutline_failed)) if isinstance(cutline_failed, pd.DataFrame) else 0,
-        "time_windows": _dataframe_records(time_windows),
+        "time_windows": _dataframe_records(time_windows) if collect_details else [],
         "time_window_message": time_message,
-        "min_cost_flow": _dataframe_records(flow),
-        "min_cost_nodes": _dataframe_records(network_nodes),
-        "min_cost_summary": network_summary if isinstance(network_summary, dict) else {},
+        "min_cost_flow": _dataframe_records(flow) if collect_details else [],
+        "min_cost_nodes": _dataframe_records(network_nodes) if collect_details else [],
+        "min_cost_summary": network_summary if collect_details and isinstance(network_summary, dict) else {},
     }
 
 
@@ -472,12 +486,23 @@ def _run_promotion(runner: _Runner, data: dict[str, pd.DataFrame], transfer: pd.
     return output if isinstance(output, pd.DataFrame) else pd.DataFrame()
 
 
-def run_analysis_pipeline(uploaded_data: Dict[str, Any]) -> PipelineResult:
+def run_analysis_pipeline(
+    uploaded_data: Dict[str, Any], *, detail_level: str = "full",
+    validation_report: ValidationReport | None = None,
+) -> PipelineResult:
+    """Run the recommendation pipeline.
+
+    ``core`` keeps every calculation that can affect recommendation fields or
+    ordering, while postponing report-only route summaries, optimality search,
+    legacy validation, sensitivity, and reason tables.  ``full`` preserves the
+    complete analysis contract used by the validation page and tests.
+    """
+    collect_details = detail_level == "full"
     result = PipelineResult(excluded_dqn_artifacts=dqn_exclusion_report())
     if not uploaded_data:
         return result
 
-    validation = validate_workbook_data(uploaded_data)
+    validation = validation_report or validate_workbook_data(uploaded_data)
     result.validation_report = {"data_validation": validation.to_dict()}
     if validation.has_errors:
         result.status = "validation_error"
@@ -499,10 +524,14 @@ def run_analysis_pipeline(uploaded_data: Dict[str, Any]) -> PipelineResult:
 
     legacy_data = prepare_legacy_data(uploaded_data)
     runner = _Runner(result)
-    analyzed_inventory, inventory_summaries = _run_inventory_analysis(runner, legacy_data["inventory"])
+    analyzed_inventory, inventory_summaries = _run_inventory_analysis(
+        runner, legacy_data["inventory"], collect_details=collect_details,
+    )
     legacy_data["inventory"] = analyzed_inventory
 
-    cluster_map, cluster_analysis = _run_clustering(runner, legacy_data["stores"], analyzed_inventory)
+    cluster_map, cluster_analysis = _run_clustering(
+        runner, legacy_data["stores"], analyzed_inventory, collect_details=collect_details,
+    )
     candidates = build_candidate_frame(base_recommendations, analyzed_inventory)
     candidates = _drop_empty_auto_vhs_columns(candidates)
     candidates = add_cluster_context(candidates, cluster_map)
@@ -539,15 +568,18 @@ def run_analysis_pipeline(uploaded_data: Dict[str, Any]) -> PipelineResult:
         "원본 함수는 VHS V2 이력 보정 그룹을 전제로 하므로 현재 VHS 설명은 연결된 VHS 상황·기여도로 생성",
     )
 
-    route_analysis = _run_routes(runner, legacy_data)
-    candidates = _enrich_route_comparison(candidates, route_analysis.pop("transfer_frame", pd.DataFrame()))
+    route_analysis = _run_routes(runner, legacy_data, collect_details=collect_details)
+    transfer_frame = route_analysis.pop("transfer_frame", pd.DataFrame())
+    candidates = _enrich_route_comparison(candidates, transfer_frame)
     candidates = _enrich_route_constraints(
         candidates,
         route_analysis.pop("cutline_frame", pd.DataFrame()),
         route_analysis.pop("time_window_frame", pd.DataFrame()),
     )
 
-    transfer_for_promotion = pd.DataFrame(route_analysis.get("direct_vs_dc", []))
+    transfer_for_promotion = (
+        transfer_frame.copy() if isinstance(transfer_frame, pd.DataFrame) else pd.DataFrame()
+    )
     promotion = _run_promotion(runner, legacy_data, transfer_for_promotion)
     candidates = _enrich_promotion(candidates, promotion)
     auto_vhs = apply_auto_vhs(candidates)
@@ -559,28 +591,36 @@ def run_analysis_pipeline(uploaded_data: Dict[str, Any]) -> PipelineResult:
         auto_vhs = apply_auto_vhs(pd.DataFrame())
 
     optimality_input = strip_dqn_columns(candidates)
-    has_cost_input = any(
-        column in optimality_input.columns
-        for column in ("estimated_cost", "transport_cost")
-    )
-    if has_cost_input:
-        optimality_raw = runner.call(
-            "varo_optimality_gap", "calculate_optimality_gap", optimality_input, k=5
+    optimality: dict[str, Any] = {
+        "status": "지연 실행",
+        "message": "분석 및 검증 페이지에서 계산합니다.",
+        "comparable_candidate_count": 0,
+    }
+    legacy_validation: dict[str, Any] = {}
+    if collect_details:
+        has_cost_input = any(
+            column in optimality_input.columns
+            for column in ("estimated_cost", "transport_cost")
         )
-    else:
-        optimality_raw = {}
-        runner.defer(
-            "varo_optimality_gap.calculate_optimality_gap",
-            "이동비용 입력 컬럼이 없어 비교를 보류했습니다.",
+        if has_cost_input:
+            optimality_raw = runner.call(
+                "varo_optimality_gap", "calculate_optimality_gap", optimality_input, k=5
+            )
+        else:
+            optimality_raw = {}
+            runner.defer(
+                "varo_optimality_gap.calculate_optimality_gap",
+                "이동비용 입력 컬럼이 없어 비교를 보류했습니다.",
+            )
+        optimality = sanitize_optimality_result(
+            optimality_raw if isinstance(optimality_raw, dict) else {},
+            len(optimality_input),
         )
-    optimality = sanitize_optimality_result(
-        optimality_raw if isinstance(optimality_raw, dict) else {},
-        len(optimality_input),
-    )
-    legacy_validation = runner.call(
-        "varo_validation", "build_validation_report", strip_dqn_columns(candidates),
-        legacy_data["stores"], legacy_data["products"], analyzed_inventory,
-    )
+        validation_output = runner.call(
+            "varo_validation", "build_validation_report", strip_dqn_columns(candidates),
+            legacy_data["stores"], legacy_data["products"], analyzed_inventory,
+        )
+        legacy_validation = validation_output if isinstance(validation_output, dict) else {}
 
     candidates = _finalize_candidate_columns(candidates)
     try:
@@ -593,24 +633,25 @@ def run_analysis_pipeline(uploaded_data: Dict[str, Any]) -> PipelineResult:
     result.top5 = top_recommendations(standard_recommendations, limit=5)
     result.vhs_analysis = (
         _vhs_analysis(candidates, runner, vhs_input_columns)
-        if not candidates.empty and "vhs" in candidates.columns else {}
+        if collect_details and not candidates.empty and "vhs" in candidates.columns else {}
     )
     if auto_vhs.analysis:
         result.vhs_analysis.update(auto_vhs.analysis)
         result.vhs_weight_analysis = auto_vhs.analysis
     result.vhs_greedy_dqn_comparison = list(auto_vhs.comparison_rows)
-    result.greedy_analysis = build_greedy_provenance(candidates)
-    result.greedy_analysis.update({
-        "rows": _dataframe_records(candidates[[column for column in [
-            "route_id", "product_name", "greedy_rank", "heuristic_score",
-            "cost_score", "quantity_score", "strategy_score", "reason_bonus",
-            "greedy_action", "greedy_strategy", "varo_action", "strategy_match",
-            "vhs_rank", "vhs_score", "varo_final_decision", "vhs_vs_greedy_match",
-            "greedy_reason",
-        ] if column in candidates.columns]]),
-        "dqn_status": "미연결",
-    })
-    result.greedy_analysis["comparison_rows"] = result.vhs_greedy_dqn_comparison
+    result.greedy_analysis = build_greedy_provenance(candidates) if collect_details else {}
+    if collect_details:
+        result.greedy_analysis.update({
+            "rows": _dataframe_records(candidates[[column for column in [
+                "route_id", "product_name", "greedy_rank", "heuristic_score",
+                "cost_score", "quantity_score", "strategy_score", "reason_bonus",
+                "greedy_action", "greedy_strategy", "varo_action", "strategy_match",
+                "vhs_rank", "vhs_score", "varo_final_decision", "vhs_vs_greedy_match",
+                "greedy_reason",
+            ] if column in candidates.columns]]),
+            "dqn_status": "미연결",
+        })
+        result.greedy_analysis["comparison_rows"] = result.vhs_greedy_dqn_comparison
     pareto_rows = [
         {
             "route_id": item.get("route_id"),
@@ -626,18 +667,19 @@ def run_analysis_pipeline(uploaded_data: Dict[str, Any]) -> PipelineResult:
         "comparison_count": len(pareto_rows),
         "non_dominated_count": sum(1 for item in pareto_rows if item.get("pareto_rank") == 1),
         "criteria": ["절감액", "폐기 위험", "수요 적합도", "경로 비용", "실행 가능성"],
-        "rows": pareto_rows,
+        "rows": pareto_rows if collect_details else [],
     }
     if "services.vhs_score_engine.pareto_ranks" not in result.connected_algorithms:
         result.connected_algorithms.append("services.vhs_score_engine.pareto_ranks")
-    result.confidence_analysis = confidence_provenance(
-        candidates, confidence_removed_columns
+    result.confidence_analysis = (
+        confidence_provenance(candidates, confidence_removed_columns)
+        if collect_details else {}
     )
     result.route_analysis = route_analysis
     result.promotion_analysis = {
         "status": "연결" if not promotion.empty else "프로모션 비교 보류",
         "calculation_function": "promotion_analyzer.analyze_promotion_vs_transfer",
-        "rows": _dataframe_records(promotion),
+        "rows": _dataframe_records(promotion) if collect_details else [],
         "recommendation_count": int(len(promotion)),
         "input_columns": [
             "suggested_qty", "estimated_cost", "unit_cost", "daily_holding_cost",
@@ -656,7 +698,7 @@ def run_analysis_pipeline(uploaded_data: Dict[str, Any]) -> PipelineResult:
         "disposal_risk": inventory_summaries.get("disposal_risk", {}),
     }
     result.validation_report.update({
-        "legacy_validation": legacy_validation if isinstance(legacy_validation, dict) else {},
+        "legacy_validation": legacy_validation,
         "optimality_gap": optimality,
         "calculation_sources": {
             "vhs": "services.vhs_score_engine.apply_auto_vhs",
@@ -674,15 +716,16 @@ def run_analysis_pipeline(uploaded_data: Dict[str, Any]) -> PipelineResult:
         "vhs_component_quality": list(auto_vhs.analysis.get("weight_rows") or []),
         "pareto_validation": dict(result.pareto_analysis),
     })
-    result.vhs_neutral_analysis = vhs_neutral_summary({"vhs_analysis": result.vhs_analysis})
-    result.sensitivity_analysis = {
-        "calculation_basis": "V2 내부 추천 결과 기준 (원본 varo_sensitivity는 보류)",
-        "rows": sensitivity_summary(standard_recommendations),
-    }
-    result.reason_analysis = {
-        "calculation_basis": "V2 내부 결과 기준 rule-based (원본 vhs_reason은 보류)",
-        "reasons": recommendation_reasons(standard_recommendations),
-    }
+    if collect_details:
+        result.vhs_neutral_analysis = vhs_neutral_summary({"vhs_analysis": result.vhs_analysis})
+        result.sensitivity_analysis = {
+            "calculation_basis": "V2 내부 추천 결과 기준 (원본 varo_sensitivity는 보류)",
+            "rows": sensitivity_summary(standard_recommendations),
+        }
+        result.reason_analysis = {
+            "calculation_basis": "V2 내부 결과 기준 rule-based (원본 vhs_reason은 보류)",
+            "reasons": recommendation_reasons(standard_recommendations),
+        }
     result.v2_summary_functions = list(V2_SUMMARY_FUNCTIONS)
 
     result.summary = calculate_overview_kpis(standard_recommendations, validation)
@@ -716,6 +759,11 @@ def run_analysis_pipeline(uploaded_data: Dict[str, Any]) -> PipelineResult:
         "legacy_root_available": any(available_legacy_algorithms().values()),
         "result_basis": result.result_basis,
         "dqn_artifacts_read": False,
+        "detail_level": "full" if collect_details else "core",
+        "deferred_until_validation": [] if collect_details else [
+            "route_report_details", "optimality_gap", "legacy_validation",
+            "sensitivity", "recommendation_reasons",
+        ],
         "algorithm_errors": list(runner.technical_errors),
     }
     return result
@@ -741,7 +789,9 @@ def ensure_recommendations(data: Dict[str, Any]) -> tuple[Dict[str, Any], str, D
     return data, "none", info
 
 
-def build_v2_state(data: Dict[str, pd.DataFrame]) -> Dict[str, object]:
+def build_v2_state(
+    data: Dict[str, pd.DataFrame], *, detail_level: str = "core",
+) -> Dict[str, object]:
     data, rec_source, candidate_info = ensure_recommendations(data)
     validation = validate_workbook_data(data)
     if validation.has_errors:
@@ -752,7 +802,9 @@ def build_v2_state(data: Dict[str, pd.DataFrame]) -> Dict[str, object]:
             "recommendation_source": rec_source,
             "candidate_info": candidate_info,
         }
-    result = run_analysis_pipeline(data)
+    result = run_analysis_pipeline(
+        data, detail_level=detail_level, validation_report=validation,
+    )
     return {
         "validation": validation,
         "recommendations": result.recommendations,

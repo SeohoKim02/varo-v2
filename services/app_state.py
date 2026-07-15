@@ -4,8 +4,6 @@ from __future__ import annotations
 from collections.abc import Mapping, MutableMapping, Sequence
 from typing import Any
 
-from services.analysis_pipeline import top_recommendations
-
 CANONICAL_DATA_KEYS = (
     "varo_data",
     "varo_validation",
@@ -57,6 +55,8 @@ def has_app_data(data: Mapping[str, Any] | None, recommendations: Sequence[Mappi
 
 
 def default_selected_route_id(recommendations: Sequence[Mapping[str, object]] | None) -> str | None:
+    from services.analysis_pipeline import top_recommendations
+
     top_route = top_recommendations(list(recommendations or []), limit=1)
     if not top_route:
         return None

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tests.streamlit_log_silencer import quiet_streamlit_test_logs
 
@@ -102,23 +103,24 @@ class PageRenderTests(unittest.TestCase):
         app.run()
         self.assertFalse(app.exception)
         blob = self._markdown_blob(app)
-        # required result-dashboard elements
+        # The home stays intentionally small: data, savings, candidate count,
+        # and the simulation are the only result sections.
         for required in (
-            "Varo 운영 결과",
-            "현재 데이터", "점포 / DC", "추천 후보 수", "예상 절감액", "평균 VHS",
-            "업로드된 재고 데이터를 바탕으로 악성재고 후보, 이동 추천, 검증 결과를 요약합니다.",
-            "다음에 볼 화면", "재고 이동 네트워크 미리보기",
-            "파란 실선 · 직접 이동", "노란 점선 · DC 경유",
+            "현재 데이터 정보", "점포", "DC", "상품", "추천 후보",
+            "전체 예상 절감액", "재고 이동 시뮬레이션",
+            "추천된 재고 이동 경로와 점포·물류센터 관계를 표시합니다.",
+            "실선: 점포 간 직접 이동", "점선: 물류센터 경유",
+            "파란 박스: 점포", "노란 박스: 물류센터", "차량 아이콘: 이동 경로",
         ):
             self.assertIn(required, blob, f"home must contain: {required}")
-        # The sidebar and home body both expose clear page navigation.
+        # Page navigation exists only in the sidebar.
         sidebar_nav = {b.label: b.key for b in app.sidebar.button}
         self.assertEqual(set(sidebar_nav), set(MENUS))
         for menu in MENUS:
             self.assertEqual(sidebar_nav[menu], f"nav_{menu}")
         button_labels = {b.label for b in app.button}
         for quick_button in ("추천 실행 보기", "경로 상세 보기", "분석 및 검증 보기", "데이터 관리 보기"):
-            self.assertIn(quick_button, button_labels, f"home should have button: {quick_button}")
+            self.assertNotIn(quick_button, button_labels)
         # the top toolbar keeps only the data-replace toggle (no duplicate 데이터 관리 button)
         self.assertIn("데이터 교체", button_labels)
         self.assertIn("시뮬레이션 실행", button_labels)
@@ -137,6 +139,9 @@ class PageRenderTests(unittest.TestCase):
             "DQN 학습 이력",
             "운영 로그",
             "선택 후보 요약",
+            "평균 VHS",
+            "다음에 볼 화면",
+            "재고 이동 네트워크 미리보기",
         ):
             self.assertNotIn(banned, blob, f"home should not contain: {banned}")
         # no download buttons on home
@@ -148,6 +153,7 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn('class="network-node dc-node"', blob)
         self.assertIn('class="network-node store-node', blob)
         self.assertEqual(blob.count('class="v2-vehicle'), 3)
+        self.assertLessEqual(blob.count('class="v2-wrap v2-card v2-kpi-card'), 3)
         self.assertNotIn('v2-running-route', blob)
         # 전체 경로 보기 defaults OFF (representative Top 3 only)
         self.assertFalse(app.session_state["show_all_routes"])
@@ -163,23 +169,34 @@ class PageRenderTests(unittest.TestCase):
             self.assertEqual(app.session_state["current_menu"], menu)
             self.assertFalse(app.exception)
 
-    def test_home_quick_navigation_only_changes_page(self):
-        targets = {
-            "추천 실행 보기": "추천 실행",
-            "경로 상세 보기": "경로 상세",
-            "분석 및 검증 보기": "분석 및 검증",
-            "데이터 관리 보기": "데이터 관리",
-        }
-        for label, menu in targets.items():
-            app = self._new_app()
-            app.session_state["current_menu"] = "홈"
-            app.run()
-            next(item for item in app.button if item.label == label).click().run()
-            self.assertFalse(app.exception, msg=f"{label}: {list(app.exception)}")
-            self.assertEqual(app.session_state["current_menu"], menu)
-            self.assertIsNone(app.session_state["dqn_training_result"])
-            self.assertIsNone(app.session_state["dqn_batch_result"])
-            self.assertIsNone(app.session_state["dqn_comparison_result"])
+    def test_simulation_controls_do_not_reload_or_reanalyze_data(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "홈"
+        app.run()
+        signature = app.session_state["data_signature"]
+        summary = dict(app.session_state["pipeline_summary"])
+        with (
+            patch("services.analysis_pipeline.run_analysis_pipeline") as pipeline,
+            patch("services.data_application.load_excel_data") as loader,
+        ):
+            next(item for item in app.selectbox if item.key == "home_speed_select").set_value("빠름").run()
+            next(item for item in app.toggle if item.key == "home_show_all").set_value(True).run()
+        pipeline.assert_not_called()
+        loader.assert_not_called()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.session_state["data_signature"], signature)
+        self.assertEqual(dict(app.session_state["pipeline_summary"]), summary)
+        self.assertEqual(app.session_state["simulation_speed"], "빠름")
+        self.assertTrue(app.session_state["show_all_routes"])
+
+    def test_home_has_no_quick_navigation_buttons(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "홈"
+        app.run()
+        labels = {item.label for item in app.button}
+        self.assertTrue(
+            {"추천 실행 보기", "경로 상세 보기", "분석 및 검증 보기", "데이터 관리 보기"}.isdisjoint(labels)
+        )
 
     def test_sidebar_nav_persists_selected_route_across_pages(self):
         app = self._new_app()

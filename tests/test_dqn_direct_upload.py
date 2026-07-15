@@ -164,15 +164,15 @@ class DqnDirectUploadPageTests(unittest.TestCase):
             app.session_state[key] = state.get(key)
         return app
 
-    def test_sample_02_state_renders_home_kpis_top_routes_and_simulation(self):
+    def test_sample_02_state_renders_minimal_home_and_simulation(self):
         state, _ = self._state_for_sample("02")
         app = self._app_with_state(state)
         app.session_state["current_menu"] = "홈"
         app.run()
         self.assertFalse(app.exception)
         blob = " ".join(element.value for element in app.markdown)
-        self.assertIn("추천 후보 수", blob)
-        self.assertIn("재고 이동 네트워크 미리보기", blob)
+        self.assertIn("추천 후보", blob)
+        self.assertIn("재고 이동 시뮬레이션", blob)
         self.assertNotIn("추천 Top 5", blob)
         self.assertEqual(blob.count('class="network-node dc-node"'), 1)
         self.assertEqual(blob.count('class="network-node store-node'), 4)
