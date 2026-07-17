@@ -35,7 +35,6 @@ CORE_CONNECTED = (
     "heuristic_optimizer.add_heuristic_scores",
     "transfer_path_analyzer.analyze_direct_vs_dc_transfer",
     "promotion_analyzer.analyze_promotion_vs_transfer",
-    "varo_optimality_gap.calculate_optimality_gap",
 )
 DQN_FORBIDDEN_TOKENS = ("reward", "loss", "q_table", "qtable", "policy_table", "replay", "model_path")
 
@@ -63,6 +62,7 @@ class AlgorithmContractTests(unittest.TestCase):
         connected = set(self.result.connected_algorithms)
         for algorithm in CORE_CONNECTED:
             self.assertIn(algorithm, connected)
+        self.assertEqual(self.result.validation_report["optimality_gap"]["status"], "지연 실행")
 
     def test_missing_optional_inventory_column_degrades_gracefully(self):
         # order_cost is used by EOQ but is NOT validation-required, so dropping it

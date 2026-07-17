@@ -134,6 +134,11 @@ def apply_state_payload(state: MutableMapping[str, Any], payload: Mapping[str, A
     state["sensitivity_data_signature"] = None
     state["sensitivity_is_running"] = False
     state["sensitivity_last_error"] = None
+    state["optimality_gap_settings"] = {}
+    state["optimality_gap_result"] = None
+    state["optimality_gap_data_signature"] = None
+    state["optimality_gap_is_running"] = False
+    state["optimality_gap_last_error"] = None
 
 
 def data_status_label(

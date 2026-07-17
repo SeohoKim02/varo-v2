@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 import re
 import copy
+import math
 from datetime import datetime
 
 from components.cards import render_empty_state, render_page_header, render_section_header
@@ -40,6 +41,13 @@ from services.sensitivity_service import (
     sensitivity_detail_frame,
     sensitivity_summary_frame,
 )
+from services.optimality_gap_service import (
+    build_optimality_settings,
+    optimality_constraints_frame,
+    optimality_routes_frame,
+    optimality_summary_frame,
+    run_optimality_gap,
+)
 
 try:
     import altair as alt
@@ -48,7 +56,7 @@ except ImportError:  # pragma: no cover - Altair is normally bundled with Stream
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-TABS = ["VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증", "민감도/신뢰도"]
+TABS = ["VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증", "최적성 Gap", "민감도/신뢰도"]
 
 _WEIGHT_LABELS = {
     "savings_score": "절감 효과",
@@ -1113,31 +1121,11 @@ def _render_confidence(pipeline: dict) -> None:
         st.caption("외부 모델 가점 없이 입력 데이터 기준으로 계산합니다.")
 
 
-def _render_optimality(pipeline: dict) -> None:
-    report = pipeline.get("validation_report") or {}
-    gap = report.get("optimality_gap") or {}
-    if not gap or gap.get("status") in ("비교 불가", "입력 컬럼 부족"):
-        render_empty_state(st, "Optimality Gap 결과가 없습니다", compact=True)
-        if gap:
-            st.caption(gap.get("status"))
-        return
-    cols = st.columns(4, gap="small")
-    cols[0].metric("Optimality Gap", gap.get("gap_str", "-"))
-    cols[1].metric("후보 일치율", f"{float(gap.get('match_rate') or 0):.1f}%")
-    cols[2].metric("Varo 비용", f"{float(gap.get('varo_total', 0)):,.0f}원")
-    cols[3].metric("최적 비용", f"{float(gap.get('opt_total', 0)):,.0f}원")
-    st.caption(
-        f"상태: {gap.get('status', '-')} · 검증 방식: {gap.get('opt_method', '-')} · "
-        f"비교 가능 후보: {gap.get('comparable_candidate_count', gap.get('candidates_used', 0))} · "
-        f"공식: {gap.get('formula', '-')}"
-    )
-
-
 def _render_report_summary(pipeline: dict) -> None:
     summary = pipeline.get("summary") or {}
     vhs = pipeline.get("vhs_analysis") or {}
     greedy = pipeline.get("greedy_analysis") or {}
-    optimality = (pipeline.get("validation_report") or {}).get("optimality_gap") or {}
+    optimality = (st.session_state.get("optimality_gap_result") or {}).get("gap") or {}
     confidence = pipeline.get("confidence_analysis") or {}
     recommendations = st.session_state.get("varo_recommendations") or []
     uploaded_avg = _as_number(vhs.get("uploaded_average"))
@@ -1162,7 +1150,7 @@ def _render_report_summary(pipeline: dict) -> None:
         ("VHS 차이 (재계산 − 업로드)", difference),
         ("Greedy 1순위", greedy.get("selected_route_id") or "-"),
         ("Greedy 전략 일치율", f"{float(greedy.get('strategy_match_rate') or 0):.1f}%"),
-        ("Optimality Gap", optimality.get("gap_str", "-")),
+        ("최적성 Gap", optimality.get("gap_str", "별도 탭에서 버튼 실행")),
         ("신뢰도 평균", confidence.get("average", "-")),
         ("연결 알고리즘 수", len(pipeline.get("connected_algorithms") or [])),
         ("보류 알고리즘 수 (원본)", len(pipeline.get("deferred_algorithms") or [])),
@@ -1389,16 +1377,259 @@ def _render_comparison_results(pipeline: dict) -> None:
     else:
         render_empty_state(st, "비교 결과가 없습니다", compact=True)
 
-    render_section_header(st, "제한 탐색 기반 검증", "추천 비용과 제한 조건 탐색 결과를 비교합니다.")
-    optimality = (pipeline.get("validation_report") or {}).get("optimality_gap") or {}
-    if not optimality:
-        render_empty_state(st, "비교 가능한 최적성 결과가 없습니다", compact=True)
-        return
-    cols = st.columns(4, gap="small")
-    cols[0].metric("최적성 Gap", optimality.get("gap_str", "-"))
-    cols[1].metric("후보 일치율", f"{float(optimality.get('match_rate') or 0):.1f}%")
-    cols[2].metric("추천 비용", f"{float(optimality.get('varo_total') or 0):,.0f}원")
-    cols[3].metric("비교 비용", f"{float(optimality.get('opt_total') or 0):,.0f}원")
+
+def _render_optimality_gap_results(result: dict) -> None:
+    summary = result.get("summary") or {}
+    combinations = result.get("combinations") or {}
+    varo = combinations.get("varo") or {}
+    greedy = combinations.get("greedy") or {}
+    best = combinations.get("best") or {}
+    gap = result.get("gap") or {}
+    search = result.get("search") or {}
+    exact = bool(search.get("optimal"))
+
+    match = ((result.get("matches") or {}).get("varo_vs_best") or {})
+    calculation_ms = float((result.get("metadata") or {}).get("calculation_ms") or 0)
+    first = st.columns(4, gap="small")
+    first[0].metric("탐색 상태", search.get("status") or "-")
+    first[1].metric("Varo 조합 절감액", f"{float(varo.get('total_saving') or 0):,.0f}원")
+    first[2].metric("Greedy 조합 절감액", f"{float(greedy.get('total_saving') or 0):,.0f}원")
+    first[3].metric(
+        "최적 조합 절감액" if exact else "탐색된 최선 절감액",
+        f"{float(best.get('total_saving') or 0):,.0f}원",
+    )
+    second = st.columns(4, gap="small")
+    second[0].metric(gap.get("label") or "참고 Gap", gap.get("gap_str") or "-")
+    second[1].metric("Varo 목표 달성률", gap.get("target_str") or "-")
+    second[2].metric("경로 Jaccard 일치율", f"{float(match.get('jaccard_pct') or 0):.2f}%")
+    second[3].metric("계산 시간", f"{calculation_ms:,.1f} ms")
+    st.caption(
+        f"전체 후보 {summary.get('input_count', 0)}개 · 최적화 대상 {summary.get('feasible_candidate_count', 0)}개 · "
+        f"적용 제약 {summary.get('applied_constraint_count', 0)}개 · 미적용 제약 {summary.get('unapplied_constraint_count', 0)}개 · "
+        f"제외 후보 {summary.get('excluded_candidate_count', 0)}개 · 제약 위반 {summary.get('constraint_violation_count', 0)}건"
+    )
+
+    if gap.get("inconsistency"):
+        st.error("탐색된 최선 조합보다 비교 전략의 절감액이 더 큽니다. 탐색 상태와 입력 제약을 확인하세요.")
+    if not exact:
+        certified = gap.get("certified_gap_range")
+        if certified:
+            st.info(
+                f"제한 탐색 결과이므로 확정 최적성 Gap이 아닙니다. 현재 참고 Gap의 인증 범위는 "
+                f"{float(certified[0]):.2f}%~{float(certified[1]):.2f}%이며, "
+                f"신뢰 가능한 절감액 상한은 {float(gap.get('upper_bound') or 0):,.0f}원입니다."
+            )
+        else:
+            st.info("제한 시간 안에 찾은 최선 조합과의 참고 비교이며, 확정 최적성 Gap으로 해석할 수 없습니다.")
+
+    tabs = st.tabs(["종합 비교", "선택 경로 비교", "제약조건", "탐색 정보"])
+    with tabs[0]:
+        summary_frame = optimality_summary_frame(result)
+        st.dataframe(summary_frame, hide_index=True, width="stretch")
+        if not summary_frame.empty:
+            chart = summary_frame[["전략", "총 예상 절감액"]].copy()
+            chart["총 예상 절감액"] = pd.to_numeric(chart["총 예상 절감액"], errors="coerce").fillna(0.0)
+            chart = chart[chart["총 예상 절감액"].map(math.isfinite)]
+            if alt is not None and not chart.empty:
+                st.altair_chart(
+                    alt.Chart(chart).mark_bar(color="#2d7f75").encode(
+                        x=alt.X("총 예상 절감액:Q", title="총 예상 절감액 (원)"),
+                        y=alt.Y("전략:N", title=None, sort=None),
+                        tooltip=[alt.Tooltip("전략:N"), alt.Tooltip("총 예상 절감액:Q", format=",")],
+                    ).properties(background="white"),
+                    width="stretch",
+                )
+            elif not chart.empty:
+                st.bar_chart(chart, x="전략", y="총 예상 절감액", horizontal=True)
+        match = result.get("matches") or {}
+        match_rows = []
+        for label, key in (
+            ("Varo ↔ 최선 조합", "varo_vs_best"),
+            ("Greedy ↔ 최선 조합", "greedy_vs_best"),
+            ("Varo ↔ Greedy", "varo_vs_greedy"),
+        ):
+            item = match.get(key) or {}
+            match_rows.append({
+                "비교": label, "공통 경로": item.get("common_count", 0),
+                "왼쪽 경로": item.get("left_count", 0), "오른쪽 경로": item.get("right_count", 0),
+                "Jaccard(%)": item.get("jaccard_pct", 0), "Varo 커버리지(%)": item.get("varo_coverage_pct", 0),
+            })
+        st.dataframe(pd.DataFrame(match_rows), hide_index=True, width="stretch")
+        st.caption(gap.get("formula") or "양의 최선 조합 절감액을 분모로 Gap을 계산합니다.")
+
+    with tabs[1]:
+        routes = optimality_routes_frame(result)
+        st.dataframe(routes, hide_index=True, width="stretch")
+        if not routes.empty:
+            chart = routes[["route_id", "예상 절감액", "선택 차이"]].copy()
+            chart["예상 절감액"] = pd.to_numeric(chart["예상 절감액"], errors="coerce").fillna(0.0)
+            chart = chart[chart["예상 절감액"].map(math.isfinite)]
+            if alt is not None and not chart.empty:
+                st.altair_chart(
+                    alt.Chart(chart).mark_bar().encode(
+                        x=alt.X("route_id:N", title="선택 경로", sort=None),
+                        y=alt.Y("예상 절감액:Q", title="예상 절감액 (원)"),
+                        color=alt.Color("선택 차이:N", title="선택 전략"),
+                        tooltip=[
+                            alt.Tooltip("route_id:N"), alt.Tooltip("선택 차이:N"),
+                            alt.Tooltip("예상 절감액:Q", format=","),
+                        ],
+                    ).properties(background="white"),
+                    width="stretch",
+                )
+            elif not chart.empty:
+                st.bar_chart(chart, x="route_id", y="예상 절감액")
+
+    with tabs[2]:
+        constraints = optimality_constraints_frame(result)
+        st.dataframe(constraints, hide_index=True, width="stretch")
+        st.caption("미적용 제약은 값을 추정하지 않았으며, 적용 범위가 일부인 경우 실제 값이 있는 그룹에만 적용했습니다.")
+
+    with tabs[3]:
+        metadata = result.get("metadata") or {}
+        search_rows = [
+            {"항목": "탐색 방식", "값": search.get("method", "-")},
+            {"항목": "요청 모드", "값": search.get("requested_mode", "-")},
+            {"항목": "조합 수 추정", "값": search.get("combination_estimate", 0)},
+            {"항목": "탐색 노드", "값": search.get("nodes", 0)},
+            {"항목": "가지치기", "값": search.get("prunes", 0)},
+            {"항목": "제한 시간(초)", "값": (result.get("settings") or {}).get("time_limit", 0)},
+            {"항목": "탐색 시간(ms)", "값": search.get("elapsed_ms", 0)},
+            {"항목": "전체 시간(ms)", "값": metadata.get("calculation_ms", 0)},
+            {"항목": "solver 상태", "값": search.get("message") or search.get("status_code", "-")},
+            {"항목": "낙관적 상한", "값": search.get("upper_bound", "-")},
+            {"항목": "종료 이유", "값": "전체 탐색 완료" if search.get("optimal") else ("시간 제한" if search.get("timed_out") else "제한 모드/solver 상태")},
+            {"항목": "캐시 사용", "값": "예" if metadata.get("cache_hit") else "아니오"},
+            {"항목": "최적해 인증", "값": "예" if exact else "아니오"},
+        ]
+        search_frame = pd.DataFrame(search_rows)
+        if not search_frame.empty:
+            search_frame["값"] = search_frame["값"].map(lambda value: "-" if value is None else str(value))
+        with st.expander("탐색 상세", expanded=False):
+            st.dataframe(search_frame, hide_index=True, width="stretch")
+            stage_times = metadata.get("stage_times_ms") or {}
+            if stage_times:
+                st.dataframe(
+                    pd.DataFrame([{"단계": key, "시간(ms)": value} for key, value in stage_times.items()]),
+                    hide_index=True, width="stretch",
+                )
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    downloads = st.columns(3, gap="small")
+    downloads[0].download_button(
+        "Gap 요약 CSV", optimality_summary_frame(result).to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"varo_v2_optimality_gap_summary_{timestamp}.csv", mime="text/csv", width="stretch",
+        key="download_optimality_summary",
+    )
+    downloads[1].download_button(
+        "선택 경로 CSV", optimality_routes_frame(result).to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"varo_v2_optimality_gap_routes_{timestamp}.csv", mime="text/csv", width="stretch",
+        key="download_optimality_routes",
+    )
+    downloads[2].download_button(
+        "제약조건 CSV", optimality_constraints_frame(result).to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"varo_v2_optimality_gap_constraints_{timestamp}.csv", mime="text/csv", width="stretch",
+        key="download_optimality_constraints",
+    )
+
+
+def _render_optimality_gap() -> None:
+    recommendations = st.session_state.get("varo_recommendations") or []
+    data = st.session_state.get("varo_data") or {}
+    current_signature = str(st.session_state.get("data_signature") or "")
+    render_section_header(
+        st, "최적성 Gap 계산",
+        "같은 후보와 같은 제약조건에서 VHS 순서의 Varo 조합, 기존 Greedy 조합, 절감액 최대 조합을 비교합니다.",
+    )
+    st.info("계산 실행 버튼을 눌렀을 때만 현재 메모리 데이터로 분석하며, 추천 결과와 DQN 상태는 변경하지 않습니다.")
+    st.caption("후보별 기존 추천 수량을 유지하는 이진 선택 모델입니다. 단위 절감액·정수 수량 규칙이 없는 부분 수량은 추정하지 않습니다.")
+
+    settings_cols = st.columns(4, gap="small")
+    candidate_name = settings_cols[0].selectbox(
+        "분석 후보", ("상위 10개", "상위 15개", "상위 20개", "전체"), index=2,
+        key="optimality_gap_candidate_limit_ui",
+    )
+    max_routes_name = settings_cols[1].selectbox(
+        "최대 선택 경로", ("3개", "5개", "10개", "무제한"), index=1,
+        key="optimality_gap_max_routes_ui",
+    )
+    mode_name = settings_cols[2].selectbox(
+        "탐색 모드", ("자동", "정확해 우선", "제한 탐색"), index=0,
+        key="optimality_gap_search_mode_ui",
+    )
+    time_name = settings_cols[3].selectbox(
+        "탐색 시간", ("1초", "3초", "5초", "10초"), index=1,
+        key="optimality_gap_time_limit_ui",
+    )
+    settings = build_optimality_settings(
+        candidate_limit={"상위 10개": 10, "상위 15개": 15, "상위 20개": 20, "전체": None}[candidate_name],
+        max_routes={"3개": 3, "5개": 5, "10개": 10, "무제한": None}[max_routes_name],
+        search_mode={"자동": "auto", "정확해 우선": "exact-first", "제한 탐색": "limited"}[mode_name],
+        time_limit={"1초": 1.0, "3초": 3.0, "5초": 5.0, "10초": 10.0}[time_name],
+    )
+    display_count = len(recommendations) if settings["candidate_limit"] is None else min(len(recommendations), settings["candidate_limit"])
+    display_routes = display_count if settings["max_routes"] is None else min(display_count, settings["max_routes"])
+    combination_estimate = sum(math.comb(display_count, count) for count in range(0, display_routes + 1))
+    st.caption(f"현재 설정의 최적화 대상은 최대 {display_count}개이며 가능한 선택 조합은 약 {combination_estimate:,}개입니다.")
+    if candidate_name == "전체" and combination_estimate > 750_000:
+        st.warning("전체 후보의 조합 수가 많아 자동 모드는 제한 탐색으로 전환될 수 있습니다.")
+
+    if (
+        st.session_state.get("optimality_gap_result") is not None
+        and str(st.session_state.get("optimality_gap_data_signature") or "") != current_signature
+    ):
+        st.session_state["optimality_gap_result"] = None
+        st.session_state["optimality_gap_last_error"] = None
+        st.session_state["optimality_gap_data_signature"] = None
+
+    actions = st.columns([2, 1], gap="small")
+    execute = actions[0].button(
+        "최적성 Gap 계산 실행", type="primary", width="stretch", key="run_optimality_gap",
+        disabled=not recommendations or bool(st.session_state.get("optimality_gap_is_running")),
+    )
+    clear = actions[1].button("최근 Gap 결과 지우기", width="stretch", key="clear_optimality_gap")
+    if clear:
+        st.session_state["optimality_gap_settings"] = {}
+        st.session_state["optimality_gap_result"] = None
+        st.session_state["optimality_gap_data_signature"] = None
+        st.session_state["optimality_gap_last_error"] = None
+
+    if execute:
+        status = st.status("후보 준비", expanded=True)
+        progress = st.progress(0.0, text="0 / 8")
+        st.session_state["optimality_gap_is_running"] = True
+        st.session_state["optimality_gap_last_error"] = None
+        baseline_recommendations = copy.deepcopy(recommendations)
+
+        def update_progress(stage: str, completed: int, total: int, detail: str) -> None:
+            progress.progress(completed / max(1, total), text=f"{stage} · {detail} · {completed} / {total}")
+            status.update(label=stage, state="running", expanded=True)
+
+        try:
+            result = run_optimality_gap(
+                baseline_recommendations, data, settings, current_signature,
+                progress_callback=update_progress,
+            )
+            st.session_state["optimality_gap_settings"] = copy.deepcopy(settings)
+            st.session_state["optimality_gap_result"] = result
+            st.session_state["optimality_gap_data_signature"] = current_signature
+            cache_text = " · 동일 조건 캐시 사용" if (result.get("metadata") or {}).get("cache_hit") else ""
+            progress.progress(1.0, text="계산 완료 · 8 / 8")
+            status.update(label=f"최적성 Gap 계산 완료{cache_text}", state="complete", expanded=False)
+        except Exception as exc:
+            st.session_state["optimality_gap_last_error"] = str(exc)
+            status.update(label="최적성 Gap 계산 실패", state="error", expanded=False)
+        finally:
+            st.session_state["optimality_gap_is_running"] = False
+
+    error = st.session_state.get("optimality_gap_last_error")
+    if error:
+        st.error(f"최적성 Gap 계산을 완료하지 못했습니다: {error}")
+    result = st.session_state.get("optimality_gap_result")
+    if result and str(st.session_state.get("optimality_gap_data_signature") or "") == current_signature:
+        _render_optimality_gap_results(result)
+    elif not execute:
+        st.caption("분석 조건을 확인한 뒤 최적성 Gap 계산 실행 버튼을 누르세요.")
 
 
 def _render_sensitivity_confidence(pipeline: dict) -> None:
@@ -1413,7 +1644,7 @@ def render_validation_page() -> None:
     has_data = bool(st.session_state.get("varo_data")) and bool(st.session_state.get("varo_recommendations"))
     render_page_header(
         st, "분석 및 검증",
-        "데이터 품질 진단 및 학습 안정성 비교를 위해 VHS, Greedy, DQN 학습·비교, Pareto, 민감도·신뢰도를 확인합니다.",
+        "데이터 품질 진단 및 학습 안정성 비교를 위해 VHS, Greedy, DQN 학습·비교, Pareto, 최적성 Gap, 민감도·신뢰도를 확인합니다.",
         badge=badge_html(status, _badge_variant(status)),
     )
     if not has_data:
@@ -1426,6 +1657,7 @@ def render_validation_page() -> None:
         lambda: _render_greedy(pipeline),
         _render_dqn,
         lambda: _render_comparison_results(pipeline),
+        _render_optimality_gap,
         lambda: _render_sensitivity_confidence(pipeline),
     )
     for tab, title, renderer in zip(tabs, TABS, renderers):

@@ -228,7 +228,7 @@ class PageRenderTests(unittest.TestCase):
         for required in ("VHS 순위", "Greedy 순위", "DQN 상태", "DQN 반영", "Pareto 순위"):
             self.assertIn(required, columns)
         blob = self._markdown_blob(app)
-        for required in ("VHS 자동 가중치", "민감도 · 추천 신뢰도", "제한 탐색 기반 검증"):
+        for required in ("VHS 자동 가중치", "민감도 · 추천 신뢰도", "최적성 Gap 계산"):
             self.assertIn(required, blob)
 
     def test_detailed_sensitivity_is_on_demand_and_renders_results(self):
@@ -412,13 +412,13 @@ class PageRenderTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(len(app.session_state["dqn_batch_comparison_result"]["rows"]), 10)
 
-    def test_validation_has_five_clear_tabs(self):
+    def test_validation_has_six_clear_tabs(self):
         app = self._new_app()
         app.session_state["current_menu"] = "분석 및 검증"
         app.run()
         self.assertFalse(app.exception)
         labels = [tab.label for tab in app.tabs]
-        self.assertEqual(labels, ["VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증", "민감도/신뢰도"])
+        self.assertEqual(labels, ["VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증", "최적성 Gap", "민감도/신뢰도"])
 
     def test_recommendation_page_has_compact_table_and_detail_expander(self):
         app = self._new_app()

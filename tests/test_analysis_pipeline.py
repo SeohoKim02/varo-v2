@@ -1,8 +1,8 @@
 """Tests for the self-contained analysis pipeline recompute and DQN exclusion.
 
 The approved non-DQN algorithms now live in _local_modules, so the pipeline
-recomputes VHS/Greedy/route/optimality from the in-project sample without any
-original-folder or backup access. DQN stays fully excluded.
+recomputes VHS/Greedy/route from the in-project sample without any original-
+folder or backup access. Optimality is button-only and DQN stays fully excluded.
 """
 from __future__ import annotations
 
@@ -101,9 +101,10 @@ class SelfContainedRecomputeTests(unittest.TestCase):
         self.assertEqual(self.result.vhs_analysis["score_basis"], "VHS 자동 가중치 최적화")
         self.assertTrue(bool(self.result.vhs_analysis))
 
-    def test_optimality_and_confidence_are_real(self):
+    def test_optimality_is_button_only_and_confidence_is_real(self):
         gap = self.result.validation_report["optimality_gap"]
-        self.assertEqual(gap["status"], "계산 가능")
+        self.assertEqual(gap["status"], "지연 실행")
+        self.assertIn("버튼", gap["message"])
         self.assertEqual(self.result.confidence_analysis["average"], 66.0)
 
     def test_selected_route_lookup_and_fallback(self):

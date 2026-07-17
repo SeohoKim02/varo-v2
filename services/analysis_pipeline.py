@@ -11,7 +11,6 @@ from services.analysis_provenance import (
     build_vhs_provenance,
     confidence_provenance,
     kpi_sources,
-    sanitize_optimality_result,
 )
 from services.data_validator import ValidationReport, validate_workbook_data
 from services.dqn_guard import dqn_exclusion_report, is_dqn_column, strip_dqn_columns
@@ -493,9 +492,9 @@ def run_analysis_pipeline(
     """Run the recommendation pipeline.
 
     ``core`` keeps every calculation that can affect recommendation fields or
-    ordering, while postponing report-only route summaries, optimality search,
-    legacy validation, sensitivity, and reason tables.  ``full`` preserves the
-    complete analysis contract used by the validation page and tests.
+    ordering, while postponing report-only route summaries, legacy validation,
+    sensitivity, and reason tables. Optimality search is always an explicit UI
+    action handled by ``services.optimality_gap_service``.
     """
     collect_details = detail_level == "full"
     result = PipelineResult(excluded_dqn_artifacts=dqn_exclusion_report())
@@ -590,32 +589,13 @@ def run_analysis_pipeline(
     else:
         auto_vhs = apply_auto_vhs(pd.DataFrame())
 
-    optimality_input = strip_dqn_columns(candidates)
     optimality: dict[str, Any] = {
         "status": "지연 실행",
-        "message": "분석 및 검증 페이지에서 계산합니다.",
+        "message": "분석 및 검증의 최적성 Gap 탭에서 버튼으로 계산합니다.",
         "comparable_candidate_count": 0,
     }
     legacy_validation: dict[str, Any] = {}
     if collect_details:
-        has_cost_input = any(
-            column in optimality_input.columns
-            for column in ("estimated_cost", "transport_cost")
-        )
-        if has_cost_input:
-            optimality_raw = runner.call(
-                "varo_optimality_gap", "calculate_optimality_gap", optimality_input, k=5
-            )
-        else:
-            optimality_raw = {}
-            runner.defer(
-                "varo_optimality_gap.calculate_optimality_gap",
-                "이동비용 입력 컬럼이 없어 비교를 보류했습니다.",
-            )
-        optimality = sanitize_optimality_result(
-            optimality_raw if isinstance(optimality_raw, dict) else {},
-            len(optimality_input),
-        )
         validation_output = runner.call(
             "varo_validation", "build_validation_report", strip_dqn_columns(candidates),
             legacy_data["stores"], legacy_data["products"], analyzed_inventory,
@@ -705,7 +685,7 @@ def run_analysis_pipeline(
             "legacy_vhs_reference": "varo_hybrid_score.calculate_varo_hybrid_score",
             "greedy": "heuristic_optimizer.add_heuristic_scores",
             "pareto": "services.vhs_score_engine.pareto_ranks",
-            "optimality_gap": "varo_optimality_gap.calculate_optimality_gap",
+            "optimality_gap": "services.optimality_gap_service.run_optimality_gap · 버튼 실행 전용",
             "confidence": "vhs_confidence.add_confidence_columns · DQN 제외",
             "routes": "transfer_path_analyzer.analyze_direct_vs_dc_transfer",
         },
@@ -761,7 +741,7 @@ def run_analysis_pipeline(
         "dqn_artifacts_read": False,
         "detail_level": "full" if collect_details else "core",
         "deferred_until_validation": [] if collect_details else [
-            "route_report_details", "optimality_gap", "legacy_validation",
+            "route_report_details", "legacy_validation",
             "sensitivity", "recommendation_reasons",
         ],
         "algorithm_errors": list(runner.technical_errors),
