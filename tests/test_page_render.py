@@ -412,13 +412,16 @@ class PageRenderTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(len(app.session_state["dqn_batch_comparison_result"]["rows"]), 10)
 
-    def test_validation_has_six_clear_tabs(self):
+    def test_validation_has_seven_clear_tabs(self):
         app = self._new_app()
         app.session_state["current_menu"] = "분석 및 검증"
         app.run()
         self.assertFalse(app.exception)
         labels = [tab.label for tab in app.tabs]
-        self.assertEqual(labels, ["VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증", "최적성 Gap", "민감도/신뢰도"])
+        self.assertEqual(labels, [
+            "VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증",
+            "최적성 Gap", "민감도/신뢰도", "전체 샘플 통합 검증",
+        ])
 
     def test_recommendation_page_has_compact_table_and_detail_expander(self):
         app = self._new_app()

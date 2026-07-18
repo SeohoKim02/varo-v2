@@ -6,6 +6,7 @@ import streamlit as st
 import re
 import copy
 import math
+from html import escape
 from datetime import datetime
 
 from components.cards import render_empty_state, render_page_header, render_section_header
@@ -48,6 +49,26 @@ from services.optimality_gap_service import (
     optimality_summary_frame,
     run_optimality_gap,
 )
+from services.integrated_validation_service import (
+    INTEGRATED_VALIDATION_VERSION,
+    SCOPE_LABELS,
+    build_integrated_settings,
+    dqn_comparison_frame,
+    error_result_frame,
+    failed_sample_ids,
+    integrated_detail_frame,
+    integrated_excel_bytes,
+    integrated_json_bytes,
+    integrated_summary_frame,
+    metadata_frame as integrated_metadata_frame,
+    optimality_result_frame,
+    pareto_sensitivity_frame,
+    run_integrated_validation,
+    sample_catalog as integrated_sample_catalog,
+    sensitivity_result_frame,
+    submission_summary_text,
+    vhs_greedy_frame,
+)
 
 try:
     import altair as alt
@@ -56,7 +77,10 @@ except ImportError:  # pragma: no cover - Altair is normally bundled with Stream
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-TABS = ["VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증", "최적성 Gap", "민감도/신뢰도"]
+TABS = [
+    "VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증",
+    "최적성 Gap", "민감도/신뢰도", "전체 샘플 통합 검증",
+]
 
 _WEIGHT_LABELS = {
     "savings_score": "절감 효과",
@@ -1639,6 +1663,353 @@ def _render_sensitivity_confidence(pipeline: dict) -> None:
     _render_confidence(pipeline)
 
 
+def _integrated_numeric_frame(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    result = frame.copy()
+    for column in columns:
+        if column in result.columns:
+            result[column] = pd.to_numeric(result[column], errors="coerce")
+            result = result[result[column].map(lambda value: pd.isna(value) or math.isfinite(float(value)))]
+    return result.dropna(subset=[column for column in columns if column in result.columns], how="all")
+
+
+def _integrated_chart(
+    frame: pd.DataFrame,
+    *,
+    x: str,
+    y: str,
+    title: str,
+    color: str | None = None,
+    percent: bool = False,
+) -> None:
+    if frame.empty or x not in frame.columns or y not in frame.columns:
+        st.caption(f"{title}: 표시할 숫자 결과가 없습니다.")
+        return
+    clean = _integrated_numeric_frame(frame, [y]).dropna(subset=[y])
+    if clean.empty:
+        st.caption(f"{title}: 표시할 숫자 결과가 없습니다.")
+        return
+    maximum = max(abs(float(value)) for value in clean[y]) or 1.0
+    palette = ("#2563eb", "#0f766e", "#d97706", "#7c3aed", "#dc2626")
+    categories = list(dict.fromkeys(str(value) for value in clean[color])) if color and color in clean.columns else []
+    category_colors = {value: palette[index % len(palette)] for index, value in enumerate(categories)}
+    rows = []
+    for _, item in clean.iterrows():
+        label = str(item.get(x) or "-")
+        category = str(item.get(color) or "") if color and color in clean.columns else ""
+        value = float(item[y])
+        width = max(0.0, min(100.0, abs(value) / maximum * 100.0))
+        bar_color = category_colors.get(category, "#2563eb")
+        value_label = f"{value:,.2f}{'%' if percent else ''}"
+        tooltip = f"{label} · {category + ' · ' if category else ''}{title}: {value_label}"
+        group_html = f'<span class="integrated-chart-group">{escape(category)}</span>' if category else ""
+        rows.append(
+            f'<div class="integrated-chart-row" title="{escape(tooltip)}">'
+            f'<span class="integrated-chart-label">{escape(label)}</span>'
+            f'<span class="integrated-chart-track"><span class="integrated-chart-bar" '
+            f'style="width:{width:.2f}%;background:{bar_color}"></span></span>'
+            f'<span class="integrated-chart-value">{escape(value_label)}</span>'
+            f'{group_html}'
+            "</div>"
+        )
+    st.markdown(
+        '<div class="integrated-chart" role="img" '
+        f'aria-label="가로축 {escape(x)}, 세로축 {escape(y)}">'
+        f'<div class="integrated-chart-title">{escape(title)}</div>'
+        + "".join(rows)
+        + f'<div class="integrated-chart-axis">가로축: {escape(x)} · 값: {escape(title)}</div></div>'
+        + """
+        <style>
+        .integrated-chart{background:#fff;border:1px solid #dbe3ef;border-radius:10px;padding:12px 14px;margin:8px 0 16px;color:#172033}
+        .integrated-chart-title{font-weight:700;margin-bottom:9px}
+        .integrated-chart-row{display:grid;grid-template-columns:72px minmax(120px,1fr) 92px 120px;align-items:center;gap:8px;min-height:26px}
+        .integrated-chart-label,.integrated-chart-value,.integrated-chart-group{font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .integrated-chart-value{text-align:right;font-variant-numeric:tabular-nums}
+        .integrated-chart-group{color:#526078}
+        .integrated-chart-track{height:10px;background:#edf2f7;border-radius:999px;overflow:hidden}
+        .integrated-chart-bar{display:block;height:100%;border-radius:999px}
+        .integrated-chart-axis{border-top:1px solid #edf2f7;margin-top:8px;padding-top:6px;font-size:.72rem;color:#64748b;text-align:center}
+        @media(max-width:720px){.integrated-chart-row{grid-template-columns:58px minmax(80px,1fr) 76px}.integrated-chart-group{display:none}}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_integrated_summary_cards(result: dict) -> None:
+    summary = result.get("summary") or {}
+    cards = (
+        ("검증 샘플 수", summary.get("sample_count", 0)),
+        ("정상 수", summary.get("normal_count", 0)),
+        ("확인 필요 수", summary.get("review_count", 0)),
+        ("실패 수", summary.get("failure_count", 0)),
+        ("전체 추천 후보 수", summary.get("total_candidate_count", 0)),
+        ("전체 예상 절감액", f"{float(summary.get('total_expected_saving') or 0):,.0f}원"),
+        ("평균 VHS", summary.get("average_vhs") if summary.get("average_vhs") is not None else "-"),
+        ("평균 상세 민감도 안정성", summary.get("average_sensitivity_score") if summary.get("average_sensitivity_score") is not None else "-"),
+        ("평균 Varo 목표 달성률", f"{summary.get('average_target_pct')}%" if summary.get("average_target_pct") is not None else "-"),
+        ("전체 처리 시간", f"{float(summary.get('total_processing_seconds') or 0):.2f}초"),
+    )
+    for offset in (0, 5):
+        columns = st.columns(5, gap="small")
+        for column, (label, value) in zip(columns, cards[offset:offset + 5]):
+            column.metric(label, value)
+
+
+def _render_integrated_downloads(result: dict) -> None:
+    stamp = str(result.get("completed_at") or datetime.now().isoformat(timespec="seconds"))
+    stamp = re.sub(r"[^0-9]", "", stamp)[:14]
+    stamp = f"{stamp[:8]}_{stamp[8:]}" if len(stamp) >= 14 else datetime.now().strftime("%Y%m%d_%H%M%S")
+    summary = integrated_summary_frame(result)
+    detail = integrated_detail_frame(result)
+    dqn = dqn_comparison_frame(result)
+    sensitivity = sensitivity_result_frame(result)
+    optimality = optimality_result_frame(result)
+    errors = error_result_frame(result)
+    summary_text = submission_summary_text(result)
+    downloads = (
+        ("전체 통합 요약 CSV", summary.to_csv(index=False).encode("utf-8-sig"), f"varo_v2_integrated_summary_{stamp}.csv", "text/csv", "download_integrated_summary"),
+        ("전체 상세 결과 CSV", detail.to_csv(index=False).encode("utf-8-sig"), f"varo_v2_integrated_detail_{stamp}.csv", "text/csv", "download_integrated_detail"),
+        ("DQN 비교 CSV", dqn.to_csv(index=False).encode("utf-8-sig"), f"varo_v2_integrated_dqn_{stamp}.csv", "text/csv", "download_integrated_dqn"),
+        ("민감도 결과 CSV", sensitivity.to_csv(index=False).encode("utf-8-sig"), f"varo_v2_integrated_sensitivity_{stamp}.csv", "text/csv", "download_integrated_sensitivity"),
+        ("최적성 Gap 결과 CSV", optimality.to_csv(index=False).encode("utf-8-sig"), f"varo_v2_integrated_gap_{stamp}.csv", "text/csv", "download_integrated_gap"),
+        ("오류 내역 CSV", errors.to_csv(index=False).encode("utf-8-sig"), f"varo_v2_integrated_errors_{stamp}.csv", "text/csv", "download_integrated_errors"),
+        ("전체 JSON", integrated_json_bytes(result), f"varo_v2_integrated_validation_{stamp}.json", "application/json", "download_integrated_json"),
+        ("통합 Excel", integrated_excel_bytes(result), f"varo_v2_integrated_validation_{stamp}.xlsx", XLSX_MIME, "download_integrated_excel"),
+        ("제출용 요약 TXT", summary_text.encode("utf-8-sig"), f"varo_v2_integrated_summary_{stamp}.txt", "text/plain", "download_integrated_txt"),
+    )
+    for offset in range(0, len(downloads), 3):
+        columns = st.columns(3, gap="small")
+        for column, (label, data, filename, mime, key) in zip(columns, downloads[offset:offset + 3]):
+            column.download_button(label, data, file_name=filename, mime=mime, key=key, width="stretch")
+
+
+def _render_integrated_results(result: dict) -> None:
+    _render_integrated_summary_cards(result)
+    frames = {
+        "summary": integrated_summary_frame(result),
+        "vhs_greedy": vhs_greedy_frame(result),
+        "dqn": dqn_comparison_frame(result),
+        "pareto_sensitivity": pareto_sensitivity_frame(result),
+        "optimality": optimality_result_frame(result),
+        "errors": error_result_frame(result),
+    }
+    result_tabs = st.tabs([
+        "종합 요약", "VHS·Greedy", "DQN 원본·균형형", "Pareto·민감도",
+        "최적성 Gap", "오류·제외 내역", "샘플별 상세",
+    ])
+    with result_tabs[0]:
+        display = frames["summary"].rename(columns={
+            "sample_label": "샘플", "store_dc": "점포/DC", "candidate_count": "후보 수",
+            "total_expected_saving": "전체 예상 절감액", "average_vhs": "평균 VHS",
+            "vhs_greedy_top1_match": "VHS/Greedy Top1 일치", "dqn_original_status": "원본 DQN 상태",
+            "dqn_balanced_status": "균형형 DQN 상태", "sensitivity_score": "민감도 안정성",
+            "varo_gap_pct": "Varo Gap", "target_pct": "목표 달성률", "pareto_status": "Pareto 상태",
+            "overall_status": "종합 상태", "processing_seconds": "처리 시간",
+        }).drop(columns=["sample_id"], errors="ignore")
+        st.dataframe(display, hide_index=True, width="stretch")
+        status_rows = pd.DataFrame([
+            {"상태": label, "샘플 수": int((result.get("summary") or {}).get(key) or 0)}
+            for label, key in (("정상", "normal_count"), ("확인 필요", "review_count"), ("실패", "failure_count"))
+        ])
+        _integrated_chart(status_rows, x="상태", y="샘플 수", title="종합 상태 분포")
+
+    with result_tabs[1]:
+        st.dataframe(frames["vhs_greedy"], hide_index=True, width="stretch")
+        _integrated_chart(frames["vhs_greedy"], x="sample_label", y="vhs_total_expected_saving", title="샘플별 전체 예상 절감액")
+        _integrated_chart(frames["vhs_greedy"], x="sample_label", y="vhs_average_vhs", title="샘플별 평균 VHS")
+
+    with result_tabs[2]:
+        st.caption("데이터 품질 진단과 실제 DQN 학습 안정성은 서로 다른 항목입니다.")
+        st.dataframe(frames["dqn"], hide_index=True, width="stretch")
+        type_chart = frames["dqn"][[
+            column for column in ("sample_label", "original_target_type_count", "balanced_target_type_count")
+            if column in frames["dqn"].columns
+        ]].copy()
+        if len(type_chart.columns) >= 2:
+            type_chart = type_chart.melt(id_vars=["sample_label"], var_name="구분", value_name="action 종류 수")
+        _integrated_chart(type_chart, x="sample_label", y="action 종류 수", color="구분", title="원본 vs 균형형 action 종류 수")
+        ratio_chart = frames["dqn"][[
+            column for column in ("sample_label", "original_target_dominant_ratio", "balanced_target_dominant_ratio")
+            if column in frames["dqn"].columns
+        ]].copy()
+        for column in ("original_target_dominant_ratio", "balanced_target_dominant_ratio"):
+            if column in ratio_chart.columns:
+                ratio_chart[column] = pd.to_numeric(ratio_chart[column], errors="coerce") * 100.0
+        if len(ratio_chart.columns) >= 2:
+            ratio_chart = ratio_chart.melt(id_vars=["sample_label"], var_name="구분", value_name="최대 쏠림 비율")
+        _integrated_chart(ratio_chart, x="sample_label", y="최대 쏠림 비율", color="구분", title="원본 vs 균형형 최대 쏠림 비율", percent=True)
+
+    with result_tabs[3]:
+        st.dataframe(frames["pareto_sensitivity"], hide_index=True, width="stretch")
+        _integrated_chart(frames["pareto_sensitivity"], x="sample_label", y="sensitivity_score", title="샘플별 민감도 안정성 점수")
+
+    with result_tabs[4]:
+        st.caption("정확 탐색과 제한 탐색 상태를 구분하며, 제한 탐색 Gap은 참고값입니다.")
+        st.dataframe(frames["optimality"], hide_index=True, width="stretch")
+        _integrated_chart(frames["optimality"], x="sample_label", y="optimality_varo_gap_pct", title="샘플별 Varo Gap", percent=True)
+        _integrated_chart(frames["optimality"], x="sample_label", y="optimality_target_pct", title="샘플별 목표 달성률", percent=True)
+
+    with result_tabs[5]:
+        if frames["errors"].empty:
+            st.success("치명적 오류나 계산 제외 내역이 없습니다.")
+        else:
+            st.dataframe(frames["errors"], hide_index=True, width="stretch")
+
+    with result_tabs[6]:
+        sample_rows = list(result.get("samples") or [])
+        if not sample_rows:
+            render_empty_state(st, "표시할 샘플 결과가 없습니다", compact=True)
+        else:
+            labels = {str(item.get("sample_label")): item for item in sample_rows}
+            selected = st.selectbox("상세 샘플", list(labels), key="integrated_validation_detail_sample")
+            item = labels[selected]
+            st.dataframe(integrated_detail_frame({"samples": [item]}), hide_index=True, width="stretch")
+            with st.expander("샘플 메타데이터", expanded=False):
+                st.json(item.get("metadata") or {})
+            with st.expander("샘플 전체 수집 결과", expanded=False):
+                st.json(item)
+
+    render_section_header(st, "제출용 한 페이지 요약", "통합 결과를 과장 없이 제출 문장으로 정리합니다.")
+    summary_text = submission_summary_text(result)
+    st.code(summary_text, language=None)
+    if st.button("제출용 요약 복사", key="integrated_summary_copy"):
+        st.session_state["integrated_validation_summary_copy"] = summary_text
+        st.info("위 코드 영역의 복사 아이콘으로 요약을 클립보드에 복사할 수 있습니다.")
+    _render_integrated_downloads(result)
+
+
+def _render_integrated_validation() -> None:
+    render_section_header(
+        st,
+        "전체 샘플 통합 검증",
+        "원본 DQN 샘플 10개를 순차적으로 분석해 추천 품질, 학습 안정성, 민감도와 최적성 Gap을 한 번에 비교합니다.",
+    )
+    st.info("통합 검증 실행 버튼을 누르기 전에는 샘플 파일을 읽거나 분석하지 않습니다. 현재 적용 데이터와 추천 결과는 변경하지 않습니다.")
+    catalog = integrated_sample_catalog()
+    sample_ids = [str(item["sample_id"]) for item in catalog]
+    labels = {str(item["sample_id"]): str(item["label"]) for item in catalog}
+    st.session_state.setdefault("integrated_validation_sample_selection", sample_ids)
+
+    scope_label = st.radio(
+        "실행 범위", list(SCOPE_LABELS.values()), index=1, horizontal=True,
+        key="integrated_validation_scope_ui",
+    )
+    scope = next(key for key, value in SCOPE_LABELS.items() if value == scope_label)
+    training_columns = st.columns(2, gap="small")
+    train_original = training_columns[0].checkbox(
+        "원본 DQN 실제 학습 포함", value=False, key="integrated_validation_train_original",
+        disabled=scope != "full",
+    )
+    train_balanced = training_columns[1].checkbox(
+        "균형형 DQN 실제 학습 포함", value=False, key="integrated_validation_train_balanced",
+        disabled=scope != "full",
+    )
+    if scope == "full":
+        st.warning("실제 DQN 학습을 포함하면 선택 샘플 수에 따라 실행 시간이 크게 늘어나며 로컬 학습 산출물이 생성될 수 있습니다.")
+    elif train_original or train_balanced:
+        st.caption("DQN 실제 학습은 전체 검증에서만 실행됩니다.")
+
+    selection_actions = st.columns(3, gap="small")
+    if selection_actions[0].button("전체 선택", key="integrated_select_all", width="stretch"):
+        st.session_state["integrated_validation_sample_selection"] = sample_ids
+    if selection_actions[1].button("전체 해제", key="integrated_clear_all", width="stretch"):
+        st.session_state["integrated_validation_sample_selection"] = []
+    previous_result = st.session_state.get("integrated_validation_result")
+    previous_failures = failed_sample_ids(previous_result)
+    if selection_actions[2].button(
+        "이전 실패 샘플만 선택", key="integrated_select_failed", width="stretch",
+        disabled=not previous_failures,
+    ):
+        st.session_state["integrated_validation_sample_selection"] = previous_failures
+    selected = st.multiselect(
+        "실행 샘플", options=sample_ids,
+        format_func=lambda value: labels.get(value, value), key="integrated_validation_sample_selection",
+    )
+    st.caption(f"선택 {len(selected)}개 · 원본 파일은 읽기 전후 SHA-256으로 변경 여부를 확인합니다.")
+
+    actions = st.columns([2, 1], gap="small")
+    execute = actions[0].button(
+        "통합 검증 실행", type="primary", key="run_integrated_validation", width="stretch",
+        disabled=bool(st.session_state.get("integrated_validation_is_running")),
+    )
+    clear = actions[1].button(
+        "최근 통합 검증 결과 지우기", key="clear_integrated_validation", width="stretch",
+        disabled=bool(st.session_state.get("integrated_validation_is_running")),
+    )
+    if clear:
+        st.session_state["integrated_validation_settings"] = {}
+        st.session_state["integrated_validation_result"] = None
+        st.session_state["integrated_validation_last_error"] = None
+        st.session_state["integrated_validation_started_at"] = None
+        st.session_state["integrated_validation_completed_at"] = None
+
+    if execute:
+        settings = build_integrated_settings(
+            scope=scope,
+            sample_ids=selected,
+            train_original=train_original,
+            train_balanced=train_balanced,
+        )
+        st.session_state["integrated_validation_settings"] = copy.deepcopy(settings)
+        st.session_state["integrated_validation_is_running"] = True
+        st.session_state["integrated_validation_last_error"] = None
+        st.session_state["integrated_validation_started_at"] = datetime.now().isoformat(timespec="seconds")
+        status = st.status("샘플 목록 준비 중", expanded=True)
+        progress = st.progress(0.0, text=f"0 / {len(selected)}")
+
+        def update_progress(event: dict) -> None:
+            current = int(event.get("current") or 0)
+            total = int(event.get("total") or len(selected))
+            completed = int(event.get("completed") or 0)
+            stage = str(event.get("stage") or "처리 중")
+            sample_label = str(event.get("sample_label") or "")
+            counts = f"정상 {event.get('normal', 0)} · 확인 필요 {event.get('review', 0)} · 실패 {event.get('failure', 0)}"
+            elapsed = float(event.get("elapsed_seconds") or 0.0)
+            progress.progress(completed / max(1, total), text=f"{sample_label} · {stage} · {completed} / {total}")
+            status.update(
+                label=f"{sample_label or '샘플 목록'} · {stage} · {current}/{total} · {counts} · {elapsed:.1f}초",
+                state="running",
+                expanded=True,
+            )
+
+        try:
+            result = run_integrated_validation(settings, progress_callback=update_progress)
+            st.session_state["integrated_validation_result"] = result
+            st.session_state["integrated_validation_completed_at"] = result.get("completed_at")
+            summary = result.get("summary") or {}
+            progress.progress(1.0, text=f"완료 · {summary.get('sample_count', 0)} / {len(selected)}")
+            status.update(
+                label=f"통합 검증 완료 · 정상 {summary.get('normal_count', 0)} · 확인 필요 {summary.get('review_count', 0)} · 실패 {summary.get('failure_count', 0)}",
+                state="complete" if not summary.get("failure_count") else "error",
+                expanded=False,
+            )
+        except Exception as exc:
+            st.session_state["integrated_validation_last_error"] = f"{type(exc).__name__}: {str(exc)[:240]}"
+            status.update(label="통합 검증 실행 실패", state="error", expanded=False)
+        finally:
+            st.session_state["integrated_validation_is_running"] = False
+
+    error = st.session_state.get("integrated_validation_last_error")
+    if error:
+        st.error(f"통합 검증을 완료하지 못했습니다: {error}")
+    result = st.session_state.get("integrated_validation_result")
+    if result and result.get("version") != INTEGRATED_VALIDATION_VERSION:
+        st.warning("검증 코드 버전이 변경되어 이전 통합 결과를 현재 결과로 표시하지 않습니다. 다시 실행해주세요.")
+        result = None
+    if result:
+        _render_integrated_results(result)
+    elif not execute:
+        st.caption("범위와 샘플을 선택한 뒤 통합 검증 실행 버튼을 누르세요.")
+
+    with st.expander("종합 상태 판단 기준", expanded=False):
+        st.markdown(
+            "- **정상**: pipeline과 VHS가 성공하고 제약 위반·치명 오류가 없으며 민감도 또는 Gap 계산이 완료된 경우\n"
+            "- **확인 필요**: DQN 데이터 편향, 민감도 변동, Varo Gap 10% 초과, Pareto 주의, 계산 제외 또는 제한 탐색이 있는 경우\n"
+            "- **실패**: 데이터 로드·pipeline·VHS 또는 필수 추천 후보 생성이 실패한 경우\n\n"
+            "DQN 미학습은 실패로 분류하지 않습니다. Pareto는 보조 검증이며 정확 최적화로 표현하지 않습니다."
+        )
+
+
 def render_validation_page() -> None:
     status = _validation_status()
     has_data = bool(st.session_state.get("varo_data")) and bool(st.session_state.get("varo_recommendations"))
@@ -1659,10 +2030,11 @@ def render_validation_page() -> None:
         lambda: _render_comparison_results(pipeline),
         _render_optimality_gap,
         lambda: _render_sensitivity_confidence(pipeline),
+        _render_integrated_validation,
     )
     for tab, title, renderer in zip(tabs, TABS, renderers):
         with tab:
-            if has_data or title == "DQN 학습·비교":
+            if has_data or title in {"DQN 학습·비교", "전체 샘플 통합 검증"}:
                 renderer()
             else:
                 render_empty_state(st, "데이터가 없습니다", compact=True)
