@@ -9,6 +9,12 @@ import pandas as pd
 RouteType = Literal["DIRECT", "VIA_DC"]
 ROUTE_TYPES = ("DIRECT", "VIA_DC")
 
+ALGORITHM_RESULT_FIELDS = (
+    "algorithm_name", "recommendation_id", "route_id", "product", "source",
+    "target", "route_type", "quantity", "score", "rank", "expected_savings",
+    "feasibility", "confidence", "explanation", "data_signature",
+)
+
 RECOMMENDATION_FIELDS = (
     "route_id", "product_id", "product_name", "source_id", "source_name",
     "target_id", "target_name", "dc_id", "dc_name", "route_type",
@@ -67,6 +73,7 @@ _ACTION_ALIASES = {
 
 @dataclass(frozen=True)
 class StandardRecommendation:
+    recommendation_id: str = ""
     route_id: str = ""
     product_id: str = ""
     product_name: str = ""
@@ -244,6 +251,7 @@ def normalize_standard_recommendation(item: Mapping[str, object]) -> Dict[str, o
     confidence = _first(item, "confidence", "confidence_score", "recommendation_confidence")
     grade = _first(item, "grade", "recommendation_grade", "vhs_grade")
     normalized: dict[str, object] = {
+        "recommendation_id": _first(item, "recommendation_id", "route_id"),
         "route_id": _first(item, "route_id", "recommendation_id"),
         "product_id": _first(item, "product_id", "item_id"),
         "product_name": _first(item, "product_name", "item_name"),
@@ -331,7 +339,7 @@ def normalize_standard_recommendation(item: Mapping[str, object]) -> Dict[str, o
         "pareto_reason": _first(item, "pareto_reason"),
     }
     for key in (
-        "route_id", "product_id", "product_name", "source_id", "source_name", "target_id", "target_name",
+        "recommendation_id", "route_id", "product_id", "product_name", "source_id", "source_name", "target_id", "target_name",
         "dc_id", "dc_name", "route_type_label", "transport_type", "transport_label", "greedy_action",
         "varo_action", "dqn_action", "dqn_status", "vhs_score_source", "greedy_reason",
         "confidence_level", "confidence_reason", "confidence_source", "grade",
@@ -390,3 +398,73 @@ def validate_recommendation_list(recommendations: List[Mapping[str, object]]) ->
         if route_id:
             seen.add(str(route_id))
     return errors
+
+
+def normalize_algorithm_result(
+    item: Mapping[str, object],
+    algorithm_name: str,
+    data_signature: str | None = None,
+) -> Dict[str, object]:
+    """Project one algorithm result onto the shared comparison contract.
+
+    This is a read-only projection.  It does not recalculate a score or alter
+    the existing recommendation order.
+    """
+    name = str(algorithm_name or "").strip() or "unknown"
+    lowered = name.casefold()
+    if "greedy" in lowered:
+        score = _first(item, "greedy_score", "heuristic_score")
+        rank = _first(item, "greedy_rank", "rank")
+        feasibility = _first(item, "greedy_selected", "feasibility_score", "status")
+        explanation = _first(item, "greedy_reason", "greedy_strategy", "reason")
+    elif "dqn" in lowered:
+        score = _first(item, "dqn_reference_score", "dqn_score")
+        rank = _first(item, "dqn_rank", "rank")
+        feasibility = _first(item, "dqn_status", "status")
+        explanation = _first(item, "dqn_action", "final_reason", "reason")
+    elif "pareto" in lowered:
+        score = _first(item, "pareto_score", "vhs_score")
+        rank = _first(item, "pareto_rank", "rank")
+        feasibility = _first(item, "pareto_status", "status")
+        explanation = _first(item, "pareto_reason", "reason")
+    elif "optimal" in lowered or "최적" in name:
+        score = _first(item, "optimal_score", "objective_value", "expected_saving")
+        rank = _first(item, "optimal_rank", "rank")
+        feasibility = _first(item, "optimal_status", "feasible", "status")
+        explanation = _first(item, "optimal_reason", "reason")
+    else:  # VHS and future ranking adapters use the current standard fields.
+        score = _first(item, "vhs_score", "recalculated_vhs_score", "uploaded_vhs_score", "score")
+        rank = _first(item, "vhs_rank", "varo_final_rank", "rank")
+        feasibility = _first(item, "feasibility_score", "status")
+        explanation = _first(item, "reason", "final_reason", "path_reason")
+    result: Dict[str, object] = {
+        "algorithm_name": name,
+        "recommendation_id": _first(item, "recommendation_id", "route_id"),
+        "route_id": _first(item, "route_id", "recommendation_id"),
+        "product": _first(item, "product_name", "product_id", "item_name", "item_id"),
+        "source": _first(item, "source_name", "source_id", "from_store_name", "from_store_id"),
+        "target": _first(item, "target_name", "target_id", "to_store_name", "to_store_id"),
+        "route_type": _first(item, "route_type"),
+        "quantity": _first(item, "recommended_qty", "suggested_qty", "transfer_qty", "quantity"),
+        "score": score,
+        "rank": rank,
+        "expected_savings": _first(item, "expected_saving", "saving_amount", "estimated_saving"),
+        "feasibility": feasibility,
+        "confidence": _first(item, "confidence", "confidence_score", "dqn_confidence"),
+        "explanation": explanation,
+        "data_signature": data_signature or _first(item, "data_signature") or "",
+    }
+    return {field: result.get(field) for field in ALGORITHM_RESULT_FIELDS}
+
+
+def algorithm_comparison_rows(
+    recommendations: List[Mapping[str, object]],
+    data_signature: str | None = None,
+    algorithms: tuple[str, ...] = ("VHS", "Greedy", "DQN", "Pareto"),
+) -> List[Dict[str, object]]:
+    """Return comparison rows without sorting or mutating recommendations."""
+    return [
+        normalize_algorithm_result(item, algorithm, data_signature)
+        for item in recommendations
+        for algorithm in algorithms
+    ]

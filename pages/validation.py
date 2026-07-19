@@ -66,7 +66,6 @@ from services.integrated_validation_service import (
     run_integrated_validation,
     sample_catalog as integrated_sample_catalog,
     sensitivity_result_frame,
-    submission_summary_text,
     vhs_greedy_frame,
 )
 
@@ -79,7 +78,7 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 TABS = [
     "VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증",
-    "최적성 Gap", "민감도/신뢰도", "전체 샘플 통합 검증",
+    "최적성 Gap", "민감도/신뢰도", "전체 샘플 품질 검증",
 ]
 
 _WEIGHT_LABELS = {
@@ -1765,7 +1764,6 @@ def _render_integrated_downloads(result: dict) -> None:
     sensitivity = sensitivity_result_frame(result)
     optimality = optimality_result_frame(result)
     errors = error_result_frame(result)
-    summary_text = submission_summary_text(result)
     downloads = (
         ("전체 통합 요약 CSV", summary.to_csv(index=False).encode("utf-8-sig"), f"varo_v2_integrated_summary_{stamp}.csv", "text/csv", "download_integrated_summary"),
         ("전체 상세 결과 CSV", detail.to_csv(index=False).encode("utf-8-sig"), f"varo_v2_integrated_detail_{stamp}.csv", "text/csv", "download_integrated_detail"),
@@ -1775,7 +1773,6 @@ def _render_integrated_downloads(result: dict) -> None:
         ("오류 내역 CSV", errors.to_csv(index=False).encode("utf-8-sig"), f"varo_v2_integrated_errors_{stamp}.csv", "text/csv", "download_integrated_errors"),
         ("전체 JSON", integrated_json_bytes(result), f"varo_v2_integrated_validation_{stamp}.json", "application/json", "download_integrated_json"),
         ("통합 Excel", integrated_excel_bytes(result), f"varo_v2_integrated_validation_{stamp}.xlsx", XLSX_MIME, "download_integrated_excel"),
-        ("제출용 요약 TXT", summary_text.encode("utf-8-sig"), f"varo_v2_integrated_summary_{stamp}.txt", "text/plain", "download_integrated_txt"),
     )
     for offset in range(0, len(downloads), 3):
         columns = st.columns(3, gap="small")
@@ -1869,20 +1866,14 @@ def _render_integrated_results(result: dict) -> None:
             with st.expander("샘플 전체 수집 결과", expanded=False):
                 st.json(item)
 
-    render_section_header(st, "제출용 한 페이지 요약", "통합 결과를 과장 없이 제출 문장으로 정리합니다.")
-    summary_text = submission_summary_text(result)
-    st.code(summary_text, language=None)
-    if st.button("제출용 요약 복사", key="integrated_summary_copy"):
-        st.session_state["integrated_validation_summary_copy"] = summary_text
-        st.info("위 코드 영역의 복사 아이콘으로 요약을 클립보드에 복사할 수 있습니다.")
     _render_integrated_downloads(result)
 
 
 def _render_integrated_validation() -> None:
     render_section_header(
         st,
-        "전체 샘플 통합 검증",
-        "원본 DQN 샘플 10개를 순차적으로 분석해 추천 품질, 학습 안정성, 민감도와 최적성 Gap을 한 번에 비교합니다.",
+        "전체 샘플 품질 검증",
+        "등록된 샘플 데이터를 순차 분석하여 추천 품질, 데이터 편향, 민감도, 제약조건과 최적성 차이를 비교합니다.",
     )
     st.info("통합 검증 실행 버튼을 누르기 전에는 샘플 파일을 읽거나 분석하지 않습니다. 현재 적용 데이터와 추천 결과는 변경하지 않습니다.")
     catalog = integrated_sample_catalog()
@@ -2034,7 +2025,7 @@ def render_validation_page() -> None:
     )
     for tab, title, renderer in zip(tabs, TABS, renderers):
         with tab:
-            if has_data or title in {"DQN 학습·비교", "전체 샘플 통합 검증"}:
+            if has_data or title in {"DQN 학습·비교", "전체 샘플 품질 검증"}:
                 renderer()
             else:
                 render_empty_state(st, "데이터가 없습니다", compact=True)

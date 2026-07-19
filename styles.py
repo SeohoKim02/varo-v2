@@ -420,7 +420,7 @@ def apply_global_styles() -> None:
             text-align: center;
             padding: 1rem;
         }}
-        .v2-network-svg {{ display: block; width: 100%; height: 700px; margin-top: 0.2rem; }}
+        .v2-network-svg {{ display: block; width: 100%; height: 700px; margin-top: 0; }}
         .v2-network-svg text {{ font-family: inherit; fill: var(--varo-text); }}
         .v2-network-svg .node-label {{
             font-size: 14px;
@@ -432,14 +432,39 @@ def apply_global_styles() -> None:
         }}
         .v2-network-svg .dc-label {{ font-size: 16.4px; font-weight: 820; }}
         .v2-network-svg .node-type {{ font-size: 10.5px; fill: var(--varo-muted); }}
+        .v2-network-svg .inventory-status-text {{ font-size: 9.6px; font-weight: 820; }}
+        .v2-network-svg .inventory-product {{ font-size: 10.8px; font-weight: 760; fill: #344154; }}
+        .v2-network-svg .inventory-stock {{ font-size: 10.4px; font-weight: 760; }}
+        .v2-network-svg .inventory-movement {{ font-size: 9.4px; fill: #46566a; }}
+        .v2-network-svg .inventory-state-change {{ font-size: 9.2px; font-weight: 720; fill: #46566a; }}
+        .v2-network-svg .compact-stock {{ font-size: 8.5px; fill: #596574; }}
+        .v2-network-svg .dc-node-id {{ font-size: 10px; font-weight: 720; fill: #6b570c; }}
+        .v2-network-svg .dc-node-work {{ font-size: 10px; font-weight: 760; fill: #594608; }}
+        .v2-network-svg .dc-node-capacity {{ font-size: 9.2px; fill: #766625; }}
         .v2-network-svg .network-node {{ filter: drop-shadow(0 2px 3px rgba(30, 41, 59, 0.06)); }}
         .v2-network-svg .recommended-node {{ filter: drop-shadow(0 3px 5px rgba(216, 131, 120, 0.18)); }}
         .v2-network-svg .v2-vehicle {{ filter: drop-shadow(0 3px 5px rgba(30, 41, 59, 0.20)); }}
         .v2-network-svg .v2-vehicle-selected {{ opacity: 1; }}
         .v2-network-svg .v2-vehicle-muted {{ opacity: 0.56; }}
-        .v2-network-svg .vehicle-route {{ font-size: 11px; font-weight: 840; }}
-        .v2-network-svg .vehicle-mode {{ font-size: 9.4px; font-weight: 780; }}
+        .v2-network-svg .v2-vehicle-disabled {{ opacity: 0.54; }}
+        .v2-network-svg .vehicle-route {{ font-size: 9.4px; font-weight: 840; fill: #ffffff !important; }}
+        .v2-network-svg .vehicle-mode {{ font-size: 9.2px; font-weight: 780; }}
+        .v2-network-svg .vehicle-stage {{ font-size: 8.4px; font-weight: 720; }}
         .v2-network-svg .vehicle-type {{ font-size: 8px; font-weight: 800; fill: #ffffff; }}
+        .v2-network-svg .route-skip-label {{ font-size: 10px; font-weight: 760; fill: #8a4650; paint-order: stroke; stroke: #ffffff; stroke-width: 3px; }}
+        .v2-sim-route-summary {{
+            display: grid;
+            grid-template-columns: 0.8fr 1.15fr 1.8fr 1fr 1fr;
+            gap: 0.5rem;
+            margin: 0.7rem 0.8rem 0.2rem;
+            padding: 0.6rem 0.75rem;
+            border: 1px solid #d6dee8;
+            border-radius: 9px;
+            background: rgba(255,255,255,0.94);
+        }}
+        .v2-sim-route-summary span {{ min-width: 0; }}
+        .v2-sim-route-summary small {{ display: block; color: #69778a; font-size: 0.68rem; margin-bottom: 0.12rem; }}
+        .v2-sim-route-summary strong {{ display: block; color: #243247; font-size: 0.78rem; white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }}
         .v2-network-legend {{
             display: flex;
             flex-wrap: wrap;
@@ -457,6 +482,43 @@ def apply_global_styles() -> None:
         .v2-legend-store {{ background: #eef5ff; border: 2px solid #78a9d8; }}
         .v2-legend-dc {{ background: #fff8df; border: 2px solid #c28a00; }}
         .v2-legend-truck {{ font-size: 1.08rem; line-height: 1; }}
+        .v2-state-dot {{ width: 12px; height: 12px; border-radius: 999px; display: inline-block; border: 1px solid transparent; }}
+        .state-excess {{ background: #fff3d6; border-color: #d69b24; }}
+        .state-normal {{ background: #e5f5ea; border-color: #67ad7a; }}
+        .state-shortage {{ background: #e8f1fb; border-color: #6b9fca; }}
+        .state-missing {{ background: #eef1f4; border-color: #aab2bc; }}
+        .v2-sim-steps {{
+            display: grid;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 0.38rem;
+            margin: 0.55rem 0 0.65rem;
+        }}
+        .v2-sim-step {{
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            min-width: 0;
+            min-height: 34px;
+            padding: 0.38rem 0.48rem;
+            border: 1px solid #d7dfe8;
+            border-radius: 7px;
+            background: #f7f9fb;
+            color: #7a8592;
+            font-size: 0.72rem;
+        }}
+        .v2-sim-step b {{
+            display: grid;
+            place-items: center;
+            flex: 0 0 19px;
+            height: 19px;
+            border-radius: 999px;
+            background: #e7ebf0;
+            font-size: 0.67rem;
+        }}
+        .v2-sim-step.is-current {{ border-color: #80add8; background: #eaf3fb; color: #234f78; font-weight: 780; }}
+        .v2-sim-step.is-current b {{ background: #2e6c9f; color: #ffffff; }}
+        .v2-sim-step.is-complete {{ border-color: #a9cfb5; background: #edf8f0; color: #356848; }}
+        .v2-sim-step.is-complete b {{ background: #5d9b6f; color: #ffffff; }}
         .v2-route-steps {{
             margin: 0;
             padding-left: 1.25rem;
@@ -531,6 +593,8 @@ def apply_global_styles() -> None:
             .v2-info-item {{ border-right: 0; padding: 0 0.4rem; }}
             .v2-network-shell {{ min-height: 470px; }}
             .v2-network-svg {{ height: 470px; }}
+            .v2-sim-route-summary {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+            .v2-sim-steps {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
         }}
         @media (max-width: 640px) {{
             .block-container {{ padding-left: 0.85rem; padding-right: 0.85rem; }}
@@ -544,6 +608,8 @@ def apply_global_styles() -> None:
             .v2-network-svg {{ height: 360px; }}
             .v2-network-svg .node-label {{ font-size: 11.4px; }}
             .v2-network-svg .dc-label {{ font-size: 12.6px; }}
+            .v2-sim-route-summary {{ grid-template-columns: 1fr; }}
+            .v2-sim-steps {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
             .stTabs [data-baseweb="tab-list"] {{
                 display: flex;
                 flex-wrap: nowrap;

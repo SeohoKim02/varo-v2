@@ -43,7 +43,7 @@ USER_STATUS_LABELS = {
 
 
 def user_status_label(value: object, default: str = "-") -> str:
-    """Return submission-friendly copy without changing the stored status."""
+    """Return operator-friendly copy without changing the stored status."""
     if value in (None, ""):
         return default
     text = str(value)

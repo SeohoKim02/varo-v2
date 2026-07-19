@@ -177,7 +177,7 @@ class DqnDirectUploadPageTests(unittest.TestCase):
         self.assertEqual(blob.count('class="network-node dc-node"'), 1)
         self.assertEqual(blob.count('class="network-node store-node'), 4)
 
-    def test_samples_01_02_10_render_data_driven_top5_and_keep_upload_across_pages(self):
+    def test_samples_01_02_10_render_default_route_top3_mode_and_keep_upload_across_pages(self):
         expected_dcs = {"01": 1, "02": 1, "10": 2}
         for number in ("01", "02", "10"):
             with self.subTest(sample=number):
@@ -193,8 +193,11 @@ class DqnDirectUploadPageTests(unittest.TestCase):
                 self.assertFalse(app.exception)
                 home_blob = " ".join(element.value for element in app.markdown)
                 self.assertEqual(home_blob.count('class="network-node dc-node"'), expected_dcs[number])
-                self.assertEqual(home_blob.count('class="v2-vehicle '), expected_top_count)
+                self.assertEqual(home_blob.count('class="v2-vehicle '), 1)
                 self.assertNotIn("파일 구조를 확인해주세요", home_blob)
+                next(item for item in app.selectbox if item.key == "home_sim_display_select").set_value("상위 3개").run()
+                top3_blob = " ".join(element.value for element in app.markdown)
+                self.assertEqual(top3_blob.count('class="v2-vehicle '), expected_top_count)
 
                 for menu in self.MENUS:
                     button = next(item for item in app.sidebar.button if item.key == f"nav_{menu}")

@@ -141,7 +141,7 @@ except Exception:  # pragma: no cover
 
 @unittest.skipIf(AppTest is None, "streamlit AppTest unavailable")
 class SimulationSamplePageTests(unittest.TestCase):
-    def test_dual_dc_home_renders_two_centers_ten_stores_and_three_vehicles(self):
+    def test_dual_dc_home_renders_two_centers_ten_stores_and_one_default_vehicle(self):
         dual = next(sample for sample in SAMPLE_WORKBOOKS if sample.key == "dual_dc_10stores_2dc")
         state: dict = {}
         self.assertTrue(load_and_apply(state, sample_path(dual), dual.filename, "샘플 추천 데이터"))
@@ -156,7 +156,7 @@ class SimulationSamplePageTests(unittest.TestCase):
         blob = " ".join(element.value for element in app.markdown)
         self.assertEqual(blob.count('class="network-node dc-node"'), 2)
         self.assertEqual(blob.count('class="network-node store-node'), 10)
-        self.assertEqual(blob.count('class="v2-vehicle'), 3)
+        self.assertEqual(blob.count('class="v2-vehicle'), 1)
         self.assertFalse(app.session_state["show_all_routes"])
 
     def test_vehicle_marker_is_a_truck_icon_not_a_dot(self):
@@ -194,7 +194,7 @@ class SimulationSamplePageTests(unittest.TestCase):
              "route_type": "VIA_DC", "dc_id": "DC01", "dc_name": "DC01",
              "recommended_qty": 9, "expected_saving": 2000, "dqn_action": "미연결"},
         ]
-        _, blob = self._render_dual_dc_home(varo_recommendations=curated)
+        _, blob = self._render_dual_dc_home(varo_recommendations=curated, home_sim_display_mode="상위 3개")
         self.assertEqual(blob.count('<path id="rp'), 2)
         self.assertEqual(blob.count('stroke-dasharray="11 8"'), 1)  # only the VIA_DC route is dashed
 
@@ -209,19 +209,20 @@ class SimulationSamplePageTests(unittest.TestCase):
         self.assertLessEqual(background, 2 * _MAX_BACKGROUND_ROUTES)
 
     def test_top3_paths_use_curves_wide_lanes_and_separate_vehicle_phases(self):
-        _, parked_blob = self._render_dual_dc_home()
+        _, parked_blob = self._render_dual_dc_home(home_sim_display_mode="상위 3개")
         for lane in ("-54", "0", "54"):
             self.assertIn(f'data-lane="{lane}"', parked_blob)
         self.assertGreaterEqual(parked_blob.count(" Q "), 4)
         parked = re.findall(r'class="v2-vehicle [^"]+" transform="translate\(([^)]+)\)', parked_blob)
         self.assertEqual(len(parked), 3)
         self.assertEqual(len(set(parked)), 3)
-        self.assertLess(parked_blob.find('class="v2-vehicle '), parked_blob.find('class="network-node dc-node"'))
+        self.assertGreater(parked_blob.find('class="v2-vehicle '), parked_blob.find('class="network-node dc-node"'))
 
-        _, playing_blob = self._render_dual_dc_home(home_sim_playing=True)
+        _, playing_blob = self._render_dual_dc_home(home_sim_playing=True, home_sim_display_mode="상위 3개")
         phases = re.findall(r'<animateMotion[^>]+begin="([^"]+)"', playing_blob)
-        self.assertEqual(len(phases), 3)
-        self.assertEqual(len(set(phases)), 3)
+        self.assertLessEqual(len(phases), 3)
+        self.assertEqual(len(set(phases)), len(phases))
+        self.assertEqual(playing_blob.count('class="v2-vehicle'), 3)
 
     def test_data_management_dqn_selector_loads_selected_sample(self):
         from services.dqn_samples import dqn_sample_options

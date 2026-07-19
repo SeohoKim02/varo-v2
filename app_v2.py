@@ -60,6 +60,10 @@ def initialize_session_state() -> None:
         "simulation_speed": "보통",
         "show_all_routes": False,
         "home_sim_playing": False,
+        "home_sim_route_rank": "1순위",
+        "home_sim_display_mode": "단일 경로",
+        "home_sim_inventory_view": "전후 비교",
+        "home_sim_run_nonce": 0,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -67,7 +71,7 @@ def initialize_session_state() -> None:
     for legacy_key in (
         "v2_uploaded_data", "v2_uploaded_file_name", "v2_standard_recommendations",
         "v2_selected_route_id", "v2_simulation_snapshot", "v2_simulation_speed",
-        "v2_show_all_routes",
+        "v2_show_all_routes", "v2_home_sim_route_rank", "v2_home_sim_display_mode",
     ):
         st.session_state.pop(legacy_key, None)
 

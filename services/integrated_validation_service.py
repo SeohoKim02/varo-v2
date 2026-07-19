@@ -954,34 +954,3 @@ def integrated_excel_bytes(result: Mapping[str, Any]) -> bytes:
 
 def integrated_json_bytes(result: Mapping[str, Any]) -> bytes:
     return json.dumps(_json_safe(result), ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
-
-
-def submission_summary_text(result: Mapping[str, Any]) -> str:
-    summary = result.get("summary") or {}
-    samples = result.get("samples") or []
-    original_biased = sum(
-        ((item.get("dqn") or {}).get("original") or {}).get("quality_status") == "검토 필요"
-        for item in samples
-    )
-    balanced_improved = sum(bool((item.get("dqn") or {}).get("improved_vs_original")) for item in samples)
-    limited = sum(bool((item.get("optimality") or {}).get("limited")) for item in samples)
-    limitations = [
-        "DQN 데이터 품질 진단은 모델 성능 보장을 의미하지 않습니다.",
-        "민감도는 선택한 OAT 범위에서의 순위 안정성 결과입니다.",
-        "최적성 Gap은 동일 후보·제약 조건 내 비교이며 실제 운영 전 현장 검토가 필요합니다.",
-    ]
-    if limited:
-        limitations.append(f"{limited}개 샘플은 정확해 인증이 아닌 제한 탐색 결과입니다.")
-    return "\n".join((
-        "VARO V2 전체 샘플 통합 검증 요약",
-        f"- 검증 샘플: {summary.get('sample_count', 0)}개 (정상 {summary.get('normal_count', 0)}, 확인 필요 {summary.get('review_count', 0)}, 실패 {summary.get('failure_count', 0)})",
-        f"- 전체 예상 절감액: {float(summary.get('total_expected_saving') or 0):,.0f}원",
-        f"- 평균 VHS: {summary.get('average_vhs') if summary.get('average_vhs') is not None else '-'}",
-        f"- 원본 DQN 품질 편향 확인 대상: {original_biased}개",
-        f"- 균형형 DQN 데이터 품질 개선: {balanced_improved}개",
-        f"- 평균 민감도 안정성: {summary.get('average_sensitivity_score') if summary.get('average_sensitivity_score') is not None else '빠른 요약 범위에서는 미계산'}",
-        f"- 평균 목표 달성률: {summary.get('average_target_pct') if summary.get('average_target_pct') is not None else '-'}%",
-        f"- 평균 Varo Gap: {summary.get('average_varo_gap_pct') if summary.get('average_varo_gap_pct') is not None else '-'}%",
-        "- 주요 한계: " + " ".join(limitations),
-    ))
-

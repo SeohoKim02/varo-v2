@@ -80,11 +80,11 @@ class OverviewSpeedContractTests(unittest.TestCase):
 
     def test_toolbar_and_legend_match_home_contract(self):
         source = (Path(__file__).resolve().parents[1] / "pages" / "overview.py").read_text(encoding="utf-8")
-        self.assertIn("st.columns([1.25, 1.1, 0.35, 0.85, 0.9]", source)
+        self.assertIn("st.columns([0.92, 1.05, 1.12, 0.92, 0.82, 1.02, 1.08]", source)
         self.assertIn('label_visibility="collapsed"', source)
         for text in (
-            "실선: 점포 간 직접 이동", "점선: 물류센터 경유",
-            "파란 박스: 점포", "노란 박스: 물류센터", "차량 아이콘: 이동 경로",
+            "실선: 직접 이동", "점선: 물류센터 경유",
+            "초과재고", "적정재고", "부족재고", "데이터 부족",
         ):
             self.assertIn(text, source)
 
@@ -94,11 +94,12 @@ class OverviewSpeedContractTests(unittest.TestCase):
     def test_vehicle_icon_exposes_transport_mode_not_a_plain_dot(self):
         from pages.overview import _truck_icon
 
-        markup = _truck_icon("#1f766d", "#2d6fa8", "#e7f1fb", "냉장", "TOP1")
+        markup = _truck_icon("#1f766d", "#2d6fa8", "#e7f1fb", "냉장", "추천 1", "상품", "5개", "출고 → 입고")
         self.assertGreaterEqual(markup.count("<rect"), 4)
         self.assertGreaterEqual(markup.count("<circle"), 2)
         self.assertIn("냉장", markup)
-        self.assertIn("TOP1", markup)
+        self.assertIn("추천 1", markup)
+        self.assertNotIn("TOP" + "1", markup)
 
 
 if __name__ == "__main__":

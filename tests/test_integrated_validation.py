@@ -36,7 +36,6 @@ from services.integrated_validation_service import (
     run_sample_validation,
     sample_catalog,
     sensitivity_result_frame,
-    submission_summary_text,
 )
 
 
@@ -216,7 +215,6 @@ class IntegratedValidationServiceTests(unittest.TestCase):
             "종합 요약", "VHS_Greedy", "DQN_Comparison", "Pareto_Sensitivity",
             "Optimality_Gap", "Errors", "Metadata",
         })
-        self.assertIn("모델 성능 보장", submission_summary_text(result))
 
 
 class IntegratedValidationAppTests(unittest.TestCase):
@@ -228,7 +226,7 @@ class IntegratedValidationAppTests(unittest.TestCase):
             app.session_state["current_menu"] = "분석 및 검증"
             app.run()
             self.assertFalse(app.exception)
-            self.assertIn("전체 샘플 통합 검증", [tab.label for tab in app.tabs])
+            self.assertIn("전체 샘플 품질 검증", [tab.label for tab in app.tabs])
             self.assertIn("통합 검증 실행", {button.label for button in app.button})
             self.assertIsNone(app.session_state["integrated_validation_result"])
             runner.assert_not_called()
@@ -255,8 +253,9 @@ class IntegratedValidationAppTests(unittest.TestCase):
         downloads = {button.label for button in app.get("download_button")}
         self.assertTrue({
             "전체 통합 요약 CSV", "전체 상세 결과 CSV", "DQN 비교 CSV", "민감도 결과 CSV",
-            "최적성 Gap 결과 CSV", "오류 내역 CSV", "전체 JSON", "통합 Excel", "제출용 요약 TXT",
+            "최적성 Gap 결과 CSV", "오류 내역 CSV", "전체 JSON", "통합 Excel",
         }.issubset(downloads))
+        self.assertEqual(len(downloads), 8)
 
         app.session_state["current_menu"] = "홈"
         app.run()

@@ -7,6 +7,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 DC = "DC"
 STORE = "STORE"
+SIMULATION_LAYOUT_VERSION = "dynamic-layout-2026-07-20.2"
 
 ID_KEYS = ("node_id", "store_id", "dc_id", "id")
 NAME_KEYS = ("node_name", "store_name", "dc_name", "name")
@@ -235,27 +236,75 @@ def _geo_positions(
 
 def _separate(
     nodes: Sequence[Mapping[str, object]], positions: Mapping[str, tuple[float, float]],
-    width: float, height: float, margin: float,
+    width: float, height: float, margin: float, recommended: set[str],
 ) -> dict[str, tuple[float, float]]:
     minimum = 170.0 if len(nodes) <= 12 else 145.0 if len(nodes) <= 16 else 78.0 if len(nodes) <= 30 else 48.0
     result: dict[str, tuple[float, float]] = {}
-    safe_x = max(margin, 104.0 if len(nodes) <= 16 else margin)
-    safe_y = max(margin, 64.0 if len(nodes) <= 16 else margin)
+    store_count = sum(classify_node(row) == STORE for row in nodes)
+    store_width, store_height = _dimensions(store_count)
+    detailed_width = max(194.0, store_width + 24.0) if store_count <= 16 else store_width + 12.0
+    detailed_height = max(132.0, store_height + 58.0) if store_count <= 16 else store_height + 24.0
+    dc_width, dc_height = max(202.0, store_width * 1.35), max(112.0, store_height * 1.45)
+    max_width = max(detailed_width, dc_width)
+    max_height = max(detailed_height, dc_height)
+    safe_x = max(margin, max_width / 2 + 8.0)
+    safe_y = max(margin, max_height / 2 + 8.0)
+    placed_sizes: dict[str, tuple[float, float]] = {}
+
+    def card_size(row: Mapping[str, object]) -> tuple[float, float]:
+        if classify_node(row) == DC:
+            return dc_width, dc_height
+        node_id = _value(row, ("node_id",))
+        return (detailed_width, detailed_height) if node_id in recommended else (store_width, store_height)
+
+    def clear(candidate_x: float, candidate_y: float, candidate_width: float, candidate_height: float) -> bool:
+        for placed_id, (placed_x, placed_y) in result.items():
+            placed_width, placed_height = placed_sizes[placed_id]
+            horizontal_gap = (candidate_width + placed_width) / 2 + 10.0
+            vertical_gap = (candidate_height + placed_height) / 2 + 10.0
+            if abs(candidate_x - placed_x) < horizontal_gap and abs(candidate_y - placed_y) < vertical_gap:
+                return False
+        return True
+
     ordered_nodes = _sort(row for row in nodes if classify_node(row) == DC) + _sort(
         row for row in nodes if classify_node(row) != DC
     )
     for index, row in enumerate(ordered_nodes):
         node_id = _value(row, ("node_id",))
         base_x, base_y = positions[node_id]
+        node_width, node_height = card_size(row)
         x, y = base_x, base_y
-        for attempt in range(16):
-            if all(math.hypot(x - px, y - py) >= minimum for px, py in result.values()):
+        found = False
+        for attempt in range(48):
+            if (
+                all(math.hypot(x - px, y - py) >= minimum for px, py in result.values())
+                and clear(x, y, node_width, node_height)
+            ):
+                found = True
                 break
             angle = (index * 2.399963 + attempt * 0.83) % (2 * math.pi)
             radius = minimum * (0.35 + attempt * 0.18)
             x = max(safe_x, min(base_x + radius * math.cos(angle), width - safe_x))
             y = max(safe_y, min(base_y + radius * math.sin(angle), height - safe_y))
+        if not found:
+            columns = 5
+            rows = max(3, math.ceil(len(nodes) / columns))
+            fallback_positions = [
+                (
+                    safe_x + column * (width - 2 * safe_x) / max(1, columns - 1),
+                    safe_y + grid_row * (height - 2 * safe_y) / max(1, rows - 1),
+                )
+                for grid_row in range(rows)
+                for column in range(columns)
+            ]
+            valid_positions = [
+                point for point in fallback_positions
+                if clear(point[0], point[1], node_width, node_height)
+            ]
+            if valid_positions:
+                x, y = min(valid_positions, key=lambda point: (math.hypot(point[0] - base_x, point[1] - base_y), point[1], point[0]))
         result[node_id] = (round(x, 2), round(y, 2))
+        placed_sizes[node_id] = (node_width, node_height)
     return result
 
 
@@ -343,6 +392,7 @@ def _node_position(
 ) -> dict[str, object]:
     node_id = _value(row, ("node_id",))
     return {
+        **dict(row),
         "node_id": node_id,
         "node_name": _value(row, ("node_name",), node_id),
         "node_type": classify_node(row),
@@ -380,7 +430,9 @@ def compute_dynamic_layout(
 
     recommended = _recommended_ids(recommendation_rows, limit=5)
     store_width, store_height = _dimensions(len(stores))
-    dc_width, dc_height = max(188.0, store_width * 1.35), max(88.0, store_height * 1.45)
+    detailed_width = max(194.0, store_width + 24.0) if len(stores) <= 16 else store_width + 12.0
+    detailed_height = max(132.0, store_height + 58.0) if len(stores) <= 16 else store_height + 24.0
+    dc_width, dc_height = max(202.0, store_width * 1.35), max(112.0, store_height * 1.45)
     geographic = _coordinate_mode(deduped)
     dc_rows: list[dict[str, object]] = []
     store_rows: list[dict[str, object]] = []
@@ -396,7 +448,7 @@ def compute_dynamic_layout(
         if len(ordered_stores) <= 3:
             for node_id, (x, y, _) in _small_store_positions(ordered_stores, width, height).items():
                 base_positions[node_id] = (x, y)
-        positions = _separate(deduped, base_positions, width, height, margin)
+        positions = _separate(deduped, base_positions, width, height, margin, recommended)
         for row in dcs:
             x, y = positions[_value(row, ("node_id",))]
             dc_rows.append(_node_position(row, x, y, dc_width, dc_height, recommended, True))
@@ -405,7 +457,7 @@ def compute_dynamic_layout(
             x, y = positions[node_id]
             emphasis = node_id in recommended
             store_rows.append(_node_position(
-                row, x, y, store_width + (12 if emphasis else 0), store_height + (6 if emphasis else 0),
+                row, x, y, detailed_width if emphasis else store_width, detailed_height if emphasis else store_height,
                 recommended, len(stores) <= 30 or emphasis or index % 3 == 0,
             ))
     else:
@@ -422,7 +474,7 @@ def compute_dynamic_layout(
             x, y, angle = positions[node_id]
             emphasis = node_id in recommended
             store_rows.append(_node_position(
-                row, x, y, store_width + (12 if emphasis else 0), store_height + (6 if emphasis else 0),
+                row, x, y, detailed_width if emphasis else store_width, detailed_height if emphasis else store_height,
                 recommended, len(stores) <= 30 or emphasis or index % 3 == 0, angle,
             ))
 
@@ -440,6 +492,7 @@ def compute_dynamic_layout(
             "dc_count": len(dc_rows),
             "store_count": len(store_rows),
             "ring_count": len(_ring_specs(len(stores), width, height)) if stores else 0,
+            "layout_version": SIMULATION_LAYOUT_VERSION,
         },
     )
 

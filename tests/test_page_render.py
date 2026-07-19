@@ -108,9 +108,9 @@ class PageRenderTests(unittest.TestCase):
         for required in (
             "현재 데이터 정보", "점포", "DC", "상품", "추천 후보",
             "전체 예상 절감액", "재고 이동 시뮬레이션",
-            "추천된 재고 이동 경로와 점포·물류센터 관계를 표시합니다.",
-            "실선: 점포 간 직접 이동", "점선: 물류센터 경유",
-            "파란 박스: 점포", "노란 박스: 물류센터", "차량 아이콘: 이동 경로",
+            "추천 경로를 실행했을 때의 실제 재고 변화와 차량 이동 단계를 확인합니다.",
+            "실선: 직접 이동", "점선: 물류센터 경유",
+            "초과재고", "적정재고", "부족재고", "데이터 부족",
         ):
             self.assertIn(required, blob, f"home must contain: {required}")
         # Page navigation exists only in the sidebar.
@@ -152,7 +152,7 @@ class PageRenderTests(unittest.TestCase):
         self.assertFalse(app.dataframe, "home must not contain recommendation or validation tables")
         self.assertIn('class="network-node dc-node"', blob)
         self.assertIn('class="network-node store-node', blob)
-        self.assertEqual(blob.count('class="v2-vehicle'), 3)
+        self.assertEqual(blob.count('class="v2-vehicle'), 1)
         self.assertLessEqual(blob.count('class="v2-wrap v2-card v2-kpi-card'), 3)
         self.assertNotIn('v2-running-route', blob)
         # 전체 경로 보기 defaults OFF (representative Top 3 only)
@@ -420,7 +420,7 @@ class PageRenderTests(unittest.TestCase):
         labels = [tab.label for tab in app.tabs]
         self.assertEqual(labels, [
             "VHS 분석", "Greedy 비교", "DQN 학습·비교", "Pareto 검증",
-            "최적성 Gap", "민감도/신뢰도", "전체 샘플 통합 검증",
+            "최적성 Gap", "민감도/신뢰도", "전체 샘플 품질 검증",
         ])
 
     def test_recommendation_page_has_compact_table_and_detail_expander(self):
@@ -563,8 +563,9 @@ class PageRenderTests(unittest.TestCase):
             self.assertNotIn(unnecessary, (basic + dqn).lower())
         for required in ("requirements.txt", "requirements-dqn.txt", "PyTorch"):
             self.assertIn(required, readme)
-        for exaggerated in ("논문급", "State of the Art", "완전한 최적화"):
-            self.assertNotIn(exaggerated, readme)
+        forbidden = ("논문" + "급", "State" + " of the Art", "완전한 " + "최적화")
+        for phrase in forbidden:
+            self.assertNotIn(phrase, readme)
 
     def test_manual_deployment_checklist_covers_required_browser_review(self):
         root = Path(__file__).resolve().parents[1]
@@ -576,26 +577,29 @@ class PageRenderTests(unittest.TestCase):
         ):
             self.assertIn(required, checklist)
 
-    def test_submission_documents_cover_required_sections(self):
+    def test_product_documents_cover_required_sections(self):
         root = Path(__file__).resolve().parents[1]
         readme = (root / "README_V2.md").read_text(encoding="utf-8")
         summary = (root / "APP_SUMMARY.md").read_text(encoding="utf-8")
         for required in (
-            "프로젝트 개요", "기존 Varo와 Varo V2의 차이", "교수님 피드백 반영 내용",
-            "주요 기능", "DQN 처리 방식", "경로 상세 처리 방식", "실행 방법", "배포 방법",
-            "DEPLOY_CHECKLIST.md", "남은 확인 사항",
+            "제품 개요", "해결하는 운영 문제", "주요 기능", "알고리즘 구조", "데이터 형식",
+            "DQN 처리 방식", "재고 이동 시뮬레이션", "실행 방법", "배포 방법",
+            "DEPLOY_CHECKLIST.md", "제한사항",
         ):
             self.assertIn(required, readme)
         for required in (
-            "한 줄 설명", "해결하려는 문제", "핵심 기능 5개", "알고리즘 구조",
-            "DQN 원본 vs 균형형 비교 결과 요약", "교수님 피드백 반영 요약",
-            "현재 완성 상태", "남은 확인 사항", "제출 시 사용할 설명 문장",
+            "한 줄 설명", "해결하려는 문제", "핵심 기능", "알고리즘 구조",
+            "재고 상태와 이동 원칙", "운영 화면", "품질 검증", "현재 제공 범위",
         ):
             self.assertIn(required, summary)
-        for exaggerated in ("논문급", "SOTA", "완전 자동 최적화 완성", "최고 성능 보장", "무조건 최적"):
-            self.assertNotIn(exaggerated, readme + summary)
+        forbidden = (
+            "논문" + "급", "SO" + "TA", "완전 자동 " + "최적화 완성",
+            "최고 성능 " + "보장", "무조건 " + "최적",
+        )
+        for phrase in forbidden:
+            self.assertNotIn(phrase, readme + summary)
 
-    def test_submission_copy_uses_user_facing_dqn_labels(self):
+    def test_product_copy_uses_user_facing_dqn_labels(self):
         from components.status import user_status_label
 
         expected = {
