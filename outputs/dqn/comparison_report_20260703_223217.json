@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-07-03T22:32:17",
+  "episodes": 80,
+  "sample_count": 1,
+  "entries": [
+    {
+      "sample_id": "01",
+      "variant": "original",
+      "dqn_status": "불안정"
+    }
+  ]
+}

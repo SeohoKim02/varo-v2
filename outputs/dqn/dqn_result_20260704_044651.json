@@ -1,0 +1,95 @@
+{
+  "status": "검토 필요",
+  "message": "action 분포가 한쪽으로 치우쳤습니다.",
+  "data_signature": "132531ec5a06d72473605777e1fa94b2073ad379006a5f980a9e0175e02b559e",
+  "timestamp": "2026-07-04T04:46:51",
+  "episodes": 0,
+  "learning_rate": 0.001,
+  "candidate_count": 4,
+  "sample_id": null,
+  "sample_name": null,
+  "store_count": null,
+  "dc_count": null,
+  "created_at": "2026-07-04T04:46:51",
+  "final_status": "검토 필요",
+  "stability_status": "검토 필요",
+  "action_distribution": {
+    "보류": 4
+  },
+  "reward_summary": {
+    "min": 0.445,
+    "max": 0.635,
+    "avg": 0.541648,
+    "last": 0.445
+  },
+  "loss_summary": {},
+  "reward_history": [
+    0.503685,
+    0.635,
+    0.582906,
+    0.445
+  ],
+  "loss_history": [],
+  "average_confidence": 19.64,
+  "reflection_mode": "DQN 참고만",
+  "model_status": "loaded",
+  "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\latest_dqn_model.pt",
+  "result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_result_20260704_044651.json",
+  "feature_columns": [
+    "expected_saving",
+    "savings_score",
+    "disposal_risk_score",
+    "days_to_expiry",
+    "expiry_days",
+    "demand_fit_score",
+    "inventory_balance_score",
+    "distance_km",
+    "move_cost",
+    "estimated_cost",
+    "expected_time_min",
+    "travel_time_min",
+    "route_cost_score",
+    "feasibility_score",
+    "promotion_score",
+    "vhs_score",
+    "greedy_rank",
+    "confidence_score"
+  ],
+  "action_labels": [
+    "재고 이동",
+    "DC 경유 이동",
+    "직접 이동",
+    "할인",
+    "긴급 할인",
+    "1+1",
+    "폐기",
+    "보류"
+  ],
+  "dqn_action_by_route": {
+    "REC0001": "보류",
+    "REC0002": "보류",
+    "REC0004": "보류",
+    "REC0003": "보류"
+  },
+  "dqn_confidence_by_route": {
+    "REC0001": 18.93,
+    "REC0002": 21.28,
+    "REC0004": 20.65,
+    "REC0003": 17.71
+  },
+  "dqn_reference_by_route": {
+    "REC0001": 41.57,
+    "REC0002": 51.68,
+    "REC0004": 47.75,
+    "REC0003": 37.0
+  },
+  "q_value_summary_by_route": {},
+  "dqn_status_by_route": {
+    "REC0001": "검토 필요",
+    "REC0002": "검토 필요",
+    "REC0004": "검토 필요",
+    "REC0003": "검토 필요"
+  },
+  "diagnostics": {},
+  "historical_artifacts_used": false
+}

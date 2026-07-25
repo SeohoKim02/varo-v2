@@ -1,0 +1,208 @@
+{
+  "status": "검토 필요",
+  "message": "action 분포가 한쪽으로 치우쳤습니다.",
+  "data_signature": "d623d1c8203a98f2887e4e72f9fdabc298b05604a83600cf361ba9495540ce91",
+  "timestamp": "2026-07-24T03:42:19",
+  "episodes": 40,
+  "learning_rate": 0.001,
+  "candidate_count": 8,
+  "sample_id": "selftest",
+  "sample_name": null,
+  "store_count": 6,
+  "dc_count": 1,
+  "created_at": "2026-07-24T03:42:19",
+  "final_status": "검토 필요",
+  "stability_status": "검토 필요",
+  "action_distribution": {
+    "할인": 8
+  },
+  "reward_summary": {
+    "min": 0.268842,
+    "max": 0.819479,
+    "avg": 0.565185,
+    "last": 0.324629
+  },
+  "loss_summary": {
+    "min": 0.002474,
+    "max": 0.021664,
+    "avg": 0.006586,
+    "last": 0.002474
+  },
+  "reward_history": [
+    0.819479,
+    0.644047,
+    0.621041,
+    0.692864,
+    0.631437,
+    0.268842,
+    0.51914,
+    0.324629
+  ],
+  "loss_history": [
+    0.021664,
+    0.019603,
+    0.017707,
+    0.015954,
+    0.014364,
+    0.012912,
+    0.011611,
+    0.010436,
+    0.009421,
+    0.008542,
+    0.007803,
+    0.007171,
+    0.006633,
+    0.006174,
+    0.005782,
+    0.005442,
+    0.005138,
+    0.004848,
+    0.004584,
+    0.004345,
+    0.004127,
+    0.003932,
+    0.00376,
+    0.003611,
+    0.003488,
+    0.003387,
+    0.003304,
+    0.003238,
+    0.003184,
+    0.003136,
+    0.003091,
+    0.003046,
+    0.002997,
+    0.002939,
+    0.002874,
+    0.002801,
+    0.002721,
+    0.002639,
+    0.002556,
+    0.002474
+  ],
+  "average_confidence": 20.34,
+  "reflection_mode": "DQN 참고만",
+  "model_status": "trained",
+  "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_selftest_s6dc1_original_ep40_lr0p001_20260724_034219.pt",
+  "result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_selftest_s6dc1_original_ep40_lr0p001_20260724_034219.json",
+  "feature_columns": [
+    "expected_saving",
+    "savings_score",
+    "disposal_risk_score",
+    "days_to_expiry",
+    "expiry_days",
+    "demand_fit_score",
+    "inventory_balance_score",
+    "distance_km",
+    "move_cost",
+    "estimated_cost",
+    "expected_time_min",
+    "travel_time_min",
+    "route_cost_score",
+    "feasibility_score",
+    "promotion_score",
+    "vhs_score",
+    "greedy_rank",
+    "confidence_score"
+  ],
+  "action_labels": [
+    "재고 이동",
+    "DC 경유 이동",
+    "직접 이동",
+    "할인",
+    "긴급 할인",
+    "1+1",
+    "폐기",
+    "보류"
+  ],
+  "dqn_action_by_route": {
+    "R001": "할인",
+    "R003": "할인",
+    "R007": "할인",
+    "R002": "할인",
+    "R005": "할인",
+    "R004": "할인",
+    "R006": "할인",
+    "R008": "할인"
+  },
+  "dqn_confidence_by_route": {
+    "R001": 21.9,
+    "R003": 20.51,
+    "R007": 20.65,
+    "R002": 21.02,
+    "R005": 21.16,
+    "R004": 18.82,
+    "R006": 19.92,
+    "R008": 18.73
+  },
+  "dqn_reference_by_route": {
+    "R001": 65.13,
+    "R003": 52.11,
+    "R007": 50.5,
+    "R002": 55.77,
+    "R005": 51.39,
+    "R004": 24.63,
+    "R006": 42.96,
+    "R008": 28.62
+  },
+  "q_value_summary_by_route": {
+    "R001": {
+      "max": 0.672864,
+      "min": -0.063392,
+      "avg": 0.081798
+    },
+    "R003": {
+      "max": 0.587268,
+      "min": -0.03316,
+      "avg": 0.069554
+    },
+    "R007": {
+      "max": 0.599063,
+      "min": -0.023776,
+      "avg": 0.074186
+    },
+    "R002": {
+      "max": 0.622636,
+      "min": -0.024805,
+      "avg": 0.078019
+    },
+    "R005": {
+      "max": 0.62616,
+      "min": -0.042598,
+      "avg": 0.073827
+    },
+    "R004": {
+      "max": 0.497573,
+      "min": -0.038141,
+      "avg": 0.073875
+    },
+    "R006": {
+      "max": 0.562408,
+      "min": -0.03079,
+      "avg": 0.076676
+    },
+    "R008": {
+      "max": 0.491676,
+      "min": -0.022755,
+      "avg": 0.073018
+    }
+  },
+  "dqn_status_by_route": {
+    "R001": "검토 필요",
+    "R003": "검토 필요",
+    "R007": "검토 필요",
+    "R002": "검토 필요",
+    "R005": "검토 필요",
+    "R004": "검토 필요",
+    "R006": "검토 필요",
+    "R008": "검토 필요"
+  },
+  "diagnostics": {
+    "historical_artifacts_used": false,
+    "target_action_distribution": {
+      "할인": 8
+    },
+    "latest_model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\latest_dqn_model.pt"
+  },
+  "historical_artifacts_used": false
+}

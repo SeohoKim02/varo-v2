@@ -1,0 +1,658 @@
+{
+  "generated_at": "2026-07-03T23:39:57",
+  "episodes": 80,
+  "sample_count": 10,
+  "entries": [
+    {
+      "sample_id": "01",
+      "sample_name": "Varo_DQN_sample_01_2stores_1dc_fresh_meal.xlsx",
+      "variant": "original",
+      "store_count": 2,
+      "dc_count": 1,
+      "candidate_count": 4,
+      "action_distribution": {
+        "보류": 4
+      },
+      "prediction_distribution": {
+        "보류": 4
+      },
+      "initial_loss": 0.055369,
+      "final_loss": 0.000321,
+      "reward_summary": {
+        "min": 0.38,
+        "max": 0.647906,
+        "avg": 0.538912,
+        "last": 0.38
+      },
+      "stability_status": "검토 필요",
+      "dqn_status": "검토 필요",
+      "dqn_reflection_available": false,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_01_s2dc1_original_ep80_lr0p001_20260703_233947.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_01_s2dc1_original_ep80_lr0p001_20260703_233947.pt"
+    },
+    {
+      "sample_id": "01",
+      "sample_name": "balanced_01_Varo_DQN_sample_01_2stores_1dc_fresh_meal.xlsx",
+      "variant": "balanced",
+      "store_count": 2,
+      "dc_count": 1,
+      "candidate_count": 4,
+      "action_distribution": {
+        "DC 경유 이동": 1,
+        "재고 이동": 1,
+        "긴급 할인": 1,
+        "할인": 1
+      },
+      "prediction_distribution": {
+        "DC 경유 이동": 1,
+        "재고 이동": 1,
+        "긴급 할인": 1,
+        "할인": 1
+      },
+      "initial_loss": 0.047137,
+      "final_loss": 0.009796,
+      "reward_summary": {
+        "min": 0.38,
+        "max": 0.647906,
+        "avg": 0.538912,
+        "last": 0.38
+      },
+      "stability_status": "정상",
+      "dqn_status": "정상",
+      "dqn_reflection_available": true,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_01_s2dc1_balanced_ep80_lr0p001_20260703_233947.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_01_s2dc1_balanced_ep80_lr0p001_20260703_233947.pt"
+    },
+    {
+      "sample_id": "02",
+      "sample_name": "Varo_DQN_sample_02_4stores_1dc_frozen.xlsx",
+      "variant": "original",
+      "store_count": 4,
+      "dc_count": 1,
+      "candidate_count": 16,
+      "action_distribution": {
+        "보류": 16
+      },
+      "prediction_distribution": {
+        "보류": 16
+      },
+      "initial_loss": 0.041085,
+      "final_loss": 0.000957,
+      "reward_summary": {
+        "min": 0.179051,
+        "max": 0.735995,
+        "avg": 0.443348,
+        "last": 0.32507
+      },
+      "stability_status": "검토 필요",
+      "dqn_status": "검토 필요",
+      "dqn_reflection_available": false,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_02_s4dc1_original_ep80_lr0p001_20260703_233948.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_02_s4dc1_original_ep80_lr0p001_20260703_233948.pt"
+    },
+    {
+      "sample_id": "02",
+      "sample_name": "balanced_02_Varo_DQN_sample_02_4stores_1dc_frozen.xlsx",
+      "variant": "balanced",
+      "store_count": 4,
+      "dc_count": 1,
+      "candidate_count": 16,
+      "action_distribution": {
+        "재고 이동": 3,
+        "보류": 3,
+        "할인": 3,
+        "긴급 할인": 3,
+        "DC 경유 이동": 3,
+        "폐기": 1
+      },
+      "prediction_distribution": {
+        "재고 이동": 3,
+        "보류": 2,
+        "DC 경유 이동": 3,
+        "긴급 할인": 6,
+        "할인": 2
+      },
+      "initial_loss": 0.03907,
+      "final_loss": 0.01192,
+      "reward_summary": {
+        "min": 0.179051,
+        "max": 0.735995,
+        "avg": 0.443348,
+        "last": 0.32507
+      },
+      "stability_status": "정상",
+      "dqn_status": "정상",
+      "dqn_reflection_available": true,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_02_s4dc1_balanced_ep80_lr0p001_20260703_233948.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_02_s4dc1_balanced_ep80_lr0p001_20260703_233948.pt"
+    },
+    {
+      "sample_id": "03",
+      "sample_name": "Varo_DQN_sample_03_4stores_1dc_dairy_bakery.xlsx",
+      "variant": "original",
+      "store_count": 4,
+      "dc_count": 1,
+      "candidate_count": 17,
+      "action_distribution": {
+        "보류": 17
+      },
+      "prediction_distribution": {
+        "보류": 17
+      },
+      "initial_loss": 0.038142,
+      "final_loss": 0.000507,
+      "reward_summary": {
+        "min": 0.262652,
+        "max": 0.733138,
+        "avg": 0.470933,
+        "last": 0.444244
+      },
+      "stability_status": "검토 필요",
+      "dqn_status": "검토 필요",
+      "dqn_reflection_available": false,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_03_s4dc1_original_ep80_lr0p001_20260703_233949.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_03_s4dc1_original_ep80_lr0p001_20260703_233949.pt"
+    },
+    {
+      "sample_id": "03",
+      "sample_name": "balanced_03_Varo_DQN_sample_03_4stores_1dc_dairy_bakery.xlsx",
+      "variant": "balanced",
+      "store_count": 4,
+      "dc_count": 1,
+      "candidate_count": 17,
+      "action_distribution": {
+        "할인": 4,
+        "긴급 할인": 3,
+        "보류": 4,
+        "DC 경유 이동": 1,
+        "재고 이동": 3,
+        "폐기": 2
+      },
+      "prediction_distribution": {
+        "긴급 할인": 5,
+        "보류": 4,
+        "DC 경유 이동": 1,
+        "재고 이동": 5,
+        "할인": 2
+      },
+      "initial_loss": 0.035203,
+      "final_loss": 0.012483,
+      "reward_summary": {
+        "min": 0.262652,
+        "max": 0.733138,
+        "avg": 0.470933,
+        "last": 0.444244
+      },
+      "stability_status": "정상",
+      "dqn_status": "정상",
+      "dqn_reflection_available": true,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_03_s4dc1_balanced_ep80_lr0p001_20260703_233949.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_03_s4dc1_balanced_ep80_lr0p001_20260703_233949.pt"
+    },
+    {
+      "sample_id": "04",
+      "sample_name": "Varo_DQN_sample_04_5stores_1dc_produce.xlsx",
+      "variant": "original",
+      "store_count": 5,
+      "dc_count": 1,
+      "candidate_count": 30,
+      "action_distribution": {
+        "보류": 30
+      },
+      "prediction_distribution": {
+        "보류": 30
+      },
+      "initial_loss": 0.051136,
+      "final_loss": 0.000837,
+      "reward_summary": {
+        "min": 0.369847,
+        "max": 0.758597,
+        "avg": 0.543172,
+        "last": 0.427374
+      },
+      "stability_status": "검토 필요",
+      "dqn_status": "검토 필요",
+      "dqn_reflection_available": false,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_04_s5dc1_original_ep80_lr0p001_20260703_233950.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_04_s5dc1_original_ep80_lr0p001_20260703_233950.pt"
+    },
+    {
+      "sample_id": "04",
+      "sample_name": "balanced_04_Varo_DQN_sample_04_5stores_1dc_produce.xlsx",
+      "variant": "balanced",
+      "store_count": 5,
+      "dc_count": 1,
+      "candidate_count": 30,
+      "action_distribution": {
+        "폐기": 4,
+        "보류": 5,
+        "할인": 5,
+        "DC 경유 이동": 5,
+        "긴급 할인": 5,
+        "재고 이동": 6
+      },
+      "prediction_distribution": {
+        "폐기": 2,
+        "재고 이동": 9,
+        "보류": 3,
+        "DC 경유 이동": 8,
+        "긴급 할인": 7,
+        "할인": 1
+      },
+      "initial_loss": 0.044901,
+      "final_loss": 0.018846,
+      "reward_summary": {
+        "min": 0.369847,
+        "max": 0.758597,
+        "avg": 0.543172,
+        "last": 0.427374
+      },
+      "stability_status": "정상",
+      "dqn_status": "정상",
+      "dqn_reflection_available": true,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_04_s5dc1_balanced_ep80_lr0p001_20260703_233951.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_04_s5dc1_balanced_ep80_lr0p001_20260703_233951.pt"
+    },
+    {
+      "sample_id": "05",
+      "sample_name": "Varo_DQN_sample_05_5stores_1dc_bakery.xlsx",
+      "variant": "original",
+      "store_count": 5,
+      "dc_count": 1,
+      "candidate_count": 27,
+      "action_distribution": {
+        "보류": 27
+      },
+      "prediction_distribution": {
+        "보류": 27
+      },
+      "initial_loss": 0.036332,
+      "final_loss": 0.000512,
+      "reward_summary": {
+        "min": 0.326967,
+        "max": 0.788498,
+        "avg": 0.480296,
+        "last": 0.393677
+      },
+      "stability_status": "검토 필요",
+      "dqn_status": "검토 필요",
+      "dqn_reflection_available": false,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_05_s5dc1_original_ep80_lr0p001_20260703_233951.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_05_s5dc1_original_ep80_lr0p001_20260703_233951.pt"
+    },
+    {
+      "sample_id": "05",
+      "sample_name": "balanced_05_Varo_DQN_sample_05_5stores_1dc_bakery.xlsx",
+      "variant": "balanced",
+      "store_count": 5,
+      "dc_count": 1,
+      "candidate_count": 27,
+      "action_distribution": {
+        "긴급 할인": 5,
+        "폐기": 4,
+        "보류": 5,
+        "DC 경유 이동": 3,
+        "재고 이동": 5,
+        "할인": 5
+      },
+      "prediction_distribution": {
+        "재고 이동": 10,
+        "폐기": 4,
+        "보류": 5,
+        "DC 경유 이동": 2,
+        "긴급 할인": 6
+      },
+      "initial_loss": 0.03586,
+      "final_loss": 0.016206,
+      "reward_summary": {
+        "min": 0.326967,
+        "max": 0.788498,
+        "avg": 0.480296,
+        "last": 0.393677
+      },
+      "stability_status": "정상",
+      "dqn_status": "정상",
+      "dqn_reflection_available": true,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_05_s5dc1_balanced_ep80_lr0p001_20260703_233952.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_05_s5dc1_balanced_ep80_lr0p001_20260703_233952.pt"
+    },
+    {
+      "sample_id": "06",
+      "sample_name": "Varo_DQN_sample_06_6stores_1dc_beverage_dry.xlsx",
+      "variant": "original",
+      "store_count": 6,
+      "dc_count": 1,
+      "candidate_count": 35,
+      "action_distribution": {
+        "보류": 2,
+        "할인": 33
+      },
+      "prediction_distribution": {
+        "할인": 35
+      },
+      "initial_loss": 0.024876,
+      "final_loss": 0.003496,
+      "reward_summary": {
+        "min": 0.283253,
+        "max": 0.844547,
+        "avg": 0.560493,
+        "last": 0.283253
+      },
+      "stability_status": "검토 필요",
+      "dqn_status": "검토 필요",
+      "dqn_reflection_available": false,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_06_s6dc1_original_ep80_lr0p001_20260703_233952.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_06_s6dc1_original_ep80_lr0p001_20260703_233952.pt"
+    },
+    {
+      "sample_id": "06",
+      "sample_name": "balanced_06_Varo_DQN_sample_06_6stores_1dc_beverage_dry.xlsx",
+      "variant": "balanced",
+      "store_count": 6,
+      "dc_count": 1,
+      "candidate_count": 35,
+      "action_distribution": {
+        "할인": 8,
+        "재고 이동": 7,
+        "폐기": 4,
+        "DC 경유 이동": 4,
+        "긴급 할인": 6,
+        "보류": 6
+      },
+      "prediction_distribution": {
+        "긴급 할인": 2,
+        "재고 이동": 11,
+        "할인": 9,
+        "DC 경유 이동": 6,
+        "보류": 7
+      },
+      "initial_loss": 0.046219,
+      "final_loss": 0.019946,
+      "reward_summary": {
+        "min": 0.283253,
+        "max": 0.844547,
+        "avg": 0.560493,
+        "last": 0.283253
+      },
+      "stability_status": "정상",
+      "dqn_status": "정상",
+      "dqn_reflection_available": true,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_06_s6dc1_balanced_ep80_lr0p001_20260703_233953.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_06_s6dc1_balanced_ep80_lr0p001_20260703_233953.pt"
+    },
+    {
+      "sample_id": "07",
+      "sample_name": "Varo_DQN_sample_07_6stores_1dc_meat_egg.xlsx",
+      "variant": "original",
+      "store_count": 6,
+      "dc_count": 1,
+      "candidate_count": 30,
+      "action_distribution": {
+        "보류": 30
+      },
+      "prediction_distribution": {
+        "보류": 30
+      },
+      "initial_loss": 0.041587,
+      "final_loss": 0.001043,
+      "reward_summary": {
+        "min": 0.259992,
+        "max": 0.887653,
+        "avg": 0.462861,
+        "last": 0.488631
+      },
+      "stability_status": "검토 필요",
+      "dqn_status": "검토 필요",
+      "dqn_reflection_available": false,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_07_s6dc1_original_ep80_lr0p001_20260703_233953.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_07_s6dc1_original_ep80_lr0p001_20260703_233953.pt"
+    },
+    {
+      "sample_id": "07",
+      "sample_name": "balanced_07_Varo_DQN_sample_07_6stores_1dc_meat_egg.xlsx",
+      "variant": "balanced",
+      "store_count": 6,
+      "dc_count": 1,
+      "candidate_count": 30,
+      "action_distribution": {
+        "재고 이동": 5,
+        "폐기": 4,
+        "DC 경유 이동": 5,
+        "할인": 5,
+        "긴급 할인": 5,
+        "보류": 6
+      },
+      "prediction_distribution": {
+        "재고 이동": 6,
+        "폐기": 5,
+        "보류": 5,
+        "긴급 할인": 9,
+        "DC 경유 이동": 5
+      },
+      "initial_loss": 0.037988,
+      "final_loss": 0.012624,
+      "reward_summary": {
+        "min": 0.259992,
+        "max": 0.887653,
+        "avg": 0.462861,
+        "last": 0.488631
+      },
+      "stability_status": "정상",
+      "dqn_status": "정상",
+      "dqn_reflection_available": true,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_07_s6dc1_balanced_ep80_lr0p001_20260703_233954.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_07_s6dc1_balanced_ep80_lr0p001_20260703_233954.pt"
+    },
+    {
+      "sample_id": "08",
+      "sample_name": "Varo_DQN_sample_08_6stores_1dc_seafood.xlsx",
+      "variant": "original",
+      "store_count": 6,
+      "dc_count": 1,
+      "candidate_count": 35,
+      "action_distribution": {
+        "보류": 35
+      },
+      "prediction_distribution": {
+        "보류": 35
+      },
+      "initial_loss": 0.035198,
+      "final_loss": 0.000712,
+      "reward_summary": {
+        "min": 0.206979,
+        "max": 0.775387,
+        "avg": 0.435503,
+        "last": 0.206979
+      },
+      "stability_status": "검토 필요",
+      "dqn_status": "검토 필요",
+      "dqn_reflection_available": false,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_08_s6dc1_original_ep80_lr0p001_20260703_233954.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_08_s6dc1_original_ep80_lr0p001_20260703_233954.pt"
+    },
+    {
+      "sample_id": "08",
+      "sample_name": "balanced_08_Varo_DQN_sample_08_6stores_1dc_seafood.xlsx",
+      "variant": "balanced",
+      "store_count": 6,
+      "dc_count": 1,
+      "candidate_count": 35,
+      "action_distribution": {
+        "폐기": 6,
+        "DC 경유 이동": 5,
+        "긴급 할인": 6,
+        "보류": 6,
+        "재고 이동": 6,
+        "할인": 6
+      },
+      "prediction_distribution": {
+        "폐기": 10,
+        "할인": 3,
+        "재고 이동": 9,
+        "긴급 할인": 6,
+        "DC 경유 이동": 6,
+        "보류": 1
+      },
+      "initial_loss": 0.033964,
+      "final_loss": 0.011879,
+      "reward_summary": {
+        "min": 0.206979,
+        "max": 0.775387,
+        "avg": 0.435503,
+        "last": 0.206979
+      },
+      "stability_status": "정상",
+      "dqn_status": "정상",
+      "dqn_reflection_available": true,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_08_s6dc1_balanced_ep80_lr0p001_20260703_233955.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_08_s6dc1_balanced_ep80_lr0p001_20260703_233955.pt"
+    },
+    {
+      "sample_id": "09",
+      "sample_name": "Varo_DQN_sample_09_8stores_1dc_meal_kit.xlsx",
+      "variant": "original",
+      "store_count": 8,
+      "dc_count": 1,
+      "candidate_count": 35,
+      "action_distribution": {
+        "보류": 35
+      },
+      "prediction_distribution": {
+        "보류": 35
+      },
+      "initial_loss": 0.036125,
+      "final_loss": 0.000581,
+      "reward_summary": {
+        "min": 0.23459,
+        "max": 0.827459,
+        "avg": 0.43994,
+        "last": 0.23459
+      },
+      "stability_status": "검토 필요",
+      "dqn_status": "검토 필요",
+      "dqn_reflection_available": false,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_09_s8dc1_original_ep80_lr0p001_20260703_233955.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_09_s8dc1_original_ep80_lr0p001_20260703_233955.pt"
+    },
+    {
+      "sample_id": "09",
+      "sample_name": "balanced_09_Varo_DQN_sample_09_8stores_1dc_meal_kit.xlsx",
+      "variant": "balanced",
+      "store_count": 8,
+      "dc_count": 1,
+      "candidate_count": 35,
+      "action_distribution": {
+        "DC 경유 이동": 6,
+        "재고 이동": 6,
+        "보류": 6,
+        "긴급 할인": 6,
+        "할인": 6,
+        "폐기": 5
+      },
+      "prediction_distribution": {
+        "DC 경유 이동": 12,
+        "재고 이동": 12,
+        "폐기": 6,
+        "긴급 할인": 5
+      },
+      "initial_loss": 0.035912,
+      "final_loss": 0.013209,
+      "reward_summary": {
+        "min": 0.23459,
+        "max": 0.827459,
+        "avg": 0.43994,
+        "last": 0.23459
+      },
+      "stability_status": "정상",
+      "dqn_status": "정상",
+      "dqn_reflection_available": true,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_09_s8dc1_balanced_ep80_lr0p001_20260703_233956.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_09_s8dc1_balanced_ep80_lr0p001_20260703_233956.pt"
+    },
+    {
+      "sample_id": "10",
+      "sample_name": "Varo_DQN_sample_10_10stores_2dc_mixed.xlsx",
+      "variant": "original",
+      "store_count": 10,
+      "dc_count": 2,
+      "candidate_count": 35,
+      "action_distribution": {
+        "보류": 32,
+        "할인": 3
+      },
+      "prediction_distribution": {
+        "보류": 35
+      },
+      "initial_loss": 0.038799,
+      "final_loss": 0.003881,
+      "reward_summary": {
+        "min": 0.275554,
+        "max": 0.85788,
+        "avg": 0.497658,
+        "last": 0.500298
+      },
+      "stability_status": "검토 필요",
+      "dqn_status": "검토 필요",
+      "dqn_reflection_available": false,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_10_s10dc2_original_ep80_lr0p001_20260703_233957.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_10_s10dc2_original_ep80_lr0p001_20260703_233957.pt"
+    },
+    {
+      "sample_id": "10",
+      "sample_name": "balanced_10_Varo_DQN_sample_10_10stores_2dc_mixed.xlsx",
+      "variant": "balanced",
+      "store_count": 10,
+      "dc_count": 2,
+      "candidate_count": 35,
+      "action_distribution": {
+        "긴급 할인": 6,
+        "할인": 6,
+        "폐기": 5,
+        "DC 경유 이동": 6,
+        "재고 이동": 6,
+        "보류": 6
+      },
+      "prediction_distribution": {
+        "긴급 할인": 10,
+        "할인": 7,
+        "폐기": 1,
+        "DC 경유 이동": 7,
+        "재고 이동": 9,
+        "보류": 1
+      },
+      "initial_loss": 0.041831,
+      "final_loss": 0.016467,
+      "reward_summary": {
+        "min": 0.275554,
+        "max": 0.85788,
+        "avg": 0.497658,
+        "last": 0.500298
+      },
+      "stability_status": "정상",
+      "dqn_status": "정상",
+      "dqn_reflection_available": true,
+      "data_signature_match": true,
+      "latest_result_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_10_s10dc2_balanced_ep80_lr0p001_20260703_233957.json",
+      "model_path": "C:\\Projects\\Varo\\varo_v2\\outputs\\dqn\\dqn_10_s10dc2_balanced_ep80_lr0p001_20260703_233957.pt"
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+# Varo V2 데이터 형식
+
+업로드 엑셀은 여러 시트로 구성됩니다. 컬럼명은 한글/영문 별칭으로 표준 컬럼에 자동 매핑됩니다
+(`services/column_aliases.py`). 아래 필수/선택 컬럼은 `services/data_validator.py` 기준입니다.
+
+## 지원 파일 형식
+
+- **`.xlsx` · `.xls`**: 여러 시트를 담는 워크북. 권장 형식.
+- **`.csv`**: 안전하게 읽되(UTF-8 / UTF-8 BOM / EUC-KR·CP949 자동 인식), 표 하나만 담을 수 있어
+  4개 필수 시트(stores/products/inventory/routes)를 구성할 수 없으므로 Excel 워크북으로 안내합니다.
+- 그 외 확장자·빈 파일·손상/암호화 파일은 읽기를 시도하지 않고 짧은 안내로 차단합니다
+  (`services/file_reader.py`). 내부 예외는 로그로만 보관하고 화면에는 traceback을 노출하지 않습니다.
+
+## 시트 선택
+
+Varo 워크북은 시트를 **이름으로** 인식합니다(stores/products/inventory/routes/v2_recommendations 등).
+"첫 시트를 임의 확정"하지 않으며, 필수 시트 이름이 없으면 어떤 시트가 없는지 안내합니다. 따라서
+다중 시트에서 임의 선택 UI는 필요하지 않습니다(이름 기반 매칭).
+
+## 시트 개요
+
+| 시트 | 역할 | 필수 여부 |
+|---|---|---|
+| `stores` | 점포·DC 노드 | 필수 |
+| `products` | 상품 | 필수 |
+| `inventory` | 점포별 재고 | 필수 |
+| `routes` | 이동 경로 | 필수 |
+| `recommendations`(=`v2_recommendations`) | 사전 추천 | 선택(없으면 자동 생성) |
+| `config`, `quality_check`, `readme` | 부가 정보 | 선택 |
+
+## stores (점포/DC)
+
+- **필수:** `node_id`, `node_name`, `node_type`
+- `node_type`은 **`DC` 또는 `STORE`만** 허용. DC 수/점포 수는 이 컬럼으로 셉니다.
+- **점포와 DC 구분:** DC01, DC02처럼 DC가 여러 개면 각각 `node_type=DC` 행으로 둡니다. DC끼리 섞이지 않습니다.
+
+## products (상품)
+
+- **필수:** `product_id`, `product_name`
+- `product_id` 중복 불가. `unit_price` 등은 선택.
+
+## inventory (재고)
+
+- **필수:** `store_id`, `product_id`, `stock_qty`
+- **권장(없으면 경고/제한):** `sales_qty`, 유통기한 계열(`expiry_days`/`expiry_date`/`shelf_life_days`/`days_to_expiry`),
+  `demand_qty` 또는 `avg_daily_sales`, `dead_stock_qty`, `demand_std`, `lead_time_days`
+- `stock_qty`는 숫자·**음수 불가**.
+- 실행 가능성 판정에 `stock_qty`(이동 후 음수 방지), `demand_qty`/`avg_daily_sales`(도착 수요), `demand_std`(안전재고 추정)를 사용합니다.
+
+## routes (경로)
+
+- **필수:** `source_id`, `target_id`, `distance_km`, `estimated_cost`, `travel_time_min`
+- `source_id`/`target_id`는 `stores.node_id`에 존재해야 합니다.
+- 숫자 컬럼은 음수 불가. 동일 source/target 중복은 경고.
+- **DIRECT vs VIA_DC:** DIRECT는 출발→도착 경로가 있어야 하고, VIA_DC는 출발→DC·DC→도착 경로가 모두 있어야 생성됩니다.
+
+## recommendations (사전 추천, 선택)
+
+시트 이름은 `v2_recommendations`. 없으면 재고·경로로 자동 생성합니다.
+
+- **필수:** `route_id`, `product_id`, `product_name`, `source_id`, `source_name`, `target_id`, `target_name`,
+  `route_type`, `recommended_qty`, `transport_type`, `estimated_cost`, `expected_saving`, `vhs_score`,
+  `recommendation_grade`, `confidence_score`, `reason`
+- `route_id`: 비어 있거나 중복 불가.
+- `route_type`: **`DIRECT` 또는 `VIA_DC`만** 허용. VIA_DC 행에는 `dc_id`·`dc_name` 필요.
+- `recommended_qty`: **0보다 커야 함**. `source_id`/`target_id`는 `stores.node_id`에 존재해야 함.
+
+## 원본 컬럼 ↔ 표준 컬럼
+
+- 컬럼명 앞뒤 공백·한글/영문 별칭은 표준 컬럼으로 자동 매핑됩니다(`column_aliases.py`).
+  원본 컬럼은 삭제하지 않고 표준 컬럼을 복사해 추가합니다.
+- 오류 표시는 **원본 컬럼명**(예: "현재고", "재고 수량 ")을 기준으로 하고, 표준 컬럼명(`stock_qty`)은
+  상세/CSV에만 둡니다. 사용자가 파일에서 바로 찾을 수 있게 하기 위함입니다.
+- **컬럼 별칭 충돌**: 표준 컬럼이 없는데 서로 다른 원본 컬럼 2개 이상이 같은 표준으로 인식되면
+  임의로 하나를 고르지 않고 원본 컬럼명을 모두 표시(확인 필요). 표준 컬럼 자체가 있으면 그 컬럼이 우선하며
+  충돌로 보지 않습니다.
+
+## 식별자 보존 규칙
+
+- 점포/상품/경로 ID는 숫자가 아니라 **문자열 식별자**로 다룹니다. `NUMERIC_COLUMNS`에 포함하지 않아
+  `001`·`000123` 등 앞자리 0을 정규화 과정에서 제거하지 않습니다.
+- 다만 **Excel이 파일 저장 시점에** 이미 ID를 숫자로 바꿔 앞자리 0을 잃은 경우는 라이브러리 단계 한계라
+  완벽 복원할 수 없습니다. 이 경우 원본 컬럼이 숫자형이면 `id_numeric` **경고**로 알리고(복원한 척하지 않음),
+  사용자가 원본을 텍스트 서식으로 저장하도록 안내합니다.
+
+## 숫자 변환 규칙
+
+- `"1,500"`·`"3.5km"`·`"15분"`·`"20개"`처럼 숫자를 뽑을 수 있으면 변환하고 정상 처리합니다.
+- `"십오"`·`"열개"` 등 뽑을 수 없으면 **원본 값을 보존**하고 정규화 값을 "변환 실패"로 표시하며,
+  핵심 수치이면 분석을 차단합니다. **실패 값을 0으로 만들지 않습니다.**
+- 빈 값·실제 NaN은 `nan`/`None`이 아니라 "빈 값"으로 표시합니다.
+
+## 행 번호 기준
+
+- 스프레드시트 1-based(헤더 = 1행). 첫 데이터 행은 2행입니다.
+- 완전히 빈 행은 문제로 보고하지 않되 이후 행 번호를 밀지 않습니다.
+- 여러 시트가 있으면 문제 표에 원본 시트명(`source_sheet_name`)을 함께 표시합니다.
+
+## 중복 키와 충돌 처리
+
+- **중복 키**: 재고는 `store_id + product_id`, 경로는 `source_id + target_id (+ route_type/dc)`,
+  추천은 `route_id`.
+- **완전히 동일한 중복 행**(`exact_duplicate`): 관련 원본 행 번호를 모두 기록하고 확인 필요로 표시합니다.
+- **값이 충돌하는 중복**(`conflict_duplicate`, 같은 키·다른 값): 임의로 합치거나 마지막 값을 쓰지 않고
+  **경고(확인 필요)** 로 표시하며 관련 원본 행 번호를 모두 남깁니다.
+- 날짜/시점 컬럼(예: `snapshot_date`)으로 구분되는 **정상 시계열 다중 행**은 중복으로 보지 않습니다.
+
+## 허용값·결측값 처리
+
+- `node_type` ∈ {DC, STORE}, `route_type` ∈ {DIRECT, VIA_DC} 외 값은 오류.
+- 숫자 컬럼의 문자열/NaN/inf/음수는 오류 또는 정리 대상으로 처리하고, 화면은 `-`/`데이터 없음`으로 표시.
+- 선택 컬럼이 없으면 해당 VHS 구성요소에 **중립값 50**을 적용(좋은 값 위장 아님)하고, 분석이 제한될 수 있음을 안내.
+- 컬럼명 앞뒤 공백·별칭은 자동 정규화(`column_aliases.py`).
+
+## 샘플 파일
+
+`samples/` 폴더(시뮬레이션 검토용):
+
+- `Varo_V2_sample_small_4stores_1dc.xlsx` (4점포/1DC)
+- `Varo_V2_sample_normal_6stores_1dc.xlsx` (6점포/1DC)
+- `Varo_V2_sample_standard_8stores_1dc.xlsx` (8점포/1DC)
+- `Varo_V2_sample_dual_dc_10stores_2dc.xlsx` (10점포/**2DC**, DC01·DC02 구분)
+- `Varo_V2_sample_edge_3stores_1dc.xlsx` (3점포/1DC, 극단 케이스)
+
+DQN 학습 샘플 팩(`Varo_DQN_training_samples_10pack`)은 이 저장소에 포함되지 않는 외부 데이터입니다.
+
+## 잘못된 데이터 예시
+
+- `node_type`에 "물류센터" 같은 자유 텍스트 → 오류(DC/STORE만 허용).
+- `recommended_qty`에 `0`, 음수, 문자열 → 오류/이동 불가.
+- VIA_DC인데 `dc_id` 비어 있음 → 오류/이동 불가.
+- `routes.source_id`가 `stores.node_id`에 없음 → 오류(존재하지 않는 점포/DC).
+- 출발지=도착지 추천 → 실행 불가능(제외).
+- 이동 수량 > 출발 점포 재고 → 이동 후 음수, 실행 불가능(제외).
