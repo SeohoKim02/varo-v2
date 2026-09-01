@@ -44,6 +44,16 @@ INVENTORY_ALIASES = {
     "unit_price": ["unit_price", "price", "단가", "가격"],
     "order_cost": ["order_cost", "주문비용", "발주비용"],
     "demand_std": ["demand_std", "수요표준편차"],
+    # Operational inventory policy fields are deliberately separate.  A reorder
+    # point or a target level is not interchangeable with a departure hard floor.
+    "safety_stock": ["safety_stock", "safety_inventory", "안전재고"],
+    "min_stock": [
+        "min_stock", "minimum_stock", "minimum_inventory", "min_inventory",
+        "stock_floor", "safety_floor", "policy_stock_floor",
+        "최소재고", "최소 보유량", "최소 보유재고", "정책 재고 하한",
+    ],
+    "reorder_point": ["reorder_point", "reorder_level", "재주문점"],
+    "target_stock": ["target_stock", "target_inventory", "목표재고"],
     "lead_time_days": ["lead_time_days", "리드타임", "조달기간"],
     "disposal_cost_per_unit": ["disposal_cost_per_unit", "disposal_cost", "폐기비용"],
 }
@@ -92,6 +102,7 @@ NUMERIC_COLUMNS = {
         "stock_qty", "dead_stock_qty", "sales_qty", "avg_daily_sales", "demand_qty",
         "sales_30d", "sales_7d", "expiry_days", "days_to_expiry", "unit_price",
         "order_cost", "demand_std", "lead_time_days", "disposal_cost_per_unit",
+        "safety_stock", "min_stock", "reorder_point", "target_stock",
     ),
     "routes": ("distance_km", "estimated_cost", "travel_time_min"),
     "recommendations": (

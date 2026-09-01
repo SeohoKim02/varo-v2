@@ -97,7 +97,10 @@ _VALUE_DISPLAY_LIMIT = 40
 
 # Numeric fields checked per sheet: (standard_column, must_be_positive).
 _NUMERIC_CHECKS = {
-    "inventory": (("stock_qty", False),),
+    "inventory": (
+        ("stock_qty", False), ("safety_stock", False), ("min_stock", False),
+        ("reorder_point", False), ("target_stock", False), ("demand_std", False),
+    ),
     "routes": (("distance_km", False), ("estimated_cost", False), ("travel_time_min", False)),
     "recommendations": (
         ("recommended_qty", True), ("estimated_cost", False), ("expected_saving", False),
@@ -134,7 +137,10 @@ _DUPLICATE_KEYS = {
     "stores": (("node_id",), ("node_name", "node_type")),
     "dcs": (("dc_id",), ("dc_name",)),
     "products": (("product_id",), ("product_name",)),
-    "inventory": (("store_id", "product_id"), ("stock_qty",)),
+    "inventory": (
+        ("store_id", "product_id"),
+        ("stock_qty", "safety_stock", "min_stock", "reorder_point", "target_stock"),
+    ),
     "routes": (("source_id", "target_id"), ("distance_km", "estimated_cost", "travel_time_min")),
     "recommendations": (
         ("route_id",),
@@ -467,6 +473,12 @@ def _check_required_values(frame, sheet, builder, blank_positions, record) -> No
 
 
 def _check_numeric(frame, sheet, builder, blank_positions, record) -> None:
+    policy_labels = {
+        "safety_stock": "안전재고",
+        "min_stock": "최소재고",
+        "reorder_point": "재주문점",
+        "target_stock": "목표재고",
+    }
     for standard, positive in _NUMERIC_CHECKS.get(sheet, ()):
         column = _resolve_column(frame, sheet, standard)
         if column is None:
@@ -477,16 +489,22 @@ def _check_numeric(frame, sheet, builder, blank_positions, record) -> None:
             row = _row_number(index, position)
             number = _num(value)
             if number is None:
+                label = policy_labels.get(standard)
                 record(builder.make(
                     row=row, source_column=column, canonical_column=standard,
                     original_value=value, normalized_value="변환 실패",
-                    message="숫자로 읽을 수 없습니다.", fix="해당 값을 숫자로 수정하세요.", code="non_numeric",
+                    message=(f"{label}는 0 이상의 숫자여야 합니다." if label else "숫자로 읽을 수 없습니다."),
+                    fix=("0 이상의 숫자로 수정하세요." if label else "해당 값을 숫자로 수정하세요."),
+                    code="non_numeric",
                 ))
             elif number < 0:
+                label = policy_labels.get(standard)
                 record(builder.make(
                     row=row, source_column=column, canonical_column=standard,
                     original_value=value, normalized_value=_normalized_numeric(value),
-                    message="음수 값입니다.", fix="0 이상의 값으로 수정하세요.", code="negative",
+                    message=(f"{label}는 0 이상의 숫자여야 합니다." if label else "음수 값입니다."),
+                    fix=("0 이상의 숫자로 수정하세요." if label else "0 이상의 값으로 수정하세요."),
+                    code="negative",
                 ))
             elif positive and number == 0:
                 record(builder.make(

@@ -206,16 +206,16 @@ class QuantityBasisTests(unittest.TestCase):
 
     def test_source_movable_limits(self):
         ctx = build_inventory_context({"inventory": pd.DataFrame([
-            {"store_id": "S1", "product_id": "P1", "stock_qty": 12, "demand_qty": 200},
-            {"store_id": "S2", "product_id": "P1", "stock_qty": 0, "demand_qty": 200},
+            {"store_id": "S1", "product_id": "P1", "stock_qty": 12, "demand_qty": 200, "safety_stock": 0},
+            {"store_id": "S2", "product_id": "P1", "stock_qty": 0, "demand_qty": 200, "safety_stock": 0},
         ])})
         basis = quantity_basis(_rec("R1", recommended_qty=12), ctx)
         self.assertEqual(basis["limiting_factor"], "출발 점포 이동 가능량")
 
     def test_equal_limits_reported(self):
         ctx = build_inventory_context({"inventory": pd.DataFrame([
-            {"store_id": "S1", "product_id": "P1", "stock_qty": 40, "demand_qty": 0},
-            {"store_id": "S2", "product_id": "P1", "stock_qty": 0, "demand_qty": 40},
+            {"store_id": "S1", "product_id": "P1", "stock_qty": 40, "demand_qty": 0, "safety_stock": 0},
+            {"store_id": "S2", "product_id": "P1", "stock_qty": 0, "demand_qty": 40, "safety_stock": 0},
         ])})
         basis = quantity_basis(_rec("R1", recommended_qty=40), ctx)
         self.assertIn("같", basis["limiting_factor"])

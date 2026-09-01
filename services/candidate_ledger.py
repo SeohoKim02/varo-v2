@@ -34,7 +34,9 @@ from services.feasibility import (
     STATUS_OK,
     InventoryContext,
     build_inventory_context,
+    inventory_floor_source_label,
 )
+from services.decision_metrics import quantity_plan
 from services.v2_summaries import recommendation_reason
 
 # --------------------------------------------------------------------------- #
@@ -63,6 +65,7 @@ _STATUS_CODE = {
 _BLOCK_STATUS_BY_CODE = {
     "same_source_target": STATUS_BLOCKED_MOVE,
     "quantity_exceeds_stock": STATUS_BLOCKED_MOVE,
+    "inventory_floor_violation": STATUS_BLOCKED_MOVE,
     "duplicate": STATUS_BLOCKED_MOVE,
     "no_route": STATUS_INSUFFICIENT,
     "via_dc_missing_dc": STATUS_INSUFFICIENT,
@@ -131,10 +134,12 @@ def quantity_basis(candidate: Mapping[str, Any], context: InventoryContext) -> d
     target = candidate.get("target_id")
     product = candidate.get("product_id")
     qty = _num(candidate.get("recommended_qty"))
-    stock = context.source_stock(source, product)
-    safety = context.safety_floor(source, product)
-    demand = context.target_demand(target, product)
-    movable = None if stock is None else max(0.0, stock - (safety or 0.0))
+    plan = quantity_plan(candidate, context)
+    stock = plan.get("source_stock")
+    safety = plan.get("inventory_floor_value")
+    demand = plan.get("target_shortfall")
+    movable = plan.get("available_to_move")
+    floor_source = str(plan.get("inventory_floor_source") or "unavailable")
 
     basis: dict[str, Any] = {
         "recommended_qty": qty,
@@ -142,6 +147,9 @@ def quantity_basis(candidate: Mapping[str, Any], context: InventoryContext) -> d
         "source_safety": safety if stock is not None else None,
         "source_movable": movable,
         "target_demand": demand,
+        "inventory_floor_source": floor_source,
+        "inventory_floor_source_label": inventory_floor_source_label(floor_source),
+        "quantity_limit_reason": plan.get("quantity_limit_reason"),
         "limiting_factor": None,
         "basis_text": None,
         "computable": False,
@@ -157,7 +165,11 @@ def quantity_basis(candidate: Mapping[str, Any], context: InventoryContext) -> d
     if movable is not None:
         limits.append(("출발 점포 이동 가능량", movable))
     if demand is not None and demand > 0:
-        limits.append(("도착 점포 부족량", demand))
+        target_label = (
+            "도착 점포 목표 재고 부족량"
+            if plan.get("target_stock_goal") is not None else "도착 점포 부족량"
+        )
+        limits.append((target_label, demand))
     if not limits:
         basis["basis_text"] = f"권장 이동 수량은 {qty:,.0f}개입니다."
         return basis
@@ -198,6 +210,8 @@ def _exclusion_reasons(candidate: Mapping[str, Any], basis: Mapping[str, Any]) -
     code = str(candidate.get("feasibility_reason_code") or "")
     hint = {
         "quantity_exceeds_stock": "출발 점포 재고 행을 확인해 수량을 조정하세요.",
+        "inventory_floor_violation": "남겨야 할 재고보다 적어지지 않도록 이동 수량을 줄이세요.",
+        "inventory_floor_unavailable": "재고현황 시트의 안전재고 또는 수요 변동 값을 확인하세요.",
         "no_route": "이동경로 시트에 해당 출발·도착 경로가 있는지 확인하세요.",
         "via_dc_missing_dc": "경유 DC 정보를 이동경로·점포 시트에서 확인하세요.",
         "cost_uncomputable": "이동경로 시트의 비용 또는 거리 값을 확인하세요.",

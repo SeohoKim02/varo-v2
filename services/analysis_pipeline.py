@@ -593,6 +593,23 @@ def run_analysis_pipeline(
     # numbers instead of each deriving their own.
     decision_context = build_decision_context(uploaded_data)
     candidates = annotate_decision_metrics(candidates, context=decision_context)
+    # An applied inventory floor is a hard execution constraint.  Remove those
+    # rows before VHS normalization/weighting so an impossible move cannot affect
+    # the scores or ranks of executable candidates.  The rows are retained for
+    # the candidate ledger below with a plain exclusion reason.
+    pre_vhs_floor_blocked: list[dict[str, Any]] = []
+    if isinstance(candidates, pd.DataFrame) and not candidates.empty and "post_move_source_gap" in candidates.columns:
+        floor_gap = pd.to_numeric(candidates["post_move_source_gap"], errors="coerce")
+        floor_block_mask = floor_gap.fillna(0.0) > 1e-9
+        if floor_block_mask.any():
+            for row in candidates.loc[floor_block_mask].to_dict("records"):
+                row.update({
+                    "feasibility_status": "이동 불가",
+                    "feasibility_reason": "이동 후 재고가 남겨야 할 재고보다 적습니다.",
+                    "feasibility_reason_code": "inventory_floor_violation",
+                })
+                pre_vhs_floor_blocked.append(row)
+            candidates = candidates.loc[~floor_block_mask].copy()
     auto_vhs = apply_auto_vhs(candidates)
     if not auto_vhs.frame.empty:
         candidates = auto_vhs.frame
@@ -637,10 +654,24 @@ def run_analysis_pipeline(
     # recording the reason. Well-formed candidates are annotated and kept.
     feasibility = annotate_feasibility(standard_recommendations, uploaded_data, context=decision_context)
     standard_recommendations = feasibility["feasible"]
-    result.feasibility_summary = feasibility["summary"]
-    if feasibility["blocked"]:
+    all_feasibility_rows = [*feasibility["annotated"], *pre_vhs_floor_blocked]
+    all_blocked = [*feasibility["blocked"], *pre_vhs_floor_blocked]
+    summary = dict(feasibility["summary"])
+    if pre_vhs_floor_blocked:
+        summary["total"] = int(summary.get("total") or 0) + len(pre_vhs_floor_blocked)
+        summary["blocked_count"] = int(summary.get("blocked_count") or 0) + len(pre_vhs_floor_blocked)
+        distribution = dict(summary.get("status_distribution") or {})
+        distribution["이동 불가"] = int(distribution.get("이동 불가") or 0) + len(pre_vhs_floor_blocked)
+        summary["status_distribution"] = distribution
+        summary["blocked_reasons"] = sorted({
+            *(summary.get("blocked_reasons") or []),
+            "이동 후 재고가 남겨야 할 재고보다 적습니다.",
+        })
+        summary["all_feasible"] = False
+    result.feasibility_summary = summary
+    if all_blocked:
         result.warnings.append(
-            f"실행 불가능한 추천 {len(feasibility['blocked'])}건을 최종 추천에서 제외했습니다."
+            f"실행 불가능한 추천 {len(all_blocked)}건을 최종 추천에서 제외했습니다."
         )
 
     report("summary")
@@ -734,7 +765,7 @@ def run_analysis_pipeline(
     # linking status, quantity basis, reasons, and original-file row lineage. Built
     # from the full feasibility output so blocked candidates never disappear.
     result.candidate_ledger = build_candidate_ledger(
-        feasibility["annotated"],
+        all_feasibility_rows,
         data=uploaded_data,
         raw_data=raw_data,
         source_metadata=source_metadata,

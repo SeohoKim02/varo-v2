@@ -58,13 +58,13 @@ class SoftFlagTests(unittest.TestCase):
                "product_id": "P1", "estimated_cost": None, "move_cost": None, "distance_km": None}
         self.assertEqual(evaluate_feasibility(rec, _ctx(stock={("S1", "P1"): 100})).status, STATUS_CHECK)
 
-    def test_post_move_below_safety_is_check(self):
+    def test_post_move_below_safety_is_hard_block(self):
         ctx = _ctx(stock={("S1", "P1"): 10.0}, safety={("S1", "P1"): 8.0})
         rec = {"source_id": "S1", "target_id": "S2", "recommended_qty": 5, "route_type": "DIRECT",
                "product_id": "P1", "estimated_cost": 100, "expected_saving": 5000}
         result = evaluate_feasibility(rec, ctx)
-        self.assertEqual(result.status, STATUS_CHECK)
-        self.assertEqual(result.reason_code, "post_move_below_safety")
+        self.assertEqual(result.status, STATUS_BLOCKED)
+        self.assertEqual(result.reason_code, "inventory_floor_violation")
 
     def test_oversupply_is_check(self):
         ctx = _ctx(stock={("S1", "P1"): 100.0}, demand={("S2", "P1"): 2.0})
@@ -77,7 +77,10 @@ class SoftFlagTests(unittest.TestCase):
 
 class FeasibleTests(unittest.TestCase):
     def test_clean_candidate_is_ok(self):
-        ctx = _ctx(stock={("S1", "P1"): 100.0}, demand={("S2", "P1"): 40.0})
+        ctx = _ctx(
+            stock={("S1", "P1"): 100.0}, demand={("S2", "P1"): 40.0},
+            safety={("S1", "P1"): 0.0},
+        )
         rec = {"source_id": "S1", "target_id": "S2", "recommended_qty": 20, "route_type": "DIRECT",
                "product_id": "P1", "estimated_cost": 100, "expected_saving": 5000}
         self.assertEqual(evaluate_feasibility(rec, ctx).status, STATUS_OK)

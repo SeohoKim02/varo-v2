@@ -34,7 +34,7 @@ from services.feasibility import InventoryContext, build_inventory_context
 # set, or the tie-break chain change — i.e. whenever the same workbook could
 # produce a different ranking. Recorded on every result so a past recommendation
 # can be traced back to the logic that produced it. Never shown on the main UI.
-ALGORITHM_VERSION = "vhs-2.1"
+ALGORITHM_VERSION = "vhs-2.2"
 
 # One standard deviation either side of the base demand. A wider band would make
 # almost every candidate look fragile; a narrower one would never flag anything.
@@ -53,11 +53,14 @@ SCENARIO_UNKNOWN = "계산 불가"
 DECISION_COLUMNS = (
     "net_benefit", "net_benefit_computable",
     "source_stock", "source_safety_floor", "source_movable",
+    "inventory_floor_value", "inventory_floor_source", "available_to_move",
+    "source_reorder_point",
     "target_stock", "target_demand", "target_shortfall", "target_demand_std",
+    "target_stock_goal", "target_stock_basis",
     "demand_low", "demand_base", "demand_high", "demand_scenario_status",
     "post_move_source_remaining", "post_move_source_gap",
     "post_move_target_stock", "post_move_target_excess",
-    "qty_max_movable", "qty_demand_needed", "qty_limiting_factor",
+    "qty_max_movable", "qty_demand_needed", "qty_limiting_factor", "quantity_limit_reason",
 )
 
 
@@ -130,40 +133,61 @@ def quantity_plan(candidate: Mapping[str, Any], context: InventoryContext) -> di
     target_stock = context.source_stock(target, product)
     demand = context.target_demand(target, product)
 
-    movable = None if stock is None else max(0.0, stock - (safety or 0.0))
+    floor_source = context.inventory_floor_source(source, product)
+    movable = context.available_to_move(source, product)
+    target_goal = context.target_stock_level(target, product)
     shortfall = None
-    if demand is not None:
+    target_basis = None
+    if target_goal is not None and target_stock is not None:
+        shortfall = max(0.0, target_goal - target_stock)
+        target_basis = "explicit_target_stock"
+    elif demand is not None:
         shortfall = max(0.0, demand - (target_stock or 0.0))
+        target_basis = "demand_fallback"
 
-    limits: list[tuple[str, float]] = []
+    limits: list[tuple[str, str, float]] = []
     if movable is not None:
-        limits.append(("출발 점포 이동 가능량", movable))
+        limits.append(("출발 점포 이동 가능량", "source_inventory_floor", movable))
     if shortfall is not None and shortfall > 0:
-        limits.append(("도착 점포 부족량", shortfall))
+        target_label = "도착 점포 목표 재고 부족량" if target_goal is not None else "도착 점포 부족량"
+        target_code = "target_stock_gap" if target_goal is not None else "target_demand_gap"
+        limits.append((target_label, target_code, shortfall))
     limiting = None
+    limit_reason = None
     if limits:
-        limits.sort(key=lambda item: (item[1], item[0]))
+        limits.sort(key=lambda item: (item[2], item[0]))
         limiting = limits[0][0]
-        if len(limits) == 2 and abs(limits[0][1] - limits[1][1]) < 1e-9:
+        limit_reason = limits[0][1]
+        if len(limits) == 2 and abs(limits[0][2] - limits[1][2]) < 1e-9:
             limiting = "출발 가능량과 도착 부족량이 같음"
+            limit_reason = "equal_source_target_limits"
 
     remaining = None if stock is None or quantity is None else stock - quantity
-    gap = None if remaining is None else max(0.0, (safety or 0.0) - remaining)
+    gap = None if remaining is None or safety is None else max(0.0, safety - remaining)
     post_target = None if target_stock is None or quantity is None else target_stock + quantity
     excess = None
-    if post_target is not None and demand is not None and demand > 0:
+    if post_target is not None and target_goal is not None:
+        excess = max(0.0, post_target - target_goal)
+    elif post_target is not None and demand is not None and demand > 0:
         excess = max(0.0, post_target - demand * OVERSUPPLY_MULTIPLE)
 
     return {
         "source_stock": stock,
         "source_safety_floor": safety if stock is not None else None,
         "source_movable": movable,
+        "inventory_floor_value": safety if stock is not None else None,
+        "inventory_floor_source": floor_source,
+        "available_to_move": movable,
+        "source_reorder_point": context.reorder_point(source, product),
         "target_stock": target_stock,
         "target_demand": demand,
         "target_shortfall": shortfall,
+        "target_stock_goal": target_goal,
+        "target_stock_basis": target_basis,
         "qty_max_movable": movable,
         "qty_demand_needed": shortfall,
         "qty_limiting_factor": limiting,
+        "quantity_limit_reason": limit_reason,
         "post_move_source_remaining": remaining,
         "post_move_source_gap": gap,
         "post_move_target_stock": post_target,
@@ -205,7 +229,10 @@ def annotate_decision_metrics(
         values = [record.get(column) for record in records]
         if column in ("net_benefit_computable",):
             frame[column] = pd.Series(values, index=frame.index).fillna(False).astype(bool)
-        elif column in ("demand_scenario_status", "qty_limiting_factor"):
+        elif column in (
+            "demand_scenario_status", "qty_limiting_factor", "inventory_floor_source",
+            "target_stock_basis", "quantity_limit_reason",
+        ):
             frame[column] = pd.Series(values, index=frame.index, dtype=object)
         else:
             frame[column] = pd.to_numeric(pd.Series(values, index=frame.index), errors="coerce")

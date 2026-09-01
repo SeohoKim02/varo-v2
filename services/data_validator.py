@@ -81,11 +81,17 @@ def _error_blank_id_values(messages: list[ValidationMessage], sheet: str, df: pd
             messages.append(ValidationMessage(ERROR, sheet, f"`{column}`이 비어 있는 행이 있습니다."))
 
 
-def _validate_numeric(messages: list[ValidationMessage], sheet: str, df: pd.DataFrame, column: str, *, positive: bool = False, allow_negative: bool = False) -> None:
+def _validate_numeric(
+    messages: list[ValidationMessage], sheet: str, df: pd.DataFrame, column: str,
+    *, positive: bool = False, allow_negative: bool = False, allow_blank: bool = False,
+) -> None:
     if column not in df.columns:
         return
     values = pd.to_numeric(df[column], errors="coerce")
+    blank = _blank_mask(df[column])
     invalid = values.isna() | ~values.map(lambda value: math.isfinite(float(value)) if pd.notna(value) else False)
+    if allow_blank:
+        invalid = invalid & ~blank
     if invalid.any():
         messages.append(ValidationMessage(ERROR, sheet, f"`{column}` 컬럼에 숫자가 아닌 값이 있습니다."))
     if positive and (values <= 0).any():
@@ -136,6 +142,12 @@ def _validate_inventory(data: dict[str, pd.DataFrame], messages: list[Validation
     _error_blank_id_values(messages, "inventory", inventory, ("store_id", "product_id"))
     _validate_numeric(messages, "inventory", inventory, "stock_qty")
     _validate_numeric(messages, "inventory", inventory, "sales_qty")
+    for optional_policy_column in (
+        "safety_stock", "min_stock", "reorder_point", "target_stock", "demand_std",
+    ):
+        _validate_numeric(
+            messages, "inventory", inventory, optional_policy_column, allow_blank=True,
+        )
     store_ids = _node_ids(data)
     product_ids = _product_ids(data)
     _validate_reference(messages, "inventory", inventory, "store_id", store_ids, "stores.node_id")

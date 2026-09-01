@@ -236,12 +236,13 @@ class ConstraintBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(missing_cost.status, STATUS_CHECK)
 
-    def test_soft_conditions_keep_the_candidate(self):
+    def test_inventory_floor_is_hard_and_oversupply_stays_soft(self):
         below_safety = evaluate_feasibility(
             candidate("X", recommended_qty=5),
             context(stock={("S1", "P1"): 10.0}, safety={("S1", "P1"): 8.0}),
         )
-        self.assertEqual(below_safety.status, STATUS_CHECK)
+        self.assertEqual(below_safety.status, STATUS_BLOCKED)
+        self.assertEqual(below_safety.reason_code, "inventory_floor_violation")
         oversupply = evaluate_feasibility(
             candidate("X", recommended_qty=50),
             context(stock={("S1", "P1"): 100.0}, demand={("S2", "P1"): 2.0}),
@@ -260,7 +261,10 @@ class ConstraintBoundaryTests(unittest.TestCase):
         self.assertEqual(len(outcome["blocked"]), 1)
 
     def test_clean_candidate_passes(self):
-        ctx = context(stock={("S1", "P1"): 100.0}, demand={("S2", "P1"): 40.0})
+        ctx = context(
+            stock={("S1", "P1"): 100.0}, demand={("S2", "P1"): 40.0},
+            safety={("S1", "P1"): 0.0},
+        )
         self.assertEqual(evaluate_feasibility(candidate("X"), ctx).status, STATUS_OK)
 
 
@@ -370,12 +374,18 @@ class QuantityTests(unittest.TestCase):
     def test_the_smaller_of_the_two_limits_is_reported(self):
         supply_bound = quantity_plan(
             candidate("A", recommended_qty=10),
-            context(stock={("S1", "P1"): 20.0}, demand={("S2", "P1"): 500.0}),
+            context(
+                stock={("S1", "P1"): 20.0}, demand={("S2", "P1"): 500.0},
+                safety={("S1", "P1"): 0.0},
+            ),
         )
         self.assertEqual(supply_bound["qty_limiting_factor"], "출발 점포 이동 가능량")
         demand_bound = quantity_plan(
             candidate("A", recommended_qty=10),
-            context(stock={("S1", "P1"): 500.0}, demand={("S2", "P1"): 30.0}),
+            context(
+                stock={("S1", "P1"): 500.0}, demand={("S2", "P1"): 30.0},
+                safety={("S1", "P1"): 0.0},
+            ),
         )
         self.assertEqual(demand_bound["qty_limiting_factor"], "도착 점포 부족량")
 

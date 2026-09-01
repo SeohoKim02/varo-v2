@@ -22,13 +22,14 @@ A **hard constraint** is a fact that makes the move wrong to execute, so it is
 enforced here by removing the candidate — never by lowering its VHS score:
 
     출발지=도착지 · 수량 ≤ 0 · 경로 유형 불명 · VIA_DC인데 DC 없음 ·
-    이동 수량 > 출발 재고 · 음수 이동 비용 · 예상 효과 ≤ 이동 비용 · 중복 후보
+    이동 수량 > 출발 재고 · 이동 후 운영 재고 하한 침범 · 음수 이동 비용 ·
+    예상 효과 ≤ 이동 비용 · 중복 후보
 
 A **soft preference** is something an operator should weigh, so it stays here as
 데이터 확인 필요 and/or feeds a VHS component — never both as a block and a
 penalty for the same fact:
 
-    비용/절감액을 계산할 수 없음 · 이동 후 출발 재고가 안전재고 아래 ·
+    비용/절감액을 계산할 수 없음 · 재고 하한을 계산할 수 없음 ·
     도착 필요량 대비 과다 이동 · 수요 불확실성 · 상대적으로 높은 비용·시간
 
 ``services/decision_metrics.py`` computes the numbers both sides read, so the
@@ -47,6 +48,15 @@ STATUS_CHECK = "데이터 확인 필요"
 STATUS_BLOCKED = "이동 불가"
 
 VALID_ROUTE_TYPES = {"DIRECT", "VIA_DC"}
+
+INVENTORY_FLOOR_SOURCE_LABELS = {
+    "explicit_min_stock": "등록된 최소 보유재고 기준",
+    "explicit_safety_stock": "등록된 안전재고 기준",
+    "explicit_combined": "등록된 재고 하한 기준",
+    "estimated": "수요 변동을 기준으로 추정",
+    "calculated": "운영 정책을 기준으로 계산",
+    "unavailable": "안전재고 정보 없음",
+}
 
 # How far above the destination's measured need a move may go before it is
 # flagged as over-supply (kept, but 데이터 확인 필요). Not a hard block.
@@ -86,6 +96,11 @@ def _key(store: Any, product: Any) -> tuple[str, str]:
     return (str(store), str(product))
 
 
+def inventory_floor_source_label(source: Any) -> str:
+    """Short user-facing provenance; internal codes never reach the screen."""
+    return INVENTORY_FLOOR_SOURCE_LABELS.get(str(source or ""), "안전재고 정보 없음")
+
+
 @dataclass
 class InventoryContext:
     """Store-product lookups built once from the uploaded workbook."""
@@ -97,6 +112,9 @@ class InventoryContext:
     # separate from ``safety`` because the safety floor is an estimate derived
     # from it, while this is the raw value the scenario analysis needs.
     dispersion: dict[tuple[str, str], float] = field(default_factory=dict)
+    floor_sources: dict[tuple[str, str], str] = field(default_factory=dict)
+    target_levels: dict[tuple[str, str], float] = field(default_factory=dict)
+    reorder_levels: dict[tuple[str, str], float] = field(default_factory=dict)
 
     def source_stock(self, store: Any, product: Any) -> float | None:
         return self.stock.get(_key(store, product))
@@ -104,8 +122,26 @@ class InventoryContext:
     def target_demand(self, store: Any, product: Any) -> float | None:
         return self.demand.get(_key(store, product))
 
-    def safety_floor(self, store: Any, product: Any) -> float:
-        return self.safety.get(_key(store, product), 0.0)
+    def safety_floor(self, store: Any, product: Any) -> float | None:
+        """Applied departure floor, preserving unknown separately from explicit 0."""
+        return self.safety.get(_key(store, product))
+
+    def inventory_floor_source(self, store: Any, product: Any) -> str:
+        return self.floor_sources.get(_key(store, product), "unavailable")
+
+    def available_to_move(self, store: Any, product: Any) -> float | None:
+        stock = self.source_stock(store, product)
+        floor = self.safety_floor(store, product)
+        if stock is None or floor is None:
+            return None
+        return max(0.0, stock - floor)
+
+    def target_stock_level(self, store: Any, product: Any) -> float | None:
+        return self.target_levels.get(_key(store, product))
+
+    def reorder_point(self, store: Any, product: Any) -> float | None:
+        """Operational reorder trigger retained for diagnostics, never a move floor."""
+        return self.reorder_levels.get(_key(store, product))
 
     def demand_std(self, store: Any, product: Any) -> float | None:
         """Measured demand standard deviation, or ``None`` when the file has none."""
@@ -115,9 +151,10 @@ class InventoryContext:
 def build_inventory_context(data: Mapping[str, Any] | None) -> InventoryContext:
     """Aggregate stock / demand / safety per (store, product) from inventory.
 
-    Missing columns simply yield empty lookups; the evaluator then downgrades to
-    데이터 확인 필요 instead of guessing. Safety floor is a conservative estimate
-    from demand (never fabricated as a hard policy number).
+    Explicit min/safety values take priority.  Only rows without an explicit
+    lower-bound policy fall back to the existing ``demand_std × 2`` estimate.
+    Reorder points and target levels are retained separately and never substituted
+    for the departure floor.
     """
     stock: dict[tuple[str, str], float] = {}
     demand: dict[tuple[str, str], float] = {}
@@ -135,6 +172,11 @@ def build_inventory_context(data: Mapping[str, Any] | None) -> InventoryContext:
     stock_col = next((c for c in ("stock_qty", "current_stock", "quantity") if c in inventory.columns), None)
     demand_col = next((c for c in ("demand_qty", "avg_daily_sales", "sales_qty") if c in inventory.columns), None)
     demand_std_col = "demand_std" if "demand_std" in inventory.columns else None
+    explicit_min: dict[tuple[str, str], list[float]] = {}
+    explicit_safety: dict[tuple[str, str], list[float]] = {}
+    estimated: dict[tuple[str, str], float] = {}
+    target_levels: dict[tuple[str, str], list[float]] = {}
+    reorder_levels: dict[tuple[str, str], list[float]] = {}
 
     for _, row in inventory.iterrows():
         store = str(row.get(store_col))
@@ -152,11 +194,44 @@ def build_inventory_context(data: Mapping[str, Any] | None) -> InventoryContext:
                 demand[key] = demand.get(key, 0.0) + weekly
         if demand_std_col is not None:
             std = _num(row.get(demand_std_col))
-            if std is not None:
+            if std is not None and std >= 0:
                 # ~1 week of demand-std as a light safety cushion (estimate, not policy).
-                safety[key] = safety.get(key, 0.0) + std * 2.0
+                estimated[key] = estimated.get(key, 0.0) + std * 2.0
                 dispersion[key] = dispersion.get(key, 0.0) + std
-    return InventoryContext(stock, demand, safety, known, dispersion)
+        minimum = _num(row.get("min_stock")) if "min_stock" in inventory.columns else None
+        registered = _num(row.get("safety_stock")) if "safety_stock" in inventory.columns else None
+        target_level = _num(row.get("target_stock")) if "target_stock" in inventory.columns else None
+        reorder_level = _num(row.get("reorder_point")) if "reorder_point" in inventory.columns else None
+        if minimum is not None and minimum >= 0:
+            explicit_min.setdefault(key, []).append(minimum)
+        if registered is not None and registered >= 0:
+            explicit_safety.setdefault(key, []).append(registered)
+        if target_level is not None and target_level >= 0:
+            target_levels.setdefault(key, []).append(target_level)
+        if reorder_level is not None and reorder_level >= 0:
+            reorder_levels.setdefault(key, []).append(reorder_level)
+
+    floor_sources: dict[tuple[str, str], str] = {}
+    for key in set(estimated) | set(explicit_min) | set(explicit_safety):
+        minimums = explicit_min.get(key, [])
+        registered = explicit_safety.get(key, [])
+        if minimums or registered:
+            # Both are lower-bound policies.  Respecting the stricter registered
+            # value satisfies each without treating reorder/target levels as floors.
+            safety[key] = max([*minimums, *registered])
+            if minimums and registered:
+                floor_sources[key] = "explicit_combined"
+            elif minimums:
+                floor_sources[key] = "explicit_min_stock"
+            else:
+                floor_sources[key] = "explicit_safety_stock"
+        else:
+            safety[key] = estimated[key]
+            floor_sources[key] = "estimated"
+
+    target = {key: max(values) for key, values in target_levels.items() if values}
+    reorder = {key: max(values) for key, values in reorder_levels.items() if values}
+    return InventoryContext(stock, demand, safety, known, dispersion, floor_sources, target, reorder)
 
 
 def evaluate_feasibility(rec: Mapping[str, Any], context: InventoryContext | None = None) -> FeasibilityResult:
@@ -217,14 +292,17 @@ def evaluate_feasibility(rec: Mapping[str, Any], context: InventoryContext | Non
         return FeasibilityResult(STATUS_CHECK, "출발 점포 재고 데이터를 확인해야 합니다.", "source_stock_missing")
 
     safety_floor = context.safety_floor(source, product)
-    if source_stock is not None and (source_stock - qty) < safety_floor:
+    if source_stock is not None and safety_floor is not None and (source_stock - qty) < safety_floor:
         return FeasibilityResult(
-            STATUS_CHECK,
-            "이동 후 출발 점포 재고가 부족할 수 있습니다.",
-            "post_move_below_safety",
-            {"remaining": source_stock - qty, "safety_floor": safety_floor},
+            STATUS_BLOCKED,
+            "이동 후 재고가 남겨야 할 재고보다 적습니다.",
+            "inventory_floor_violation",
+            {
+                "remaining": source_stock - qty,
+                "inventory_floor": safety_floor,
+                "inventory_floor_source": context.inventory_floor_source(source, product),
+            },
         )
-
     need = context.target_demand(target, product)
     if need is not None and need > 0 and qty > need * _OVERSUPPLY_MULTIPLE:
         return FeasibilityResult(
@@ -232,6 +310,13 @@ def evaluate_feasibility(rec: Mapping[str, Any], context: InventoryContext | Non
             "도착 점포 필요량보다 이동 수량이 많습니다.",
             "oversupply",
             {"target_need": need, "recommended_qty": qty},
+        )
+
+    if source_stock is not None and safety_floor is None:
+        return FeasibilityResult(
+            STATUS_CHECK,
+            "남겨야 할 재고 기준을 확인할 수 없습니다.",
+            "inventory_floor_unavailable",
         )
 
     return FeasibilityResult(STATUS_OK, "이동 조건을 충족합니다.", "ok")

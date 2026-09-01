@@ -12,6 +12,7 @@ from typing import Any
 import pandas as pd
 
 from services.column_aliases import clean_numeric_value
+from services.feasibility import build_inventory_context
 
 MAX_CANDIDATES = 20
 _DEFAULT_UNIT_PRICE = 1000.0
@@ -168,6 +169,7 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
     try:
         stores = data["stores"]
         inventory = data["inventory"].copy()
+        inventory_context = build_inventory_context(data)
         store_ids, dc_ids = _store_ids_by_type(stores)
         names = _name_lookup(stores)
         product_info = _product_info(data["products"])
@@ -207,6 +209,10 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
             stock = item["_stock"]
             if stock <= 0:
                 continue
+            source_movable = inventory_context.available_to_move(source, product)
+            if source_movable is not None and source_movable <= 0:
+                stats["qty_excluded"] += 1
+                continue
             expiry = item["_expiry"] if expiry_col else None
             expiry = None if (expiry is None or pd.isna(expiry)) else float(expiry)
             median = median_stock.get(product, stock)
@@ -223,7 +229,11 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
                 if resolved is None:
                     continue
                 target_stock = stock_by.get((target, product), median)
-                need = max(0.0, median - target_stock) + demand_by.get((target, product), 0.0) * 7
+                target_goal = inventory_context.target_stock_level(target, product)
+                if target_goal is not None:
+                    need = max(0.0, target_goal - target_stock)
+                else:
+                    need = max(0.0, median - target_stock) + demand_by.get((target, product), 0.0) * 7
                 targets.append((need, -resolved["route"]["estimated_cost"], target, resolved))
             if not targets:
                 stats["route_deferred"] += 1
@@ -238,9 +248,11 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
 
             target_stock = stock_by.get((target, product), median)
             source_surplus = max(1.0, surplus if surplus > 0 else stock * 0.3)
+            if source_movable is not None:
+                source_surplus = min(source_surplus, source_movable)
             target_need = max(1.0, need if need > 0 else source_surplus)
             cap = _SHORT_EXPIRY_CAP if (expiry is not None and expiry <= 3) else _MOVE_CAP
-            moved = int(max(1, min(source_surplus, target_need, stock, cap)))
+            moved = int(max(0, min(source_surplus, target_need, stock, cap)))
             if moved <= 0:
                 stats["qty_excluded"] += 1
                 continue

@@ -36,6 +36,8 @@ RECOMMENDATION_FIELDS = (
     "demand_risk_score", "post_move_risk_score", "dqn_reference_score",
     "pareto_rank", "pareto_status",
     "net_benefit", "source_movable", "target_shortfall", "qty_limiting_factor",
+    "inventory_floor_value", "inventory_floor_source", "available_to_move",
+    "quantity_limit_reason", "target_stock_goal", "target_stock_basis",
     "demand_scenario_status", "robustness_status", "robustness_detail",
     "algorithm_version",
 )
@@ -52,6 +54,7 @@ NUMERIC_FIELDS = (
     "demand_fit_score", "inventory_balance_score", "route_cost_score",
     "feasibility_score", "demand_risk_score", "post_move_risk_score",
     "pareto_rank", "net_benefit", "source_movable", "target_shortfall",
+    "inventory_floor_value", "available_to_move", "target_stock_goal",
 )
 
 _ACTION_ALIASES = {
@@ -159,6 +162,12 @@ class StandardRecommendation:
     source_movable: Optional[float] = None
     target_shortfall: Optional[float] = None
     qty_limiting_factor: Optional[str] = None
+    inventory_floor_value: Optional[float] = None
+    inventory_floor_source: Optional[str] = None
+    available_to_move: Optional[float] = None
+    quantity_limit_reason: Optional[str] = None
+    target_stock_goal: Optional[float] = None
+    target_stock_basis: Optional[str] = None
     demand_scenario_status: Optional[str] = None
     robustness_status: Optional[str] = None
     robustness_detail: Optional[str] = None
@@ -343,6 +352,12 @@ def normalize_standard_recommendation(item: Mapping[str, object]) -> Dict[str, o
         "source_movable": _first(item, "source_movable"),
         "target_shortfall": _first(item, "target_shortfall"),
         "qty_limiting_factor": _first(item, "qty_limiting_factor"),
+        "inventory_floor_value": _first(item, "inventory_floor_value", "source_safety_floor"),
+        "inventory_floor_source": _first(item, "inventory_floor_source"),
+        "available_to_move": _first(item, "available_to_move", "source_movable"),
+        "quantity_limit_reason": _first(item, "quantity_limit_reason"),
+        "target_stock_goal": _first(item, "target_stock_goal"),
+        "target_stock_basis": _first(item, "target_stock_basis"),
         "demand_scenario_status": _first(item, "demand_scenario_status"),
         "robustness_status": _first(item, "robustness_status"),
         "robustness_detail": _first(item, "robustness_detail"),
@@ -358,7 +373,8 @@ def normalize_standard_recommendation(item: Mapping[str, object]) -> Dict[str, o
         "cutline_reason", "path_reason", "promotion_recommended", "promotion_reason",
         "greedy_strategy", "varo_final_decision", "final_reason",
         "weight_profile_id", "weight_summary", "pareto_status",
-        "qty_limiting_factor", "demand_scenario_status", "robustness_status",
+        "qty_limiting_factor", "inventory_floor_source", "quantity_limit_reason",
+        "target_stock_basis", "demand_scenario_status", "robustness_status",
         "robustness_detail", "algorithm_version",
     ):
         normalized[key] = _clean_text(normalized.get(key))

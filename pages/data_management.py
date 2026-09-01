@@ -324,6 +324,17 @@ def _render_upload_quality() -> None:
         st.warning("추천 결과를 만들기 위한 최소 정보가 부족합니다. 파일을 확인해 주세요.")
     if report.get("missing_required_count"):
         st.warning("필수 컬럼이 부족해 일부 분석이 제한됩니다.")
+    inventory = (st.session_state.get("varo_data") or {}).get("inventory")
+    if isinstance(inventory, pd.DataFrame):
+        labels = [
+            label for column, label in (
+                ("safety_stock", "안전재고"), ("min_stock", "최소재고"),
+                ("reorder_point", "재주문점"), ("target_stock", "목표재고"),
+            )
+            if column in inventory.columns
+        ]
+        if labels:
+            st.caption(f"운영 재고 기준 인식: {', '.join(labels)}")
 
 
 def _render_data_issues() -> None:

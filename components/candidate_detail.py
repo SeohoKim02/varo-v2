@@ -31,11 +31,29 @@ def ledger_record(pipeline: Mapping[str, Any] | None, route_id: Any) -> dict[str
 
 
 def render_quantity_basis(st, record: Mapping[str, Any] | None) -> None:
-    """One plain line explaining what limited the recommended quantity."""
+    """Compact operational quantity/provenance detail without internal fields."""
     basis = (record or {}).get("quantity_basis") or {}
+    values = []
+    for label, key in (
+        ("출발 현재 재고", "source_stock"),
+        ("남겨야 할 재고", "source_safety"),
+        ("이동 가능", "source_movable"),
+        ("권장 이동", "recommended_qty"),
+    ):
+        value = basis.get(key)
+        try:
+            if value is not None:
+                values.append(f"{label} {float(value):,.0f}개")
+        except (TypeError, ValueError):
+            continue
+    if values:
+        st.caption(" · ".join(values))
     text = basis.get("basis_text")
     if text:
         st.caption(text)
+    source_label = basis.get("inventory_floor_source_label")
+    if source_label:
+        st.caption(f"안전재고 기준: {source_label}")
 
 
 def render_source_locations(st, record: Mapping[str, Any] | None, expanded: bool = False) -> None:
