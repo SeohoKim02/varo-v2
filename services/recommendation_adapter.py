@@ -31,10 +31,13 @@ RECOMMENDATION_FIELDS = (
     "varo_final_decision", "varo_final_rank", "dqn_reference_score",
     "vhs_vs_greedy_match", "vhs_vs_dqn_match", "final_reason",
     "weight_profile_id", "weight_summary",
-    "savings_score", "disposal_risk_score", "demand_fit_score",
+    "net_benefit_score", "disposal_risk_score", "demand_fit_score",
     "inventory_balance_score", "route_cost_score", "feasibility_score",
-    "promotion_score", "greedy_score", "dqn_reference_score",
+    "demand_risk_score", "post_move_risk_score", "dqn_reference_score",
     "pareto_rank", "pareto_status",
+    "net_benefit", "source_movable", "target_shortfall", "qty_limiting_factor",
+    "demand_scenario_status", "robustness_status", "robustness_detail",
+    "algorithm_version",
 )
 NUMERIC_FIELDS = (
     "recommended_qty", "distance_km", "expected_time_min", "travel_time_min",
@@ -45,9 +48,10 @@ NUMERIC_FIELDS = (
     "greedy_rank", "heuristic_score", "dqn_confidence", "dqn_correction",
     "distance_cutline_km", "promotion_effect", "promotion_transfer_cost",
     "promotion_net_cost", "vhs_rank", "varo_final_rank",
-    "dqn_reference_score", "savings_score", "disposal_risk_score",
+    "dqn_reference_score", "net_benefit_score", "disposal_risk_score",
     "demand_fit_score", "inventory_balance_score", "route_cost_score",
-    "feasibility_score", "promotion_score", "greedy_score", "pareto_rank",
+    "feasibility_score", "demand_risk_score", "post_move_risk_score",
+    "pareto_rank", "net_benefit", "source_movable", "target_shortfall",
 )
 
 _ACTION_ALIASES = {
@@ -140,16 +144,25 @@ class StandardRecommendation:
     final_reason: Optional[str] = None
     weight_profile_id: Optional[str] = None
     weight_summary: Optional[str] = None
-    savings_score: Optional[float] = None
+    net_benefit_score: Optional[float] = None
     disposal_risk_score: Optional[float] = None
     demand_fit_score: Optional[float] = None
     inventory_balance_score: Optional[float] = None
     route_cost_score: Optional[float] = None
     feasibility_score: Optional[float] = None
-    promotion_score: Optional[float] = None
-    greedy_score: Optional[float] = None
+    demand_risk_score: Optional[float] = None
+    post_move_risk_score: Optional[float] = None
     pareto_rank: Optional[float] = None
     pareto_status: Optional[str] = None
+    # Decision metrics carried through so the UI never recomputes them.
+    net_benefit: Optional[float] = None
+    source_movable: Optional[float] = None
+    target_shortfall: Optional[float] = None
+    qty_limiting_factor: Optional[str] = None
+    demand_scenario_status: Optional[str] = None
+    robustness_status: Optional[str] = None
+    robustness_detail: Optional[str] = None
+    algorithm_version: Optional[str] = None
 
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
@@ -316,16 +329,24 @@ def normalize_standard_recommendation(item: Mapping[str, object]) -> Dict[str, o
         "final_reason": _first(item, "final_reason"),
         "weight_profile_id": _first(item, "weight_profile_id"),
         "weight_summary": _first(item, "weight_summary"),
-        "savings_score": _first(item, "savings_score"),
+        "net_benefit_score": _first(item, "net_benefit_score"),
         "disposal_risk_score": _first(item, "disposal_risk_score"),
         "demand_fit_score": _first(item, "demand_fit_score"),
         "inventory_balance_score": _first(item, "inventory_balance_score"),
         "route_cost_score": _first(item, "route_cost_score"),
         "feasibility_score": _first(item, "feasibility_score"),
-        "promotion_score": _first(item, "promotion_score"),
-        "greedy_score": _first(item, "greedy_score"),
+        "demand_risk_score": _first(item, "demand_risk_score"),
+        "post_move_risk_score": _first(item, "post_move_risk_score"),
         "pareto_rank": _first(item, "pareto_rank"),
         "pareto_status": _first(item, "pareto_status"),
+        "net_benefit": _first(item, "net_benefit"),
+        "source_movable": _first(item, "source_movable"),
+        "target_shortfall": _first(item, "target_shortfall"),
+        "qty_limiting_factor": _first(item, "qty_limiting_factor"),
+        "demand_scenario_status": _first(item, "demand_scenario_status"),
+        "robustness_status": _first(item, "robustness_status"),
+        "robustness_detail": _first(item, "robustness_detail"),
+        "algorithm_version": _first(item, "algorithm_version"),
     }
     for key in (
         "route_id", "product_id", "product_name", "source_id", "source_name", "target_id", "target_name",
@@ -337,6 +358,8 @@ def normalize_standard_recommendation(item: Mapping[str, object]) -> Dict[str, o
         "cutline_reason", "path_reason", "promotion_recommended", "promotion_reason",
         "greedy_strategy", "varo_final_decision", "final_reason",
         "weight_profile_id", "weight_summary", "pareto_status",
+        "qty_limiting_factor", "demand_scenario_status", "robustness_status",
+        "robustness_detail", "algorithm_version",
     ):
         normalized[key] = _clean_text(normalized.get(key))
     for key in NUMERIC_FIELDS:

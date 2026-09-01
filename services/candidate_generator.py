@@ -33,17 +33,19 @@ def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
     return max(low, min(high, value))
 
 
-def _store_ids_by_type(stores: pd.DataFrame) -> tuple[list[str], str | None]:
+def _store_ids_by_type(stores: pd.DataFrame) -> tuple[list[str], list[str]]:
+    """Return (store ids, DC ids). Every DC is returned: a network with DC01 and
+    DC02 must be able to route through either one, not only the first listed."""
     type_col = next((c for c in ("node_type", "store_type", "type") if c in stores.columns), None)
     id_col = next((c for c in ("node_id", "store_id", "id") if c in stores.columns), None)
     if id_col is None:
-        return [], None
+        return [], []
     if type_col is None:
-        return [str(v) for v in stores[id_col].dropna()], None
+        return [str(v) for v in stores[id_col].dropna()], []
     upper = stores[type_col].astype(str).str.strip().str.upper()
     store_ids = [str(v) for v in stores.loc[upper == "STORE", id_col].dropna()]
     dc_ids = [str(v) for v in stores.loc[upper == "DC", id_col].dropna()]
-    return store_ids, (dc_ids[0] if dc_ids else None)
+    return store_ids, dc_ids
 
 
 def _name_lookup(stores: pd.DataFrame) -> dict[str, str]:
@@ -113,29 +115,43 @@ def can_generate(data: dict[str, Any]) -> bool:
 
 
 def _resolve_route(
-    source: str, target: str, dc_id: str | None,
+    source: str, target: str, dc_ids: list[str] | None,
     direct: dict[tuple[str, str], dict[str, float]],
 ) -> dict[str, Any] | None:
+    """Pick the cheaper of the direct leg and the cheapest DC-routed path.
+
+    Every DC is evaluated, so a pair that is only reachable through DC02 is not
+    dropped because DC01 happens to come first in the master data.
+    """
     direct_leg = direct.get((source, target))
     via = None
-    if dc_id and (source, dc_id) in direct and (dc_id, target) in direct:
+    via_dc_id: str | None = None
+    for dc_id in dc_ids or []:
+        if (source, dc_id) not in direct or (dc_id, target) not in direct:
+            continue
         a, b = direct[(source, dc_id)], direct[(dc_id, target)]
-        via = {
+        option = {
             "distance_km": a["distance_km"] + b["distance_km"],
             "estimated_cost": (a["estimated_cost"] or 0) + (b["estimated_cost"] or 0),
             "travel_time_min": a["travel_time_min"] + b["travel_time_min"],
         }
+        if via is None or option["estimated_cost"] < via["estimated_cost"]:
+            via, via_dc_id = option, dc_id
     if direct_leg and via:
         if (direct_leg["estimated_cost"] or 1e12) <= (via["estimated_cost"] or 1e12):
             return {"route_type": "DIRECT", "route": direct_leg, "direct": direct_leg, "via": via,
+                    "dc_id": None,
                     "basis": "직접 경로 비용이 DC 경유보다 낮아 DIRECT를 선택했습니다."}
         return {"route_type": "VIA_DC", "route": via, "direct": direct_leg, "via": via,
+                "dc_id": via_dc_id,
                 "basis": "DC 경유 비용이 직접 경로보다 낮아 VIA_DC를 선택했습니다."}
     if direct_leg:
         return {"route_type": "DIRECT", "route": direct_leg, "direct": direct_leg, "via": None,
+                "dc_id": None,
                 "basis": "직접 경로만 가능해 DIRECT 후보로 생성했습니다."}
     if via:
         return {"route_type": "VIA_DC", "route": via, "direct": None, "via": via,
+                "dc_id": via_dc_id,
                 "basis": "직접 경로가 없어 DC 경유 후보로 생성했습니다."}
     return None
 
@@ -152,7 +168,7 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
     try:
         stores = data["stores"]
         inventory = data["inventory"].copy()
-        store_ids, dc_id = _store_ids_by_type(stores)
+        store_ids, dc_ids = _store_ids_by_type(stores)
         names = _name_lookup(stores)
         product_info = _product_info(data["products"])
         direct = _route_lookup(data["routes"])
@@ -203,7 +219,7 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
             for target in store_ids:
                 if target == source:
                     continue
-                resolved = _resolve_route(source, target, dc_id, direct)
+                resolved = _resolve_route(source, target, dc_ids, direct)
                 if resolved is None:
                     continue
                 target_stock = stock_by.get((target, product), median)
@@ -274,6 +290,7 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
             route_type = resolved["route_type"]
             direct_leg, via_leg = resolved.get("direct"), resolved.get("via")
             route_id = f"V2C{index:03d}"
+            route_dc_id = resolved.get("dc_id") if route_type == "VIA_DC" else None
             if route_type == "DIRECT":
                 stats["direct_count"] += 1
             else:
@@ -287,8 +304,8 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
                 "product_name": product_info[r["product"]]["name"],
                 "source_id": r["source"], "source_name": names.get(r["source"], r["source"]),
                 "target_id": r["target"], "target_name": names.get(r["target"], r["target"]),
-                "dc_id": dc_id if route_type == "VIA_DC" else None,
-                "dc_name": names.get(dc_id, dc_id) if (route_type == "VIA_DC" and dc_id) else None,
+                "dc_id": route_dc_id,
+                "dc_name": names.get(route_dc_id, route_dc_id) if route_dc_id else None,
                 "route_type": route_type, "transport_type": "일반 탑차",
                 "recommended_qty": r["moved"], "estimated_cost": r["cost"],
                 "expected_saving": round(r["saving"], 1),

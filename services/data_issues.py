@@ -2,8 +2,8 @@
 
 The sheet-level gate lives in ``data_validator``; this module adds *row-level*
 detail so a user can open their file and fix the exact cell. It never mutates
-data and never changes the validation verdict — it is an explanatory layer that
-powers a compact on-screen summary (counts + top issues) and a fixable CSV.
+data. The partial-data builder consumes its explicit policy fields and original
+row references to create a separate usable dataset.
 
 Original-vs-normalized separation
 ---------------------------------
@@ -16,17 +16,15 @@ Analysis still runs only on the separate normalized frames.
 Row numbers are 1-based spreadsheet rows (header = row 1, so the first data row
 is row 2). Blank rows are skipped but never renumber the rows below them.
 
-Severity ↔ gate consistency
----------------------------
-Each issue carries ``severity`` (오류/경고) and ``blocks_analysis`` from one
-central policy (``ISSUE_POLICY``). Every *blocking* code has a matching
-``data_validator`` ERROR, so ``summary["has_blocking"]`` and the real apply gate
-(``validation.has_errors``) always agree.
+Severity and treatment are independent. Each issue carries both user-facing
+severity and a centralized treatment contract (file block, row exclusion,
+retained warning, or information).
 """
 from __future__ import annotations
 
 import io
 import math
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 import pandas as pd
@@ -35,21 +33,60 @@ from services.column_aliases import SHEET_ALIASES, _canonical, clean_numeric_val
 
 ERROR = "오류"
 WARNING = "경고"
+INFORMATION = "정보"
 
-# Single source of truth: issue_code -> (severity, blocks_analysis).
-# error  <=> blocks_analysis=True  (행 사용 불가, 반드시 수정)
-# warning <=> blocks_analysis=False (확인 필요, 정책상 해당 행 제외 후 분석 가능)
-ISSUE_POLICY: dict[str, tuple[str, bool]] = {
-    "missing_id": (ERROR, True),
-    "non_numeric": (ERROR, True),
-    "negative": (ERROR, True),
-    "zero_quantity": (ERROR, True),
-    "same_source_target": (ERROR, True),
-    "conflict_duplicate": (WARNING, False),
-    "exact_duplicate": (WARNING, False),
-    "alias_conflict": (WARNING, False),
-    "id_numeric": (WARNING, False),
+FILE_BLOCKING = "file_blocking"
+ROW_EXCLUDABLE = "row_excludable"
+ROW_WARNING = "row_warning"
+INFORMATIONAL = "informational"
+
+
+@dataclass(frozen=True)
+class IssuePolicy:
+    """One shared treatment contract for validators, intake, UI and exports."""
+
+    severity: str
+    blocks_analysis: bool
+    scope: str
+    row_excludable: bool
+    retain_after_warning: bool
+    treatment: str
+    issue_message: str
+    fix_message: str
+
+
+_UNKNOWN_POLICY = IssuePolicy(
+    ERROR, True, "file", False, False, FILE_BLOCKING,
+    "데이터 구조를 안전하게 확인할 수 없습니다.",
+    "문제를 수정한 뒤 파일을 다시 업로드하세요.",
+)
+
+# Single source of truth. Severity, analysis gate and exclusion scope are
+# deliberately independent: an ERROR may be safely removable at row scope,
+# while a sheet-level alias conflict blocks the whole file.
+ISSUE_POLICY: dict[str, IssuePolicy] = {
+    "missing_id": IssuePolicy(ERROR, True, "cell", True, False, ROW_EXCLUDABLE, "필수 식별자가 없습니다.", "식별자를 입력하세요."),
+    "missing_required_value": IssuePolicy(ERROR, True, "cell", True, False, ROW_EXCLUDABLE, "필수 값이 없습니다.", "필수 값을 입력하세요."),
+    "non_numeric": IssuePolicy(ERROR, True, "cell", True, False, ROW_EXCLUDABLE, "숫자로 읽을 수 없습니다.", "숫자 값으로 수정하세요."),
+    "negative": IssuePolicy(ERROR, True, "cell", True, False, ROW_EXCLUDABLE, "음수 값입니다.", "0 이상의 값으로 수정하세요."),
+    "zero_quantity": IssuePolicy(ERROR, True, "cell", True, False, ROW_EXCLUDABLE, "이동 수량이 0입니다.", "1 이상의 값으로 수정하세요."),
+    "same_source_target": IssuePolicy(ERROR, True, "row", True, False, ROW_EXCLUDABLE, "출발지와 도착지가 같습니다.", "서로 다른 점포를 입력하세요."),
+    "invalid_node_type": IssuePolicy(ERROR, True, "cell", True, False, ROW_EXCLUDABLE, "점포 유형을 확인할 수 없습니다.", "DC 또는 STORE로 수정하세요."),
+    "invalid_route_type": IssuePolicy(ERROR, True, "cell", True, False, ROW_EXCLUDABLE, "경로 유형을 확인할 수 없습니다.", "DIRECT 또는 VIA_DC로 수정하세요."),
+    "missing_dc": IssuePolicy(ERROR, True, "row", True, False, ROW_EXCLUDABLE, "물류센터 경유 정보가 올바르지 않습니다.", "유효한 DC 정보를 입력하세요."),
+    "orphan_reference": IssuePolicy(ERROR, True, "row", True, False, ROW_EXCLUDABLE, "참조하는 기준정보가 없습니다.", "점포·상품·DC 식별자를 확인하세요."),
+    "missing_route_path": IssuePolicy(ERROR, True, "row", True, False, ROW_EXCLUDABLE, "추천에 필요한 경로 정보가 없습니다.", "경로 시트의 연결 정보를 확인하세요."),
+    "conflict_duplicate": IssuePolicy(WARNING, False, "row", True, False, ROW_EXCLUDABLE, "같은 키의 값이 서로 다릅니다.", "관련 행을 확인해 하나의 올바른 값으로 정리하세요."),
+    "exact_duplicate": IssuePolicy(WARNING, False, "row", True, False, ROW_EXCLUDABLE, "동일한 행이 중복되어 있습니다.", "중복 행을 하나만 남기세요."),
+    "alias_conflict": IssuePolicy(ERROR, True, "sheet", False, False, FILE_BLOCKING, "여러 원본 컬럼이 같은 필수 항목과 충돌합니다.", "충돌하는 컬럼을 정리한 뒤 다시 업로드하세요."),
+    "id_numeric": IssuePolicy(WARNING, False, "cell", False, True, ROW_WARNING, "식별자가 숫자로 저장되어 있습니다.", "앞자리 0이 필요하면 텍스트 형식으로 저장하세요."),
+    "blank_rows_removed": IssuePolicy(INFORMATION, False, "sheet", False, True, INFORMATIONAL, "빈 행을 건너뛰었습니다.", "수정하지 않아도 됩니다."),
 }
+
+
+def issue_policy(code: object) -> IssuePolicy:
+    """Return a conservative policy; unknown codes can never bypass the gate."""
+    return ISSUE_POLICY.get(str(code or ""), _UNKNOWN_POLICY)
 
 # When more than this share of the original rows would be excluded, the file is
 # treated as 사용 불가(강한 확인 필요) rather than a soft warning. Documented in
@@ -62,24 +99,47 @@ _VALUE_DISPLAY_LIMIT = 40
 _NUMERIC_CHECKS = {
     "inventory": (("stock_qty", False),),
     "routes": (("distance_km", False), ("estimated_cost", False), ("travel_time_min", False)),
-    "recommendations": (("recommended_qty", True), ("estimated_cost", False), ("expected_saving", False)),
+    "recommendations": (
+        ("recommended_qty", True), ("estimated_cost", False), ("expected_saving", False),
+        ("distance_km", False), ("travel_time_min", False),
+    ),
 }
 # Identifier fields that must not be blank: sheet -> standard columns.
 _REQUIRED_IDS = {
+    "stores": ("node_id",),
+    "dcs": ("dc_id",),
+    "products": ("product_id",),
     "inventory": ("store_id", "product_id"),
     "recommendations": ("route_id", "product_id", "source_id", "target_id"),
     "routes": ("source_id", "target_id"),
+}
+_REQUIRED_VALUES = {
+    "stores": ("node_name", "node_type"),
+    "dcs": ("dc_name",),
+    "products": ("product_name",),
 }
 # Identifier columns whose original type is checked for leading-zero loss.
 _ID_COLUMNS = {
     "stores": ("node_id",),
+    "dcs": ("dc_id",),
+    "products": ("product_id",),
     "inventory": ("store_id", "product_id"),
     "routes": ("source_id", "target_id"),
     "recommendations": ("route_id", "product_id", "source_id", "target_id"),
 }
-# Duplicate keys: sheet -> (key columns, value column that matters for conflicts).
+# Duplicate keys: sheet -> (key columns, value columns used to distinguish an
+# exact duplicate from a conflict). Exact duplicates keep the first original row;
+# conflicting groups exclude every related row because no value is preferred.
 _DUPLICATE_KEYS = {
-    "inventory": (("store_id", "product_id"), "stock_qty"),
+    "stores": (("node_id",), ("node_name", "node_type")),
+    "dcs": (("dc_id",), ("dc_name",)),
+    "products": (("product_id",), ("product_name",)),
+    "inventory": (("store_id", "product_id"), ("stock_qty",)),
+    "routes": (("source_id", "target_id"), ("distance_km", "estimated_cost", "travel_time_min")),
+    "recommendations": (
+        ("route_id",),
+        ("product_id", "source_id", "target_id", "route_type", "dc_id", "recommended_qty"),
+    ),
 }
 # Canonical fragments that mark a column as a time/snapshot dimension. Rows that
 # share a key but differ on such a column are legitimate multi-row (시계열), not
@@ -179,8 +239,9 @@ class _IssueBuilder:
         self, *, row: int, source_column: str | None, canonical_column: str,
         original_value: Any, normalized_value: str, message: str, fix: str, code: str,
         related_rows: list[int] | None = None,
+        exclusion_rows: list[int] | None = None,
     ) -> dict[str, Any]:
-        severity, blocks = ISSUE_POLICY.get(code, (WARNING, False))
+        policy = issue_policy(code)
         source_column = source_column or canonical_column
         return {
             # Compact on-screen table (사용자에게 익숙한 원본 기준).
@@ -188,13 +249,13 @@ class _IssueBuilder:
             "행": row,
             "컬럼": source_column,
             "값": _display_value(original_value),
-            "구분": severity,
-            "문제": message,
-            "수정 방법": fix,
+            "구분": policy.severity,
+            "문제": message or policy.issue_message,
+            "수정 방법": fix or policy.fix_message,
             # Folded detail / CSV / logs.
             "code": code,
             "issue_code": code,
-            "severity": severity,
+            "severity": policy.severity,
             "source_type": self.source_type,
             "source_file": self.source_file,
             "source_sheet": self.sheet,
@@ -204,10 +265,62 @@ class _IssueBuilder:
             "canonical_column_name": canonical_column,
             "original_value": _original_text(original_value),
             "normalized_value": normalized_value,
-            "blocks_analysis": blocks,
+            "blocks_analysis": policy.blocks_analysis,
+            "scope": policy.scope,
+            "row_excludable": policy.row_excludable,
+            "retain_after_warning": policy.retain_after_warning,
+            "treatment": policy.treatment,
             "related_rows": related_rows or [],
+            "exclusion_rows": exclusion_rows if exclusion_rows is not None else (
+                [row] if policy.row_excludable and row >= 2 else []
+            ),
+            "issue_message": message or policy.issue_message,
             "fix_message": fix,
         }
+
+
+def exclusion_row_refs(issues: list[Mapping[str, Any]]) -> set[tuple[str, int]]:
+    """Unique original rows selected by the shared row-exclusion policy."""
+    refs: set[tuple[str, int]] = set()
+    for item in issues:
+        policy = issue_policy(item.get("issue_code") or item.get("code"))
+        if not policy.row_excludable:
+            continue
+        sheet = str(item.get("source_sheet") or "")
+        for value in item.get("exclusion_rows") or [item.get("source_row_number")]:
+            try:
+                row = int(value)
+            except (TypeError, ValueError):
+                continue
+            if sheet and row >= 2:
+                refs.add((sheet, row))
+    return refs
+
+
+def annotate_issue_treatments(
+    issues: list[dict[str, Any]], excluded_refs: set[tuple[str, int]] | None = None,
+) -> list[dict[str, Any]]:
+    """Attach user-facing outcomes without exposing internal policy names."""
+    excluded = excluded_refs if excluded_refs is not None else exclusion_row_refs(issues)
+    annotated: list[dict[str, Any]] = []
+    for raw in issues:
+        item = dict(raw)
+        policy = issue_policy(item.get("issue_code") or item.get("code"))
+        try:
+            source_row = int(item.get("source_row_number") or 0)
+        except (TypeError, ValueError):
+            source_row = 0
+        ref = (str(item.get("source_sheet") or ""), source_row)
+        if policy.treatment == FILE_BLOCKING:
+            result, included = "파일 사용 차단", "아니오"
+        elif ref in excluded:
+            result, included = "제외", "아니오"
+        else:
+            result, included = "경고만 표시", "예"
+        item["처리 결과"] = result
+        item["적용 데이터 포함 여부"] = included
+        annotated.append(item)
+    return annotated
 
 
 def _sheet_source_type(default: str, sheet: str) -> str:
@@ -249,36 +362,70 @@ def collect_data_issues(
         def record(issue: dict[str, Any]) -> None:
             issues.append(issue)
             key = (sheet, issue["행"])
-            (error_rows if issue["severity"] == ERROR else warning_rows).add(key)
+            if issue["severity"] == ERROR:
+                error_rows.add(key)
+            elif issue["severity"] == WARNING:
+                warning_rows.add(key)
 
         _check_required_ids(frame, sheet, builder, blank_positions, record)
+        _check_required_values(frame, sheet, builder, blank_positions, record)
         _check_numeric(frame, sheet, builder, blank_positions, record)
+        _check_node_type(
+            frame, sheet, builder, blank_positions, record,
+            separate_dcs=isinstance(source_frames.get("dcs"), pd.DataFrame),
+        )
+        _check_route_type_and_dc(frame, sheet, builder, blank_positions, record)
         _check_same_source_target(frame, sheet, builder, blank_positions, record)
         _check_duplicates(frame, sheet, builder, blank_positions, record)
         _check_alias_conflicts(frame, sheet, builder, record)
         _check_identifier_types(frame, sheet, builder, blank_positions, record)
 
+    analysis_sheets = {"stores", "dcs", "products", "inventory", "routes", "recommendations"}
     total_rows = sum(
         int((~frame.apply(lambda r: all(_is_blank(v) for v in r), axis=1)).sum())
-        for frame in source_frames.values()
+        for sheet, frame in source_frames.items()
+        if sheet in analysis_sheets
         if isinstance(frame, pd.DataFrame) and not frame.empty
     )
-    error_count = len(error_rows)
-    warning_count = len(warning_rows - error_rows)
-    excluded_rows = error_count
+    excluded_refs = exclusion_row_refs(issues)
+    issues = annotate_issue_treatments(issues, excluded_refs)
+    error_count = len({row for row in error_rows if row[1] >= 2})
+    warning_only = {row for row in warning_rows - error_rows if row[1] >= 2}
+    warning_included = warning_only - excluded_refs
+    warning_count = len(warning_only)
+    excluded_rows = len(excluded_refs)
     usable_rows = max(0, total_rows - excluded_rows)
-    mostly_excluded = total_rows > 0 and (excluded_rows / total_rows) > HEAVY_EXCLUSION_RATIO
+    mostly_excluded = total_rows > 0 and (excluded_rows / total_rows) >= HEAVY_EXCLUSION_RATIO
+    file_blocking = [item for item in issues if item.get("treatment") == FILE_BLOCKING]
+    duplicate_refs = {
+        (str(item.get("source_sheet") or ""), int(row))
+        for item in issues if item.get("code") in ("conflict_duplicate", "exact_duplicate")
+        for row in (item.get("related_rows") or [item.get("source_row_number")])
+        if row
+    }
     summary = {
         "total_rows": total_rows,
         "total_issues": len(issues),
+        "error_items": sum(item.get("severity") == ERROR for item in issues),
+        "warning_items": sum(item.get("severity") == WARNING for item in issues),
         "error_rows": error_count,
         "warning_rows": warning_count,
         "usable_rows": usable_rows,
-        "warning_included_rows": usable_rows,
+        "applied_rows": usable_rows,
+        "warning_included_rows": len(warning_included),
         "excluded_rows": excluded_rows,
-        "duplicate_rows": sum(1 for i in issues if i["code"] in ("conflict_duplicate", "exact_duplicate")),
+        "duplicate_rows": len(duplicate_refs),
+        "excluded_row_refs": [
+            {"source_sheet": sheet, "source_row_number": row}
+            for sheet, row in sorted(excluded_refs)
+        ],
         "top": _rank_issues(issues)[:5],
-        "has_blocking": error_count > 0 or mostly_excluded,
+        # This is the issue-level gate only. The partial-application builder
+        # evaluates the 50% exclusion threshold per table and overall.
+        "has_blocking": any(item.get("blocks_analysis") for item in issues) or (
+            mostly_excluded and any(item.get("severity") == ERROR for item in issues)
+        ),
+        "has_file_blocking": bool(file_blocking),
         "mostly_excluded": mostly_excluded,
     }
     return {"issues": issues, "summary": summary}
@@ -298,6 +445,24 @@ def _check_required_ids(frame, sheet, builder, blank_positions, record) -> None:
                     canonical_column=standard, original_value=value, normalized_value="빈 값",
                     message="값이 비어 있어 항목을 구분할 수 없습니다.",
                     fix=f"{column} 값을 입력한 뒤 다시 업로드하세요.", code="missing_id",
+                ))
+
+
+def _check_required_values(frame, sheet, builder, blank_positions, record) -> None:
+    for standard in _REQUIRED_VALUES.get(sheet, ()):
+        column = _resolve_column(frame, sheet, standard)
+        if column is None:
+            continue
+        for position, (index, value) in enumerate(frame[column].items()):
+            if index in blank_positions:
+                continue
+            if _is_blank(value):
+                record(builder.make(
+                    row=_row_number(index, position), source_column=column,
+                    canonical_column=standard, original_value=value, normalized_value="빈 값",
+                    message="필수 값이 비어 있습니다.",
+                    fix=f"{column} 값을 입력한 뒤 다시 업로드하세요.",
+                    code="missing_required_value",
                 ))
 
 
@@ -331,8 +496,66 @@ def _check_numeric(frame, sheet, builder, blank_positions, record) -> None:
                 ))
 
 
-def _check_same_source_target(frame, sheet, builder, blank_positions, record) -> None:
+def _check_node_type(frame, sheet, builder, blank_positions, record, *, separate_dcs: bool = False) -> None:
+    if sheet != "stores":
+        return
+    if separate_dcs:
+        # DQN workbooks use store_type as a business segment and keep real DC
+        # rows in a separate dcs sheet; the loader safely assigns STORE/DC.
+        return
+    column = _resolve_column(frame, sheet, "node_type")
+    if column is None:
+        return
+    for position, (index, value) in enumerate(frame[column].items()):
+        if index in blank_positions or _is_blank(value):
+            continue
+        normalized = str(value).strip().upper()
+        if normalized not in {"DC", "STORE"}:
+            record(builder.make(
+                row=_row_number(index, position), source_column=column,
+                canonical_column="node_type", original_value=value, normalized_value=normalized,
+                message="점포 유형은 DC 또는 STORE여야 합니다.",
+                fix="점포 유형을 DC 또는 STORE로 수정하세요.", code="invalid_node_type",
+            ))
+
+
+def _check_route_type_and_dc(frame, sheet, builder, blank_positions, record) -> None:
+    # routes.route_type describes an edge (STORE_TO_STORE/STORE_TO_DC/DC_TO_STORE),
+    # while recommendations.route_type is the user decision mode (DIRECT/VIA_DC).
     if sheet != "recommendations":
+        return
+    type_column = _resolve_column(frame, sheet, "route_type")
+    if type_column is None:
+        return
+    dc_column = _resolve_column(frame, sheet, "dc_id")
+    for position, index in enumerate(frame.index):
+        if index in blank_positions:
+            continue
+        value = frame.at[index, type_column]
+        if _is_blank(value):
+            continue
+        normalized = str(value).strip().upper()
+        row = _row_number(index, position)
+        if normalized not in {"DIRECT", "VIA_DC"}:
+            record(builder.make(
+                row=row, source_column=type_column, canonical_column="route_type",
+                original_value=value, normalized_value=normalized,
+                message="지원하지 않는 경로 유형입니다.",
+                fix="DIRECT 또는 VIA_DC로 수정하세요.", code="invalid_route_type",
+            ))
+            continue
+        if normalized == "VIA_DC" and (dc_column is None or _is_blank(frame.at[index, dc_column])):
+            record(builder.make(
+                row=row, source_column=dc_column or "dc_id", canonical_column="dc_id",
+                original_value="" if dc_column is None else frame.at[index, dc_column],
+                normalized_value="빈 값",
+                message="물류센터 경유 경로에 DC 정보가 없습니다.",
+                fix="경유할 DC 식별자를 입력하세요.", code="missing_dc",
+            ))
+
+
+def _check_same_source_target(frame, sheet, builder, blank_positions, record) -> None:
+    if sheet not in {"routes", "recommendations"}:
         return
     src_col = _resolve_column(frame, sheet, "source_id")
     tgt_col = _resolve_column(frame, sheet, "target_id")
@@ -355,10 +578,17 @@ def _check_duplicates(frame, sheet, builder, blank_positions, record) -> None:
     spec = _DUPLICATE_KEYS.get(sheet)
     if not spec:
         return
-    key_standards, value_standard = spec
+    key_standards, value_standards = spec
     key_cols = [_resolve_column(frame, sheet, s) for s in key_standards]
-    value_col = _resolve_column(frame, sheet, value_standard)
-    if any(c is None for c in key_cols) or value_col is None:
+    if (
+        sheet == "recommendations" and len(key_cols) == 1
+        and "recommendation_id" in frame.columns
+        and not frame["recommendation_id"].duplicated().any()
+    ):
+        key_cols = ["recommendation_id"]
+    value_pairs = [(standard, _resolve_column(frame, sheet, standard)) for standard in value_standards]
+    value_pairs = [(standard, column) for standard, column in value_pairs if column is not None]
+    if any(c is None for c in key_cols) or not value_pairs:
         return
     time_cols = [str(c) for c in frame.columns if any(m in _canonical(c) for m in _TIME_MARKERS)]
     live_index = [i for i in frame.index if i not in blank_positions]
@@ -374,7 +604,10 @@ def _check_duplicates(frame, sheet, builder, blank_positions, record) -> None:
         if any(group[tc].astype(str).nunique() > 1 for tc in time_cols):
             continue
         rows = sorted(_row_number(idx, positions[idx]) for idx in group.index)
-        distinct_values = {str(v).strip() for v in group[value_col] if not _is_blank(v)}
+        distinct_values = {
+            tuple(_original_text(group.at[idx, column]).strip() for _, column in value_pairs)
+            for idx in group.index
+        }
         row_phrase = "·".join(f"{r}행" for r in rows)
         if len(distinct_values) > 1:
             message = f"{row_phrase}에 같은 점포·상품 데이터가 있으며 값이 다릅니다."
@@ -384,12 +617,15 @@ def _check_duplicates(frame, sheet, builder, blank_positions, record) -> None:
             message = f"{row_phrase}에 완전히 동일한 데이터가 중복되어 있습니다."
             fix = "중복 행 중 하나만 남기세요."
             code = "exact_duplicate"
+        exclusion_rows = rows if code == "conflict_duplicate" else rows[1:]
+        first_standard, first_column = value_pairs[0]
         for idx in group.index:
             record(builder.make(
-                row=_row_number(idx, positions[idx]), source_column=value_col,
-                canonical_column=value_standard, original_value=frame.at[idx, value_col],
-                normalized_value=_normalized_numeric(frame.at[idx, value_col]),
+                row=_row_number(idx, positions[idx]), source_column=first_column,
+                canonical_column=first_standard, original_value=frame.at[idx, first_column],
+                normalized_value=_original_text(frame.at[idx, first_column]),
                 message=message, fix=fix, code=code, related_rows=rows,
+                exclusion_rows=exclusion_rows,
             ))
 
 
@@ -443,7 +679,16 @@ def _check_identifier_types(frame, sheet, builder, blank_positions, record) -> N
 
 
 def _rank_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(issues, key=lambda item: 0 if item["구분"] == ERROR else 1)
+    order = {ERROR: 0, WARNING: 1, INFORMATION: 2}
+    return sorted(
+        issues,
+        key=lambda item: (
+            0 if item.get("treatment") == FILE_BLOCKING else 1,
+            order.get(item.get("구분"), 3),
+            str(item.get("source_sheet") or ""),
+            int(item.get("source_row_number") or 0),
+        ),
+    )
 
 
 # On-screen compact table columns (원본 기준, 내부 코드명 미노출).
@@ -451,12 +696,12 @@ _DISPLAY_COLUMNS = ["시트", "행", "컬럼", "값", "구분", "문제", "수�
 # Folded detail table columns (adds 표준 컬럼/정규화 값/차단/관련 행).
 _DETAIL_COLUMNS = [
     "시트", "행", "컬럼", "값", "구분", "문제", "수정 방법",
-    "표준 컬럼", "정규화 값", "분석 차단", "관련 행",
+    "처리 결과", "적용 데이터 포함 여부", "표준 컬럼", "정규화 값", "분석 차단", "관련 행",
 ]
 # Fixable CSV columns (원본 위치 + 수정 방법 + 전체 원본 값).
 _CSV_COLUMNS = [
-    "파일명", "시트명", "원본 행 번호", "원본 컬럼명", "입력값", "정규화 값",
-    "구분", "문제", "수정 방법", "오류 코드", "분석 차단", "관련 행",
+    "파일명", "시트명", "원본 행 번호", "원본 컬럼명", "입력값",
+    "구분", "문제", "수정 방법", "처리 결과", "적용 데이터 포함 여부", "관련 행",
 ]
 
 
@@ -472,6 +717,8 @@ def detail_rows(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for item in issues:
         row = {key: item.get(key, "") for key in _DISPLAY_COLUMNS}
+        row["처리 결과"] = item.get("처리 결과", "")
+        row["적용 데이터 포함 여부"] = item.get("적용 데이터 포함 여부", "")
         row["표준 컬럼"] = item.get("canonical_column_name", "")
         row["정규화 값"] = item.get("normalized_value", "")
         row["분석 차단"] = "예" if item.get("blocks_analysis") else "아니오"
@@ -489,12 +736,11 @@ def issues_to_csv_bytes(issues: list[dict[str, Any]]) -> bytes:
             "원본 행 번호": item.get("source_row_number", item.get("행", "")),
             "원본 컬럼명": item.get("source_column_name", item.get("컬럼", "")),
             "입력값": item.get("original_value", ""),  # full value, not truncated
-            "정규화 값": item.get("normalized_value", ""),
             "구분": item.get("구분", ""),
             "문제": item.get("문제", ""),
             "수정 방법": item.get("수정 방법", ""),
-            "오류 코드": item.get("issue_code", item.get("code", "")),
-            "분석 차단": "예" if item.get("blocks_analysis") else "아니오",
+            "처리 결과": item.get("처리 결과", ""),
+            "적용 데이터 포함 여부": item.get("적용 데이터 포함 여부", ""),
             "관련 행": _related_text(item.get("related_rows")),
         }
         for item in issues

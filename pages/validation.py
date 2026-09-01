@@ -14,6 +14,7 @@ from components.candidate_detail import render_excluded_candidates
 from components.state_banner import render_state_action_card
 from components.tables import render_capped_table, render_html_table
 from components.status import badge_html
+from services.vhs_score_engine import COMPONENT_LABELS
 from services.home_state import NO_CANDIDATES, READY, build_home_state
 from services import export_service, v2_summaries
 from services.dqn_service import (
@@ -126,17 +127,10 @@ def _won(value) -> str:
     return f"{n:,.0f}원" if n is not None else "-"
 
 
+# Labels come from the scoring engine so a component rename can never leave a raw
+# field name on screen. The extras are legacy keys some workbooks still carry.
 _COMPONENT_NAMES = {
-    "savings_score": "절감 효과",
-    "disposal_risk_score": "폐기 위험",
-    "demand_fit_score": "수요 적합도",
-    "inventory_balance_score": "재고 균형",
-    "route_cost_score": "이동 비용",
-    "feasibility_score": "실행 가능성",
-    "promotion_score": "프로모션 효과",
-    "greedy_score": "Greedy 기준",
-    "confidence_score": "추천 신뢰도",
-    "dqn_reference_score": "DQN 참고",
+    **COMPONENT_LABELS,
     "expiry_risk_score": "유통기한 위험",
     "sales_score": "판매 가능성",
     "route_efficiency_score": "경로 효율",
@@ -324,12 +318,12 @@ def _render_scores(pipeline: dict) -> None:
 # Tab 2 · 점수 구성
 # --------------------------------------------------------------------------- #
 _COMPONENT_GROUPS = [
-    ("절감·프로모션", ("savings_score", "promotion_score")),
+    ("경제성", ("net_benefit_score",)),
+    ("재고 문제 해소", ("inventory_balance_score", "demand_fit_score")),
     ("위험·폐기", ("disposal_risk_score", "expiry_risk_score")),
-    ("수요·판매", ("demand_fit_score", "sales_score")),
-    ("비용·경로", ("route_cost_score", "route_efficiency_score")),
-    ("실행·균형", ("feasibility_score", "inventory_balance_score")),
-    ("참고 지표", ("greedy_score", "confidence_score", "dqn_reference_score")),
+    ("이동 부담·실행 여건", ("route_cost_score", "route_efficiency_score", "feasibility_score")),
+    ("이동 후 위험·수요 안정성", ("post_move_risk_score", "demand_risk_score")),
+    ("참고 지표", ("dqn_reference_score",)),
 ]
 
 
@@ -380,7 +374,6 @@ def _render_score_components(pipeline: dict) -> None:
             detail_rows.append(row)
         if detail_rows:
             st.dataframe(pd.DataFrame(detail_rows), hide_index=True, width="stretch")
-        st.caption("구성요소(영문 필드): " + ", ".join(f"{_component_name(key)}({key})" for key in comp))
         neutral = pipeline.get("vhs_neutral_analysis") or v2_summaries.vhs_neutral_summary(pipeline)
         st.caption(f"기본값 사용 사유: {neutral.get('neutral_reason', '-')}")
 

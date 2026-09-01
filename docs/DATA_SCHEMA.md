@@ -100,10 +100,20 @@ Varo 워크북은 시트를 **이름으로** 인식합니다(stores/products/inv
 
 - **중복 키**: 재고는 `store_id + product_id`, 경로는 `source_id + target_id (+ route_type/dc)`,
   추천은 `route_id`.
-- **완전히 동일한 중복 행**(`exact_duplicate`): 관련 원본 행 번호를 모두 기록하고 확인 필요로 표시합니다.
+- **완전히 동일한 중복 행**(`exact_duplicate`): 첫 원본 행만 유지하고 이후 관련 행을 제외합니다.
 - **값이 충돌하는 중복**(`conflict_duplicate`, 같은 키·다른 값): 임의로 합치거나 마지막 값을 쓰지 않고
-  **경고(확인 필요)** 로 표시하며 관련 원본 행 번호를 모두 남깁니다.
+  관련 원본 행 번호를 모두 남기고 어느 값도 임의 선택하지 않으며 관련 행을 모두 제외합니다.
 - 날짜/시점 컬럼(예: `snapshot_date`)으로 구분되는 **정상 시계열 다중 행**은 중복으로 보지 않습니다.
+
+## 기준정보와 부분 적용 참조 관계
+
+- `stores.node_id`는 `inventory.store_id`, `routes.source_id/target_id`, 추천의 출발·도착·DC가 참조합니다.
+- `products.product_id`는 재고와 추천이 참조합니다. 기준정보 행이 제외되면 해당 ID를 참조하는 행도 같은
+  정제 단계에서 제외되며 고아 참조는 적용 데이터에 남지 않습니다.
+- DIRECT 추천은 유효한 점포 간 경로가, VIA_DC 추천은 유효한 DC와 두 구간 경로 또는 동일 의미의 VIA_DC
+  경로 행이 있어야 합니다. DC01 오류는 독립적인 DC02 경로를 제거하지 않습니다.
+- 제외 후 전체/테이블별 50% 이상 손실, 필수 테이블 소실, STORE/DC/상품/재고/경로 최소 조건 미달이면
+  파일 전체를 사용하지 않습니다. 추천 후보가 0건인 것과 분석 입력 자체가 무효인 것은 구분합니다.
 
 ## 허용값·결측값 처리
 
@@ -123,6 +133,16 @@ Varo 워크북은 시트를 **이름으로** 인식합니다(stores/products/inv
 - `Varo_V2_sample_edge_3stores_1dc.xlsx` (3점포/1DC, 극단 케이스)
 
 DQN 학습 샘플 팩(`Varo_DQN_training_samples_10pack`)은 이 저장소에 포함되지 않는 외부 데이터입니다.
+
+`validation_data/` 폴더(운영 형식 검증용, 앱 기본 경로 아님):
+
+- `varo_v2_anonymized_operational.xlsx` — 40점포/2DC/30상품, 분석 대상 2,742행.
+  위 스키마만 사용하며 **의도적인 오류 행·유지 경고 행이 섞여 있습니다.**
+  이름·좌표는 모두 가상 값이고 개인정보나 실제 업체 정보는 없습니다.
+- `varo_v2_anonymized_operational_manifest.json` — 기대 결과(행 수·제외 행·DC 구성 등).
+
+`python tools/generate_anonymized_operational_workbook.py`로 고정 seed에서 언제든 다시 만들 수
+있으며, 앱의 기본 샘플을 대체하지 않습니다. 검증 내용은 `docs/OPERATIONAL_VALIDATION.md` 참고.
 
 ## 잘못된 데이터 예시
 

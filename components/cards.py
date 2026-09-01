@@ -117,8 +117,8 @@ def render_recommendation_summary(st, recommendation: Optional[Mapping[str, obje
     rows = [
         ("검토 경로", review_route),
         ("추천 수량", format_number(recommendation.get("recommended_qty"), "개")),
-        ("예상 절감액", format_currency(recommendation.get("expected_saving"))),
-        ("최종 처리 제안", recommendation.get("varo_action") or "-"),
+        ("예상 순효과", format_currency(recommendation.get("net_benefit"))),
+        ("추천 안정성", recommendation.get("robustness_status") or "-"),
     ]
     grid = "".join(
         f'<div class="v2-info-item"><span class="v2-card-caption">{_safe(label)}</span><strong>{_safe(value)}</strong></div>'

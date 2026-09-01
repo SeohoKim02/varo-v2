@@ -150,7 +150,10 @@ class ColumnTrackingTests(unittest.TestCase):
         self.assertTrue(conflict)
         self.assertIn("현재고", conflict[0]["source_column_name"])
         self.assertIn("재고", conflict[0]["source_column_name"])
-        self.assertFalse(conflict[0]["blocks_analysis"])  # 확인 필요, not 사용 불가
+        # Ambiguous aliases are structural: choosing either source column would
+        # silently change meaning, so the whole file must be fixed.
+        self.assertTrue(conflict[0]["blocks_analysis"])
+        self.assertEqual(conflict[0]["treatment"], "file_blocking")
 
     def test_no_false_conflict_when_standard_column_present(self):
         # sales_qty and avg_daily_sales are cross-listed aliases but both are real

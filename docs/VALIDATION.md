@@ -47,34 +47,36 @@ python -m compileall -q app_v2.py router.py styles.py components services pages 
 
 - 필수 식별자 공백(`missing_id`), 비수치(`non_numeric`), 음수(`negative`), 이동 수량 0(`zero_quantity`),
   출발지=도착지(`same_source_target`) → **오류 · 분석 차단**.
-- 값 충돌 중복(`conflict_duplicate`), 완전 동일 중복(`exact_duplicate`), 컬럼 별칭 충돌(`alias_conflict`),
-  식별자 숫자화(`id_numeric`, 앞자리 0 손실 가능) → **경고 · 확인 필요**.
+- 값 충돌 중복(`conflict_duplicate`)과 완전 동일 중복(`exact_duplicate`)은 행 제외 대상으로 기록합니다.
+- 컬럼 별칭 충돌(`alias_conflict`)은 어떤 원본 컬럼이 맞는지 결정할 수 없어 **파일 구조 차단 오류**입니다.
+- 식별자 숫자화(`id_numeric`, 앞자리 0 손실 가능)는 행을 유지하는 경고입니다.
 - **원본 값 보존**: 숫자 변환 실패 시 원본 문자열(예: "십오")을 그대로 보여주고 정규화 값은 "변환 실패"로
   표시합니다. 실패 값을 임의로 0으로 만들지 않습니다. 빈 값은 `nan`/`None`이 아니라 "빈 값"으로 표시합니다.
 - **컬럼 충돌**: 서로 다른 원본 컬럼이 같은 표준 컬럼(표준 컬럼 자체가 없을 때)으로 인식되면 원본 컬럼명을
   모두 표시하고, 임의로 하나를 고르지 않습니다.
-- **중복**: 관련된 모든 원본 행 번호(`related_rows`)를 기록합니다. 값이 충돌하는 중복은 마지막 값으로
-  덮어쓰지 않고 확인 필요로 둡니다. 날짜/시점 컬럼으로 구분되는 정상 시계열 다중 행은 중복으로 보지 않습니다.
+- **중복**: 관련된 모든 원본 행 번호(`related_rows`)를 기록합니다. 값 충돌 중복은 관련 행을 모두 제외하고,
+  완전히 같은 중복은 첫 행만 유지합니다. 날짜/시점 컬럼으로 구분되는 정상 시계열 다중 행은 유지합니다.
 
-## 심각도 ↔ 분석 차단 일치
+## 심각도와 처리 정책 분리
 
-- 심각도와 `blocks_analysis` 기준은 `data_issues.ISSUE_POLICY` 한 곳에서 관리합니다
-  (오류 ⇔ `blocks_analysis=True`, 경고 ⇔ `False`).
-- **차단 코드는 모두 대응하는 `data_validator` 오류를 갖습니다**(비수치·음수·0 수량·빈 식별자·출발지=도착지).
-  따라서 문제 표의 "사용 불가" 판정과 실제 적용 게이트(`validation.has_errors`)가 항상 일치합니다.
-- 컬럼 충돌/식별자 숫자화/중복은 경고이므로 데이터는 로드되며 사용자가 확인합니다.
+- `ISSUE_POLICY` 한 곳에서 `severity`, `blocks_analysis`, `scope`, `row_excludable`,
+  `retain_after_warning`, 사용자 문제/수정 문구를 관리합니다. severity만으로 제거 여부를 결정하지 않습니다.
+- 처리는 `file_blocking`, `row_excludable`, `row_warning`, `informational`로 나뉩니다. 알 수 없는 코드는
+  안전하게 파일 차단으로 처리합니다.
 
 ## 문제 행 제외 정책
 
-- `total_rows`(원본 비어있지 않은 행), `usable_rows`(사용 행), `excluded_rows`(=오류 행),
-  `warning_rows`, `duplicate_rows`를 계산합니다. 오류 행만 제외하고 나머지로 분석합니다.
-- **제외 비율이 `HEAVY_EXCLUSION_RATIO`(0.5)를 넘으면** `mostly_excluded=True`로 사용 불가(강한 확인 필요)로
-  판정합니다. 핵심 식별자·필수 수치가 없는 행은 정상 분석에 포함하지 않습니다.
+- 제외 집합은 pandas 위치가 아니라 `(source_sheet, source_row_number)`로 만들며 한 행의 여러 문제를 한 번만
+  셉니다. 기준정보 제거로 고아가 되는 재고·경로·추천도 같은 1회 제외 집합에 추가합니다.
+- 값 충돌 중복은 관련 행 전체, 완전 동일 중복은 첫 행 이외를 제외합니다.
+- 제외 후 `validate_workbook_data`를 한 번 다시 실행합니다. 오류가 남으면 반복 삭제로 통과시키지 않습니다.
+- `HEAVY_EXCLUSION_RATIO=0.5`는 전체 분석 행과 각 필수 테이블에 모두 적용합니다. 50%와 그 이상은 차단합니다.
+  별도로 STORE 1개·DC 1개·상품·재고·경로가 남아야 합니다. 후보 0건 자체는 적용 차단 사유가 아닙니다.
 
 ## 분석 실행 게이트
 
-- **UI**: 검증 오류가 있으면 데이터가 적용되지 않고 pending으로만 보관됩니다(`data_application.load_and_apply`).
-  사용 불가 pending 데이터는 적용 상태로 복사되지 않습니다.
+- **UI**: 구조 오류 또는 제외 후 재검증 오류가 있으면 사용 불가 pending으로만 보관됩니다. 행 단위 오류는
+  정책에 따라 정제본에서 제외하며, 재검증을 통과한 정제본만 적용할 수 있습니다.
 - **파이프라인**: `run_analysis_pipeline`은 `validate_workbook_data`가 오류를 반환하면 상태
   `validation_error`로 즉시 중단하고 추천을 만들지 않습니다. **직접 함수 호출에서도** 게이트가 작동합니다.
 - 실행 불가능한 개별 후보는 실행 가능성 게이트(`services/feasibility.py`)가 최종 추천에서 제외합니다.
@@ -127,9 +129,9 @@ python -m compileall -q app_v2.py router.py styles.py components services pages 
   검사만 된 pending → "검사한 데이터를 적용하세요"; 적용 데이터 없음 → 데이터 없음 → 서명 불일치(stale)
   → 분석 실패 → 추천 있음/후보 0건. **적용된 정상 데이터가 있으면** 새 pending(정상/경고/사용 불가)은
   workspace 상태를 바꾸지 않고 `pending_notice`로만 알립니다(사용 불가 pending이 현재 결과를 숨기지 않음).
-- **적용=분석 실행(적용 시점).** `commit_pending_data`(또는 샘플의 `load_and_apply`)가 적용과 동시에
-  파이프라인을 실행하므로, 적용된 데이터에서 "적용됐지만 실행 전" 상태는 발생하지 않습니다. 업로드 파일은
-  적용 전까지 pending으로만 존재하며 분석에 사용되지 않습니다.
+- **업로드 적용과 분석 실행 분리.** `commit_pending_data`는 최종 usable data만 적용하고 과거 결과를
+  초기화한 뒤 `analysis_pending` 상태로 둡니다. 사용자가 추천 실행 페이지의 버튼을 눌러야
+  `run_applied_analysis`가 usable data로 파이프라인을 실행합니다. 빠른 샘플 경로만 기존 일괄 실행을 유지합니다.
 - **서명 불일치 시 과거 결과 숨김.** 적용 서명과 후보 기록(`candidate_ledger`)의 서명이 다르면 `stale`로
   판정해 과거 KPI·최우선 추천을 감춥니다. 정상 흐름에서는 `apply_state_payload`가 결과와 서명을 원자적으로
   교체하므로 항상 일치하며, 이 검사는 안전망입니다.
@@ -163,23 +165,25 @@ python -m compileall -q app_v2.py router.py styles.py components services pages 
 ## 검사와 적용 분리 (2단계 intake)
 
 - **inspect vs apply.** UI 업로드 경로는 `data_application.prepare_pending_data`로 파일을 *검사만* 합니다:
-  읽기 → 원본 snapshot 보존 → 정규화(`ensure_recommendations`) → `validate_workbook_data` → 행 수 점검
-  (`collect_data_issues`) → signature 생성 → `pending_*`에 저장. **여기서는 `varo_data`·`data_signature`·
+  읽기 → 원본 snapshot 보존 → 전체 정규화 → 공통 정책 분류 → 원본 행 제외 집합 → 참조 행 정리 →
+  최종 usable data → 1회 재검증 → source/usable signature 생성 → `pending_*` 저장. **여기서는 `varo_data`·`data_signature`·
   추천·candidate ledger를 절대 건드리지 않습니다.** 반환값은 상태 코드(사용 가능/확인 필요/사용 불가/현재
   데이터와 동일). 실제 적용은 사용자가 버튼을 눌러 `commit_pending_data`를 호출할 때만 일어납니다.
   (샘플/빠른 시작과 기존 프로그램적 호출은 한 번에 적용하는 `load_and_apply`를 계속 사용합니다.)
-- **pending intake payload.** `pending_varo_data`(정규화)·`pending_raw_data`(원본)·`pending_varo_validation`·
+- **pending intake payload.** `pending_varo_data`(전체 정규화)·`pending_usable_data`(적용 가능 정제본)·
+  `pending_raw_data`(원본)·`pending_varo_validation`·`pending_data_issues`·`pending_excluded_row_refs`·
+  `pending_quality_summary`·`pending_source_signature`·`pending_usable_signature`·
   `pending_source_metadata`·`pending_data_signature`·`pending_uploaded_filename`·`pending_data_source_type`·
   `pending_recommendation_source`·`pending_apply_allowed`·`pending_usable_rows`·`pending_excluded_rows`·
   `pending_status`·`pending_created_at`·`pending_upload_report`. 과거 추천·ledger·선택·경로·시뮬레이션은
   pending에 포함되지 않으며, pending 데이터는 적용 전까지 분석 파이프라인에 전달되지 않습니다.
-- **적용 전 최종 재검증.** `commit_pending_data`는 저장된 검사 결과를 그대로 신뢰하기 전에 pending 데이터·
-  검증·signature 존재, 오류 없음(`pending_apply_allowed`), 분석 사용 행 ≥ 1, stores 존재를 재확인합니다.
+- **적용 전 최종 재검증.** `commit_pending_data`는 usable data·검증·source/usable signature·제외 집합과
+  집계의 일치, `pending_apply_allowed`, 분석 사용 행, stores 존재를 재확인하고 usable signature를 다시 계산합니다.
   누락·불일치면 "검사 결과가 만료됐습니다"로 중단하고 적용하지 않습니다(내부 키/예외명 미노출).
-- **원자적 적용.** 재검증 통과 시 `run_analysis_pipeline`을 저장된 pending 데이터로 실행하고 payload를
-  완성한 뒤 `apply_state_payload` **한 번**으로 반영합니다. 성공 후에만 이전 추천·VHS·Greedy·Pareto·
+- **원자적 적용.** 재검증 통과 시 usable data와 원본 감사 계보·품질 요약을 payload로 완성한 뒤
+  `apply_state_payload` **한 번**으로 반영합니다. 성공 후에만 이전 추천·VHS·Greedy·Pareto·
   민감도·신뢰도·candidate ledger·선택 후보·경로 상세·시뮬레이션·현재 데이터와 다른 DQN 반영이 초기화됩니다.
-- **적용 실패 롤백/보존.** 파이프라인 예외·`validation_error`가 나면 현재 적용 데이터·추천·pending을 모두
+- **적용 실패 롤백/보존.** signature 불일치·재검증 오류·적용 예외가 나면 현재 적용 데이터·추천·pending을 모두
   보존하고 `data_apply_error`에 사용자용 짧은 메시지만 둡니다(traceback은 `logging.exception`으로만 기록).
   일부만 바뀐 혼합 상태를 만들지 않습니다.
 - **signature 동일·변경.** 내용 해시가 현재 적용 데이터와 같으면 pending 상태를 "현재 데이터와 동일"로 두고,
@@ -198,9 +202,8 @@ python -m compileall -q app_v2.py router.py styles.py components services pages 
   설명·상태 등급이 홈·추천 실행·검증과 항상 일치합니다(페이지별 개별 boolean 재판정 없음). 데이터 관리에만
   필요한 상세(현재/검사 중 구분, 행 수 점검, 파일·샘플 선택)만 view가 추가로 계산합니다.
 - **현재 적용 데이터와 검사 중 데이터 분리.** view는 `varo_data`의 stores 유무로 현재 적용 데이터를,
-  `pending_*`로 검사 중 데이터를 **독립적으로** 판정합니다. 이 코드베이스에서 pending 데이터는 오직
-  *사용 불가* 업로드입니다(유효/경고 데이터는 `load_and_apply`가 즉시 적용). 그래서 화면은 "검사 중"을
-  사용 불가로만 표시하고, 새 업로드가 오류여도 기존 정상 적용 데이터와 추천을 즉시 삭제하지 않습니다.
+  `pending_*`로 검사 중 데이터를 **독립적으로** 판정합니다. pending은 사용 가능·확인 필요·사용 불가를 모두
+  가질 수 있고, 버튼을 누르기 전에는 기존 정상 적용 데이터와 추천을 변경하지 않습니다.
 - **적용의 원자성.** 적용은 `apply_state_payload` 한 번으로 정규화 데이터·원본 계보·source metadata·
   signature를 넣고, 이전 추천·candidate ledger·선택 후보·경로 상세·시뮬레이션·민감도/신뢰도·DQN 반영
   상태를 함께 초기화합니다(일부만 적용되고 나머지가 남는 상태가 없음).
@@ -273,4 +276,20 @@ python -m pytest tests/test_feasibility.py tests/test_decision_support.py \
   tests/test_dqn_service.py tests/test_kpi_formatting.py -q
 # 페이지 렌더
 python -m pytest tests/test_page_render.py -q
+# 운영 형식 익명화 데이터 end-to-end
+python -m pytest tests/test_operational_validation.py tests/test_operational_ui_flow.py -q
 ```
+
+## 운영 형식 익명화 데이터 검증
+
+실제 운영 업로드와 같은 형태의 익명화 워크북(다중 점포·다중 상품·2개 DC·DIRECT/VIA_DC,
+정상·유지 경고·제외 대상 행 혼합)으로 파일 업로드부터 추천 결과·화면 상태까지 실행한 기록은
+[`docs/OPERATIONAL_VALIDATION.md`](OPERATIONAL_VALIDATION.md)에 있습니다. 데이터 구성, 기대값과
+실제 결과, 성능 측정값, 발견·수정한 결함, 남은 한계, 재현 명령이 모두 그 문서에 있습니다.
+
+```bash
+python tools/generate_anonymized_operational_workbook.py   # 고정 seed로 워크북 + 기대값 manifest
+python tools/run_operational_validation.py --repeats 3     # 실제 서비스로 end-to-end 검증
+```
+
+기대값은 앱 코드나 화면이 아니라 `validation_data/*_manifest.json`으로만 관리합니다.

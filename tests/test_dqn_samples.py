@@ -116,7 +116,7 @@ class DqnHomeTop5Tests(unittest.TestCase):
                 recs = build_v2_state(load_excel_data(path))["recommendations"]
         rows = build_home_top_rows(recs)
         self.assertTrue(rows)
-        self.assertEqual(set(rows[0]), {"순위", "상품", "출발", "도착", "경로", "수량", "예상 절감액"})
+        self.assertEqual(set(rows[0]), {"순위", "상품", "출발", "도착", "경로", "수량", "예상 순효과"})
         for internal in ("route_id", "VHS", "vhs_score", "Greedy", "greedy_score", "DQN", "신뢰도", "상태"):
             self.assertNotIn(internal, rows[0])
 

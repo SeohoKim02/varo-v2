@@ -3,12 +3,25 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Dict, Iterable
+import math
 
 import pandas as pd
 
 PASS = "통과"
 WARNING = "주의"
 ERROR = "오류"
+
+REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
+    "stores": ("node_id", "node_name", "node_type"),
+    "products": ("product_id", "product_name"),
+    "inventory": ("store_id", "product_id", "stock_qty"),
+    "routes": ("source_id", "target_id", "distance_km", "estimated_cost", "travel_time_min"),
+    "recommendations": (
+        "route_id", "product_id", "product_name", "source_id", "source_name", "target_id", "target_name",
+        "route_type", "recommended_qty", "transport_type", "estimated_cost", "expected_saving", "vhs_score",
+        "recommendation_grade", "confidence_score", "reason",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -72,7 +85,8 @@ def _validate_numeric(messages: list[ValidationMessage], sheet: str, df: pd.Data
     if column not in df.columns:
         return
     values = pd.to_numeric(df[column], errors="coerce")
-    if values.isna().any():
+    invalid = values.isna() | ~values.map(lambda value: math.isfinite(float(value)) if pd.notna(value) else False)
+    if invalid.any():
         messages.append(ValidationMessage(ERROR, sheet, f"`{column}` 컬럼에 숫자가 아닌 값이 있습니다."))
     if positive and (values <= 0).any():
         messages.append(ValidationMessage(ERROR, sheet, f"`{column}` 값은 0보다 커야 합니다."))
@@ -82,7 +96,10 @@ def _validate_numeric(messages: list[ValidationMessage], sheet: str, df: pd.Data
 
 def _validate_stores(data: dict[str, pd.DataFrame], messages: list[ValidationMessage]) -> Dict[str, int]:
     stores = data.get("stores", pd.DataFrame())
-    _add_missing(messages, "stores", stores, ("node_id", "node_name", "node_type"))
+    _add_missing(messages, "stores", stores, REQUIRED_COLUMNS["stores"])
+    if stores.empty:
+        messages.append(ValidationMessage(ERROR, "stores", "유효한 점포 데이터가 없습니다."))
+    _error_blank_id_values(messages, "stores", stores, ("node_id", "node_name", "node_type"))
     if any(column not in stores.columns for column in ("node_id", "node_type")):
         return {"dc_count": 0, "store_count": 0}
     if stores["node_id"].duplicated().any():
@@ -102,7 +119,10 @@ def _validate_stores(data: dict[str, pd.DataFrame], messages: list[ValidationMes
 
 def _validate_products(data: dict[str, pd.DataFrame], messages: list[ValidationMessage]) -> int:
     products = data.get("products", pd.DataFrame())
-    _add_missing(messages, "products", products, ("product_id", "product_name"))
+    _add_missing(messages, "products", products, REQUIRED_COLUMNS["products"])
+    if products.empty:
+        messages.append(ValidationMessage(ERROR, "products", "유효한 상품 데이터가 없습니다."))
+    _error_blank_id_values(messages, "products", products, ("product_id", "product_name"))
     if "product_id" in products.columns and products["product_id"].duplicated().any():
         messages.append(ValidationMessage(ERROR, "products", "product_id 중복 값이 있습니다."))
     return int(len(products))
@@ -110,10 +130,16 @@ def _validate_products(data: dict[str, pd.DataFrame], messages: list[ValidationM
 
 def _validate_inventory(data: dict[str, pd.DataFrame], messages: list[ValidationMessage]) -> int:
     inventory = data.get("inventory", pd.DataFrame())
-    _add_missing(messages, "inventory", inventory, ("store_id", "product_id", "stock_qty"))
+    _add_missing(messages, "inventory", inventory, REQUIRED_COLUMNS["inventory"])
+    if inventory.empty:
+        messages.append(ValidationMessage(ERROR, "inventory", "유효한 재고 데이터가 없습니다."))
     _error_blank_id_values(messages, "inventory", inventory, ("store_id", "product_id"))
     _validate_numeric(messages, "inventory", inventory, "stock_qty")
     _validate_numeric(messages, "inventory", inventory, "sales_qty")
+    store_ids = _node_ids(data)
+    product_ids = _product_ids(data)
+    _validate_reference(messages, "inventory", inventory, "store_id", store_ids, "stores.node_id")
+    _validate_reference(messages, "inventory", inventory, "product_id", product_ids, "products.product_id")
     if "sales_qty" not in inventory.columns:
         messages.append(ValidationMessage(WARNING, "inventory", "판매량 컬럼을 찾지 못했습니다."))
     if not any(column in inventory.columns for column in ("expiry_days", "expiry_date", "expiration_date", "shelf_life_days")):
@@ -128,9 +154,29 @@ def _node_ids(data: dict[str, pd.DataFrame]) -> set[str]:
     return set(stores["node_id"].dropna().astype(str))
 
 
+def _product_ids(data: dict[str, pd.DataFrame]) -> set[str]:
+    products = data.get("products", pd.DataFrame())
+    if "product_id" not in products.columns:
+        return set()
+    return set(products["product_id"].dropna().astype(str))
+
+
+def _validate_reference(
+    messages: list[ValidationMessage], sheet: str, frame: pd.DataFrame,
+    column: str, valid: set[str], target: str,
+) -> None:
+    if column not in frame.columns or not valid:
+        return
+    invalid = sorted(set(frame.loc[~_blank_mask(frame[column]), column].astype(str)) - valid)
+    if invalid:
+        messages.append(ValidationMessage(ERROR, sheet, f"`{column}`에 {target}에 없는 값이 있습니다: {invalid}"))
+
+
 def _validate_routes(data: dict[str, pd.DataFrame], messages: list[ValidationMessage]) -> int:
     routes = data.get("routes", pd.DataFrame())
-    _add_missing(messages, "routes", routes, ("source_id", "target_id", "distance_km", "estimated_cost", "travel_time_min"))
+    _add_missing(messages, "routes", routes, REQUIRED_COLUMNS["routes"])
+    if routes.empty:
+        messages.append(ValidationMessage(ERROR, "routes", "유효한 경로 데이터가 없습니다."))
     _error_blank_id_values(messages, "routes", routes, ("source_id", "target_id"))
     ids = _node_ids(data)
     for column in ("source_id", "target_id"):
@@ -140,6 +186,12 @@ def _validate_routes(data: dict[str, pd.DataFrame], messages: list[ValidationMes
                 messages.append(ValidationMessage(ERROR, "routes", f"`{column}`에 stores.node_id에 없는 값이 있습니다: {invalid}"))
     if {"source_id", "target_id"}.issubset(routes.columns) and routes.duplicated(["source_id", "target_id"]).any():
         messages.append(ValidationMessage(WARNING, "routes", "동일 source_id/target_id 조합이 중복되어 있습니다."))
+    if {"source_id", "target_id"}.issubset(routes.columns):
+        same = (~_blank_mask(routes["source_id"])) & (
+            routes["source_id"].astype(str).str.strip() == routes["target_id"].astype(str).str.strip()
+        )
+        if bool(same.any()):
+            messages.append(ValidationMessage(ERROR, "routes", "출발지와 도착지가 같은 경로가 있습니다."))
     for column in ("distance_km", "estimated_cost", "travel_time_min"):
         _validate_numeric(messages, "routes", routes, column)
     return int(len(routes))
@@ -147,11 +199,7 @@ def _validate_routes(data: dict[str, pd.DataFrame], messages: list[ValidationMes
 
 def _validate_recommendations(data: dict[str, pd.DataFrame], messages: list[ValidationMessage]) -> Dict[str, int]:
     recs = data.get("recommendations", pd.DataFrame())
-    required = (
-        "route_id", "product_id", "product_name", "source_id", "source_name", "target_id", "target_name",
-        "route_type", "recommended_qty", "transport_type", "estimated_cost", "expected_saving", "vhs_score",
-        "recommendation_grade", "confidence_score", "reason",
-    )
+    required = REQUIRED_COLUMNS["recommendations"]
     _add_missing(messages, "v2_recommendations", recs, required)
     if "route_id" in recs.columns:
         if _blank_mask(recs["route_id"]).any():
@@ -178,11 +226,24 @@ def _validate_recommendations(data: dict[str, pd.DataFrame], messages: list[Vali
         if bool(same.any()):
             messages.append(ValidationMessage(ERROR, "v2_recommendations", "출발지와 도착지가 같은 추천이 있습니다."))
     ids = _node_ids(data)
+    product_ids = _product_ids(data)
     for column in ("source_id", "target_id"):
         if column in recs.columns and ids:
             invalid = sorted(set(recs[column].dropna().astype(str)) - ids)
             if invalid:
                 messages.append(ValidationMessage(ERROR, "v2_recommendations", f"`{column}`에 stores.node_id에 없는 값이 있습니다: {invalid}"))
+    _validate_reference(messages, "v2_recommendations", recs, "product_id", product_ids, "products.product_id")
+    if "dc_id" in recs.columns and ids:
+        dc_ids = set(
+            data.get("stores", pd.DataFrame()).loc[
+                data.get("stores", pd.DataFrame()).get("node_type", pd.Series(dtype=str)).astype(str).str.upper() == "DC",
+                "node_id",
+            ].astype(str)
+        ) if {"node_id", "node_type"}.issubset(data.get("stores", pd.DataFrame()).columns) else set()
+        via = recs.get("route_type", pd.Series(index=recs.index, dtype=str)).astype(str).str.upper() == "VIA_DC"
+        invalid_dc = set(recs.loc[via & ~_blank_mask(recs.get("dc_id", pd.Series(index=recs.index, dtype=object))), "dc_id"].astype(str)) - dc_ids
+        if invalid_dc:
+            messages.append(ValidationMessage(ERROR, "v2_recommendations", f"`dc_id`에 유효한 DC가 아닌 값이 있습니다: {sorted(invalid_dc)}"))
     for column in ("recommended_qty", "estimated_cost", "expected_saving", "vhs_score", "confidence_score", "distance_km", "travel_time_min"):
         _validate_numeric(messages, "v2_recommendations", recs, column, positive=(column == "recommended_qty"))
     route_type = recs["route_type"].astype(str).str.strip().str.upper() if "route_type" in recs.columns else pd.Series(dtype=str)

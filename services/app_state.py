@@ -24,6 +24,11 @@ CANONICAL_DATA_KEYS = (
     "data_signature",
     "raw_data",
     "source_metadata",
+    "source_signature",
+    "data_quality_summary",
+    "data_issues",
+    "excluded_row_refs",
+    "analysis_run_required",
     "dqn_training_result",
     "dqn_reflection_mode",
     "kakao_map_state",
@@ -53,6 +58,18 @@ TRANSIENT_VIEW_KEYS = (
     "raw_sheet_select",
 )
 
+# Transient keys describing the *current* recommendation run (progress flag, the
+# measured duration, and the one-shot completion notice). They belong to a single
+# run, never to the dataset, so applying or clearing data must drop them —
+# otherwise a stale "실행 중" would block the button or an old duration would be
+# shown next to a new result.
+ANALYSIS_RUN_KEYS = (
+    "analysis_running",
+    "analysis_elapsed_seconds",
+    "analysis_completed_notice",
+    "analysis_run_error",
+)
+
 
 # Empty defaults for every canonical key (mirrors app_v2.initialize_session_state)
 # so 현재 데이터 초기화 leaves the workspace in the exact 데이터 없음 shape.
@@ -74,6 +91,11 @@ _CANONICAL_EMPTY: dict[str, Any] = {
     "data_signature": None,
     "raw_data": {},
     "source_metadata": {},
+    "source_signature": None,
+    "data_quality_summary": {},
+    "data_issues": [],
+    "excluded_row_refs": [],
+    "analysis_run_required": False,
     "dqn_training_result": None,
     "dqn_reflection_mode": "DQN 참고만",
     "kakao_map_state": None,
@@ -88,6 +110,8 @@ _PENDING_KEYS = (
     "pending_raw_data", "pending_source_metadata", "pending_load_error",
     "pending_data_signature", "pending_recommendation_source", "pending_apply_allowed",
     "pending_usable_rows", "pending_excluded_rows", "pending_status", "pending_created_at",
+    "pending_usable_data", "pending_usable_signature", "pending_source_signature",
+    "pending_data_issues", "pending_excluded_row_refs", "pending_quality_summary",
     "data_apply_error",
 )
 
@@ -108,6 +132,11 @@ def has_app_data(data: Mapping[str, Any] | None, recommendations: Sequence[Mappi
     if not isinstance(data, Mapping):
         return False
     return _has_rows(data.get("stores")) and _has_rows(recommendations)
+
+
+def has_applied_data(data: Mapping[str, Any] | None) -> bool:
+    """Applied analysis input exists even when recommendations have not run yet."""
+    return isinstance(data, Mapping) and _has_rows(data.get("stores"))
 
 
 def default_selected_route_id(recommendations: Sequence[Mapping[str, object]] | None) -> str | None:
@@ -138,6 +167,11 @@ def build_applied_state_payload(
     data_signature: str | None = None,
     raw_data: Mapping[str, Any] | None = None,
     source_metadata: Mapping[str, Any] | None = None,
+    source_signature: str | None = None,
+    data_quality_summary: Mapping[str, Any] | None = None,
+    data_issues: Sequence[Mapping[str, Any]] | None = None,
+    excluded_row_refs: Sequence[Mapping[str, Any]] | None = None,
+    analysis_run_required: bool = False,
 ) -> dict[str, Any]:
     if getattr(validation, "has_errors", False):
         raise ValueError("검증 오류가 있는 데이터는 앱에 적용할 수 없습니다.")
@@ -161,6 +195,11 @@ def build_applied_state_payload(
         "upload_report": {},
         "recommendation_source": "uploaded",
         "data_signature": data_signature,
+        "source_signature": source_signature or data_signature,
+        "data_quality_summary": dict(data_quality_summary or {}),
+        "data_issues": [dict(item) for item in (data_issues or [])],
+        "excluded_row_refs": [dict(item) for item in (excluded_row_refs or [])],
+        "analysis_run_required": bool(analysis_run_required),
     }
 
 
@@ -192,7 +231,7 @@ def apply_state_payload(state: MutableMapping[str, Any], payload: Mapping[str, A
             _assign(state, key, payload.get(key))
         else:
             state[key] = payload.get(key)
-    for key in TRANSIENT_VIEW_KEYS:
+    for key in (*TRANSIENT_VIEW_KEYS, *ANALYSIS_RUN_KEYS):
         state.pop(key, None)
     state["simulation_snapshot"] = None
     state["show_all_routes"] = False
@@ -213,7 +252,7 @@ def clear_applied_data(state: MutableMapping[str, Any]) -> None:
     """
     for key in CANONICAL_DATA_KEYS:
         _assign(state, key, _CANONICAL_EMPTY.get(key))
-    for key in TRANSIENT_VIEW_KEYS:
+    for key in (*TRANSIENT_VIEW_KEYS, *ANALYSIS_RUN_KEYS):
         state.pop(key, None)
     for key in _PENDING_KEYS:
         state.pop(key, None)
@@ -236,7 +275,7 @@ def data_status_label(
         status = validation.get("status")
     if status == "오류":
         return "검증 오류"
-    if not has_app_data(data, recommendations):
+    if not has_applied_data(data):
         return "데이터 없음"
     pipeline_status = (pipeline_result or {}).get("status")
     if pipeline_status == "success":

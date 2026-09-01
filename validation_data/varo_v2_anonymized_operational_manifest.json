@@ -1,0 +1,711 @@
+{
+  "anonymization": {
+    "contains_personal_data": false,
+    "contains_real_company_data": false,
+    "coordinates": "실제 주소가 아닌 인공 격자 좌표 (위도 10.x / 경도 10.x)",
+    "dc_name_pattern": "가상물류센터 N",
+    "product_name_pattern": "가상상품 NN",
+    "region_name_pattern": "가상권역 X",
+    "store_name_pattern": "가상점포 NN"
+  },
+  "expected": {
+    "applied_rows": 2623,
+    "apply_allowed": true,
+    "candidate_generation_possible": true,
+    "excluded_by_table": {
+      "inventory": 30,
+      "recommendations": 6,
+      "routes": 82,
+      "stores": 1
+    },
+    "excluded_row_refs": [
+      {
+        "source_row_number": 42,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 92,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 122,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 146,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 147,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 148,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 149,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 150,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 151,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 152,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 153,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 154,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 155,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 156,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 157,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 158,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 159,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 160,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 161,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 162,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 163,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 164,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 165,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 166,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 167,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 168,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 169,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 202,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 962,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 963,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 64,
+        "source_sheet": "recommendations"
+      },
+      {
+        "source_row_number": 65,
+        "source_sheet": "recommendations"
+      },
+      {
+        "source_row_number": 66,
+        "source_sheet": "recommendations"
+      },
+      {
+        "source_row_number": 67,
+        "source_sheet": "recommendations"
+      },
+      {
+        "source_row_number": 68,
+        "source_sheet": "recommendations"
+      },
+      {
+        "source_row_number": 69,
+        "source_sheet": "recommendations"
+      },
+      {
+        "source_row_number": 7,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 17,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 46,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 47,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 85,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 124,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 163,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 202,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 236,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 237,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 238,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 239,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 240,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 241,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 242,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 243,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 244,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 245,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 246,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 247,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 248,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 249,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 250,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 251,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 253,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 254,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 255,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 256,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 257,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 258,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 259,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 260,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 261,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 262,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 263,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 264,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 265,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 266,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 267,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 268,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 269,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 270,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 271,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 272,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 273,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 274,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 275,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 282,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 321,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 360,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 399,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 438,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 477,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 516,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 555,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 594,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 633,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 672,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 711,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 750,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 789,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 828,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 867,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 906,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 945,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 984,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1023,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1062,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1101,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1140,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1179,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1218,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1257,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1296,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1335,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1374,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1413,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1452,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1491,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1530,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1575,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 1576,
+        "source_sheet": "routes"
+      },
+      {
+        "source_row_number": 10,
+        "source_sheet": "stores"
+      }
+    ],
+    "excluded_rows": 119,
+    "excluded_store_id": "S07",
+    "minimum_recommendation_count": 1,
+    "orphan_references_after_exclusion": 0,
+    "retained_warning_row_refs": [
+      {
+        "source_row_number": 2,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 62,
+        "source_sheet": "inventory"
+      },
+      {
+        "source_row_number": 2,
+        "source_sheet": "products"
+      },
+      {
+        "source_row_number": 2,
+        "source_sheet": "recommendations"
+      }
+    ],
+    "total_rows": 2742,
+    "usable_rows_by_table": {
+      "inventory": 932,
+      "products": 30,
+      "recommendations": 62,
+      "routes": 1558,
+      "stores": 41
+    },
+    "warning_included_rows": 4,
+    "warning_rows": 7
+  },
+  "generator": "tools/generate_anonymized_operational_workbook.py",
+  "issues": {
+    "cascade_excluded_rows": 106,
+    "file_blocking_count": 0,
+    "injected": {
+      "blank_row": {
+        "row": 252,
+        "sheet": "routes"
+      },
+      "inventory": [
+        {
+          "column": "stock_qty",
+          "issue": "negative",
+          "row": 42
+        },
+        {
+          "column": "stock_qty",
+          "issue": "non_numeric",
+          "row": 122
+        },
+        {
+          "column": "store_id, stock_qty",
+          "issue": "missing_id+negative",
+          "row": 202
+        },
+        {
+          "column": "stock_qty",
+          "issue": "exact_duplicate",
+          "note": "원본 62행과 동일",
+          "row": 962
+        },
+        {
+          "column": "stock_qty",
+          "issue": "conflict_duplicate",
+          "note": "원본 92행과 값 충돌",
+          "row": 963
+        },
+        {
+          "column": "stock_qty",
+          "issue": "conflict_duplicate",
+          "note": "963행과 값 충돌",
+          "row": 92
+        }
+      ],
+      "recommendations": [
+        {
+          "column": "recommended_qty",
+          "issue": "zero_quantity",
+          "route_id": "RX01",
+          "row": 65
+        },
+        {
+          "column": "dc_id",
+          "issue": "missing_dc",
+          "route_id": "RX02",
+          "row": 66
+        },
+        {
+          "column": "route_type",
+          "issue": "invalid_route_type",
+          "route_id": "RX03",
+          "row": 67
+        },
+        {
+          "column": "target_id",
+          "issue": "same_source_target",
+          "route_id": "RX04",
+          "row": 68
+        },
+        {
+          "column": "target_id",
+          "issue": "orphan_reference",
+          "route_id": "RX05",
+          "row": 69
+        }
+      ],
+      "routes": [
+        {
+          "column": "distance_km",
+          "issue": "negative",
+          "row": 17
+        },
+        {
+          "column": "estimated_cost",
+          "issue": "non_numeric",
+          "row": 47
+        }
+      ],
+      "stores": [
+        {
+          "column": "node_name",
+          "issue": "missing_required_value",
+          "node_id": "S07",
+          "row": 10
+        }
+      ],
+      "warnings": [
+        {
+          "column": "product_id",
+          "issue": "id_numeric",
+          "row": 2,
+          "sheet": "products"
+        },
+        {
+          "column": "product_id",
+          "issue": "id_numeric",
+          "row": 2,
+          "sheet": "inventory"
+        },
+        {
+          "column": "product_id",
+          "issue": "id_numeric",
+          "row": 2,
+          "sheet": "recommendations"
+        },
+        {
+          "column": "stock_qty",
+          "issue": "exact_duplicate",
+          "row": 62,
+          "sheet": "inventory"
+        },
+        {
+          "column": "stock_qty",
+          "issue": "exact_duplicate",
+          "row": 962,
+          "sheet": "inventory"
+        },
+        {
+          "column": "stock_qty",
+          "issue": "conflict_duplicate",
+          "row": 92,
+          "sheet": "inventory"
+        },
+        {
+          "column": "stock_qty",
+          "issue": "conflict_duplicate",
+          "row": 963,
+          "sheet": "inventory"
+        }
+      ]
+    },
+    "retained_warning_detail": "product_id 가 숫자로 저장된 3개 시트(id_numeric)와 완전 중복 쌍의 첫 원본 행은 경고만 표시하고 적용 데이터에 남깁니다.",
+    "retained_warning_rows": 4,
+    "row_excludable_rows": 13,
+    "warning_rows": 7
+  },
+  "recommendations": {
+    "cascade_excluded_route_id": "R0063",
+    "dc01_rows": 8,
+    "dc02_rows": 12,
+    "direct_rows": 46,
+    "feasibility_blocked_route_ids": [
+      "R0061",
+      "R0062"
+    ],
+    "total_rows": 68,
+    "via_dc_rows": 21
+  },
+  "reference_date": "2026-09-01",
+  "routes": {
+    "dc01_rows": 40,
+    "dc02_rows": 40,
+    "direct_rows": 1560,
+    "via_dc_rows": 80
+  },
+  "scale": {
+    "dc_count": 2,
+    "product_count": 30,
+    "source_rows_by_table": {
+      "inventory": 962,
+      "products": 30,
+      "recommendations": 68,
+      "routes": 1640,
+      "stores": 42
+    },
+    "store_count": 40,
+    "total_source_rows": 2742
+  },
+  "seed": 20260901
+}

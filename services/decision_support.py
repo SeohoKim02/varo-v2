@@ -69,8 +69,15 @@ def recommendation_stability(weight_sensitivity: Mapping[str, Any] | None) -> di
             "reasons": ["후보나 시나리오가 부족해 안정성을 판단할 수 없습니다."],
         }
 
+    # Mean rank movement grows with the candidate count: in a 60-candidate set the
+    # tail always shuffles a little, and that says nothing about the recommendation
+    # the user is being shown. The tolerance therefore scales with the set size,
+    # while Top-1 retention stays the primary signal.
+    candidates = int(ws.get("candidate_count") or 0)
+    tolerance = max(0.5, 0.05 * candidates)
+
     reasons: list[str] = []
-    if retention >= 0.999 and (volatility is None or volatility <= 0.5):
+    if retention >= 0.999 and (volatility is None or volatility <= tolerance):
         status = STABLE
         reasons.append("가중치를 조정해도 1순위 추천이 유지됩니다.")
     elif retention >= 0.80:

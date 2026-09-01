@@ -5,7 +5,7 @@ import streamlit as st
 
 from components.data_toolbar import render_quick_data_bar
 from components.status import app_status_badges_html
-from services.app_state import has_app_data
+from services.app_state import has_applied_data
 
 MENU_ITEMS = [
     "운영 현황",
@@ -24,10 +24,7 @@ def get_current_menu() -> str:
 
 
 def _file_label() -> str:
-    if not has_app_data(
-        st.session_state.get("varo_data"),
-        st.session_state.get("varo_recommendations"),
-    ):
+    if not has_applied_data(st.session_state.get("varo_data")):
         return "데이터 없음"
     return st.session_state.get("uploaded_filename") or "파일명 없음"
 

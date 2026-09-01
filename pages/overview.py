@@ -141,7 +141,7 @@ def _render_result_kpis(home: dict) -> None:
     cards = [
         ("추천 후보", format_number(home.get("recommendation_count")), "실행을 검토할 이동 후보 수"),
         ("권장 이동 수량", format_number(kpis.get("total_recommended_qty")), "추천 전체의 이동 대상 수량"),
-        ("예상 순효과", format_currency(kpis.get("total_expected_saving")), "추천 실행 시 기대 효과"),
+        ("예상 순효과", format_currency(kpis.get("total_net_benefit")), "이동 비용을 뺀 기대 효과"),
         ("추천 신뢰도", str(confidence), "실행 가능성과 순위 안정성 기준"),
         ("데이터 상태", str(home.get("data_status") or "확인 필요"), "현재 사용 중인 데이터"),
     ]
@@ -506,7 +506,8 @@ def _render_best_recommendation_card(top: dict, confidence: str | None) -> None:
         f'<span>방식 {_safe(route_label)}</span>'
         f'{dc_line}'
         f'<span>수량 {_safe(format_number(top.get("recommended_qty"), "개"))}</span>'
-        f'<span>예상 순효과 {_safe(format_currency(top.get("expected_saving")))}</span>'
+        f'<span>예상 순효과 {_safe(format_currency(top.get("net_benefit")))}</span>'
+        f'<span>추천 안정성 {_safe(top.get("robustness_status") or "-")}</span>'
         f'<span>추천 신뢰도 {_safe(confidence or "-")}</span>'
         '</div>'
         f'{reason_html}'

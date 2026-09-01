@@ -6,9 +6,7 @@ needs, so the page never re-guesses status from scattered booleans. It reuses
 next action/status grade, and adds the data-management-only detail:
 
 * 현재 적용 데이터(applied) vs 검사 중 데이터(pending) 를 명확히 분리.
-* pending 은 이 코드베이스에서 오직 *사용 불가* 업로드만 존재한다
-  (``data_application.load_and_apply`` 는 유효/경고 데이터는 즉시 적용하고,
-  검증 오류 데이터만 ``pending_*`` 로 보관). 그래서 pending = 사용 불가.
+* pending은 전체 정규화본, 제외 집합, 최종 usable data를 분리해 보관한다.
 * 검사 결과는 행 수 중심(전체/분석 사용/오류/경고/제외)으로 요약.
 
 Nothing internal (signatures, filesystem paths, session keys, exception names,
@@ -21,7 +19,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from services.data_issues import collect_data_issues, display_rows
-from services.home_state import NO_CANDIDATES, READY, STALE, build_home_state
+from services.home_state import ANALYSIS_PENDING, NO_CANDIDATES, READY, STALE, build_home_state
 
 
 def _has_rows(value: Any) -> bool:
@@ -135,9 +133,11 @@ def _build(state: Mapping[str, Any]) -> dict[str, Any]:
 
     current = None
     if has_current:
-        summary = _issue_summary(
-            state.get("varo_data"), state.get("raw_data"), state.get("source_metadata")
-        )
+        summary = dict(state.get("data_quality_summary") or {})
+        if not summary:
+            summary = _issue_summary(
+                state.get("varo_data"), state.get("raw_data"), state.get("source_metadata")
+            )
         recommendations = state.get("varo_recommendations") or []
         rec_count = len(recommendations)
         if rec_count:
@@ -151,30 +151,55 @@ def _build(state: Mapping[str, Any]) -> dict[str, Any]:
             "filename": state.get("uploaded_filename") or "-",
             "sheet_label": _sheet_label(state.get("source_metadata")),
             "data_status": home.get("data_status") or "사용 가능",
-            "total_rows": summary["total_rows"],
-            "usable_rows": summary["usable_rows"],
-            "excluded_rows": summary["excluded_rows"],
-            "warning_rows": summary["warning_rows"],
+            "total_rows": int(summary.get("total_rows") or 0),
+            "usable_rows": int(summary.get("usable_rows") or summary.get("applied_rows") or 0),
+            "excluded_rows": int(summary.get("excluded_rows") or 0),
+            "warning_rows": int(summary.get("warning_rows") or 0),
             "recommendation_count": rec_count,
             "recommendation_status": rec_status,
         }
 
     pending = None
     if pending_data:
-        summary = _issue_summary(
-            pending_data,
-            state.get("pending_raw_data"),
-            state.get("pending_source_metadata"),
-        )
+        quality = dict(state.get("pending_quality_summary") or {})
+        stored_issues = list(state.get("pending_data_issues") or [])
+        if quality:
+            summary = {
+                **quality,
+                "issue_count": len(stored_issues),
+                "issues": stored_issues,
+                "top_rows": display_rows(stored_issues[:5]),
+            }
+        else:
+            summary = _issue_summary(
+                pending_data,
+                state.get("pending_raw_data"),
+                state.get("pending_source_metadata"),
+            )
         status = str(state.get("pending_status") or "사용 불가")
         apply_allowed = bool(state.get("pending_apply_allowed"))
         same_as_current = status == "현재 데이터와 동일"
-        if status == "사용 가능":
-            apply_label = "이 데이터 사용"
-        elif status == "확인 필요":
+        excluded_count = int(state.get("pending_excluded_rows") or summary.get("excluded_rows") or 0)
+        warning_count = int(summary.get("warning_rows") or 0)
+        if apply_allowed and excluded_count:
             apply_label = "문제 행을 제외하고 사용"
+        elif apply_allowed and warning_count:
+            apply_label = "확인 후 이 데이터 사용"
+        elif apply_allowed:
+            apply_label = "이 데이터 사용"
         else:
             apply_label = None
+        excluded_issues = [item for item in summary.get("issues", []) if item.get("처리 결과") == "제외"]
+        excluded_preview = [
+            {
+                "시트": item.get("시트", ""), "행": item.get("행", ""),
+                "컬럼": item.get("컬럼", ""), "입력값": item.get("값", ""),
+                "제외 이유": item.get("문제", ""), "수정 방법": item.get("수정 방법", ""),
+            }
+            for item in excluded_issues
+        ]
+        reason_counts = quality.get("exclusion_reasons") or {}
+        top_reasons = sorted(reason_counts.items(), key=lambda pair: (-int(pair[1]), str(pair[0])))[:3]
         pending = {
             "filename": state.get("pending_uploaded_filename") or "-",
             "sheet_label": _sheet_label(state.get("pending_source_metadata")),
@@ -182,15 +207,18 @@ def _build(state: Mapping[str, Any]) -> dict[str, Any]:
             "apply_allowed": apply_allowed,
             "apply_label": apply_label,
             "same_as_current": same_as_current,
-            "total_rows": summary["total_rows"],
-            "usable_rows": int(state.get("pending_usable_rows") or summary["usable_rows"]),
-            "excluded_rows": int(state.get("pending_excluded_rows") or summary["excluded_rows"]),
-            "error_rows": summary["error_rows"],
-            "warning_rows": summary["warning_rows"],
-            "issue_count": summary["issue_count"],
-            "top_rows": summary["top_rows"],
-            "issues": summary["issues"],
-            "error_messages": _error_messages(pending_validation),
+            "total_rows": int(summary.get("total_rows") or 0),
+            "usable_rows": int(state.get("pending_usable_rows") or summary.get("usable_rows") or 0),
+            "excluded_rows": excluded_count,
+            "error_rows": int(summary.get("error_rows") or 0),
+            "warning_rows": warning_count,
+            "warning_included_rows": int(summary.get("warning_included_rows") or 0),
+            "issue_count": int(summary.get("issue_count") or 0),
+            "top_rows": summary.get("top_rows") or [],
+            "issues": summary.get("issues") or [],
+            "excluded_preview": excluded_preview,
+            "top_exclusion_reasons": top_reasons,
+            "error_messages": list(quality.get("blockers") or [])[:5] or _error_messages(pending_validation),
         }
 
     return {
@@ -204,5 +232,5 @@ def _build(state: Mapping[str, Any]) -> dict[str, Any]:
         # A forward action ("추천 실행") only makes sense when there is applied data
         # and no unusable upload demanding a fix first.
         "show_next_action": has_current and not has_pending
-        and home.get("state_code") in (READY, NO_CANDIDATES),
+        and home.get("state_code") in (ANALYSIS_PENDING, READY, NO_CANDIDATES),
     }

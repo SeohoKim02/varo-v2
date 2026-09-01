@@ -20,8 +20,9 @@ class ParetoTests(unittest.TestCase):
         # A and C are mutually non-dominated (front 1); B is dominated by A (front 2).
         dominant = {name: 90.0 for name in PARETO_OBJECTIVES}
         dominated = {name: 50.0 for name in PARETO_OBJECTIVES}
+        # Better on one current objective, worse on another -> neither dominates.
         trade_off = {**{name: 90.0 for name in PARETO_OBJECTIVES},
-                     "savings_score": 95.0, "disposal_risk_score": 10.0, "feasibility_score": 10.0}
+                     "net_benefit_score": 95.0, "disposal_risk_score": 10.0}
         rows = compute_pareto([dominant, dominated, trade_off])
         self.assertEqual(rows[0]["pareto_rank"], 1)
         self.assertEqual(rows[0]["pareto_status"], "비지배")
@@ -36,7 +37,11 @@ class ParetoTests(unittest.TestCase):
         summary = pareto_summary(rows)
         self.assertEqual(summary["front_size"], 1)
         self.assertEqual(summary["candidate_count"], 2)
-        self.assertEqual(len(summary["objectives"]), 5)
+        # Kept deliberately small (2-4 axes): more axes push nearly every
+        # candidate onto the front and the check stops discriminating.
+        self.assertEqual(len(summary["objectives"]), len(PARETO_OBJECTIVES))
+        self.assertLessEqual(len(summary["objectives"]), 4)
+        self.assertGreaterEqual(len(summary["objectives"]), 2)
 
     def test_empty_input(self):
         self.assertEqual(compute_pareto([]), [])

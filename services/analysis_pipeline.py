@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
 import pandas as pd
 
+from services.analysis_progress import ProgressCallback, ProgressReporter
 from services.analysis_provenance import (
     build_greedy_provenance,
     build_vhs_provenance,
@@ -19,7 +21,12 @@ from services.candidate_ledger import (
     ledger_summary,
 )
 from services.data_validator import ValidationReport, validate_workbook_data
+from services.decision_metrics import (
+    ALGORITHM_VERSION, annotate_decision_metrics, build_decision_context,
+    summarize as summarize_decisions,
+)
 from services.decision_support import recommendation_confidence, recommendation_stability
+from services.greedy_baseline import compare_to_vhs
 from services.dqn_guard import dqn_exclusion_report, is_dqn_column, strip_dqn_columns
 from services.feasibility import annotate_feasibility
 from services.legacy_adapters.data_adapter import (
@@ -45,9 +52,9 @@ from services.v2_summaries import (
 from services.vhs_score_engine import apply_auto_vhs
 
 AUTO_VHS_INPUT_COLUMNS = (
-    "savings_score", "disposal_risk_score", "demand_fit_score",
+    "net_benefit_score", "disposal_risk_score", "demand_fit_score",
     "inventory_balance_score", "route_cost_score", "feasibility_score",
-    "promotion_score", "greedy_score", "dqn_reference_score",
+    "demand_risk_score", "post_move_risk_score", "dqn_reference_score",
     "vhs_vs_greedy_match", "vhs_vs_dqn_match", "final_reason",
     "weight_profile_id", "weight_summary", "varo_final_decision",
     "varo_final_rank",
@@ -491,16 +498,23 @@ def run_analysis_pipeline(
     raw_data: Mapping[str, Any] | None = None,
     source_metadata: Mapping[str, Any] | None = None,
     data_signature: str | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> PipelineResult:
+    """Run the approved algorithms. ``progress_callback`` is purely observational:
+    it receives one event per real stage and cannot influence the result."""
+    report = ProgressReporter(progress_callback)
     result = PipelineResult(excluded_dqn_artifacts=dqn_exclusion_report())
     if not uploaded_data:
+        report.fail()
         return result
 
+    report("validation")
     validation = validate_workbook_data(uploaded_data)
     result.validation_report = {"data_validation": validation.to_dict()}
     if validation.has_errors:
         result.status = "validation_error"
         result.diagnostics = {"status": "validation_error", "validation": validation.to_dict()}
+        report.fail()
         return result
 
     try:
@@ -508,6 +522,7 @@ def run_analysis_pipeline(
     except ValueError as exc:
         result.status = "adapter_error"
         result.warnings.append(str(exc))
+        report.fail()
         return result
 
     source_dqn_columns = [
@@ -516,16 +531,19 @@ def run_analysis_pipeline(
         if is_dqn_column(column)
     ]
 
+    report("inventory")
     legacy_data = prepare_legacy_data(uploaded_data)
     runner = _Runner(result)
     analyzed_inventory, inventory_summaries = _run_inventory_analysis(runner, legacy_data["inventory"])
     legacy_data["inventory"] = analyzed_inventory
 
+    report("candidates")
     cluster_map, cluster_analysis = _run_clustering(runner, legacy_data["stores"], analyzed_inventory)
     candidates = build_candidate_frame(base_recommendations, analyzed_inventory)
     candidates = _drop_empty_auto_vhs_columns(candidates)
     candidates = add_cluster_context(candidates, cluster_map)
 
+    report("scoring")
     greedy_input = strip_dqn_columns(candidates)
     greedy = runner.call("heuristic_optimizer", "add_heuristic_scores", greedy_input)
     if isinstance(greedy, pd.DataFrame) and not greedy.empty:
@@ -558,6 +576,7 @@ def run_analysis_pipeline(
         "원본 함수는 VHS V2 이력 보정 그룹을 전제로 하므로 현재 VHS 설명은 연결된 VHS 상황·기여도로 생성",
     )
 
+    report("routes")
     route_analysis = _run_routes(runner, legacy_data)
     candidates = _enrich_route_comparison(candidates, route_analysis.pop("transfer_frame", pd.DataFrame()))
     candidates = _enrich_route_constraints(
@@ -569,6 +588,11 @@ def run_analysis_pipeline(
     transfer_for_promotion = pd.DataFrame(route_analysis.get("direct_vs_dc", []))
     promotion = _run_promotion(runner, legacy_data, transfer_for_promotion)
     candidates = _enrich_promotion(candidates, promotion)
+    # Net benefit, quantity limits, post-move risk and demand scenarios are
+    # computed once here so the score and the feasibility gate read the same
+    # numbers instead of each deriving their own.
+    decision_context = build_decision_context(uploaded_data)
+    candidates = annotate_decision_metrics(candidates, context=decision_context)
     auto_vhs = apply_auto_vhs(candidates)
     if not auto_vhs.frame.empty:
         candidates = auto_vhs.frame
@@ -577,6 +601,7 @@ def run_analysis_pipeline(
     else:
         auto_vhs = apply_auto_vhs(pd.DataFrame())
 
+    report("verification")
     optimality_input = strip_dqn_columns(candidates)
     has_cost_input = any(
         column in optimality_input.columns
@@ -610,7 +635,7 @@ def run_analysis_pipeline(
 
     # Feasibility gate: block impossible moves BEFORE they reach the final set,
     # recording the reason. Well-formed candidates are annotated and kept.
-    feasibility = annotate_feasibility(standard_recommendations, uploaded_data)
+    feasibility = annotate_feasibility(standard_recommendations, uploaded_data, context=decision_context)
     standard_recommendations = feasibility["feasible"]
     result.feasibility_summary = feasibility["summary"]
     if feasibility["blocked"]:
@@ -618,6 +643,7 @@ def run_analysis_pipeline(
             f"실행 불가능한 추천 {len(feasibility['blocked'])}건을 최종 추천에서 제외했습니다."
         )
 
+    report("summary")
     result.recommendations = standard_recommendations
     result.top5 = top_recommendations(standard_recommendations, limit=5)
     result.vhs_analysis = (
@@ -670,6 +696,10 @@ def run_analysis_pipeline(
     result.validation_report.update({
         "legacy_validation": legacy_validation if isinstance(legacy_validation, dict) else {},
         "optimality_gap": optimality,
+        "algorithm_version": ALGORITHM_VERSION,
+        "decision_metrics": summarize_decisions(standard_recommendations),
+        # Baseline comparison for technical review; not shown on the main screens.
+        "greedy_baseline": compare_to_vhs(standard_recommendations),
         "calculation_sources": {
             "vhs": "services.vhs_score_engine.apply_auto_vhs",
             "legacy_vhs_reference": "varo_hybrid_score.calculate_varo_hybrid_score",
@@ -747,7 +777,13 @@ def run_analysis_pipeline(
         "result_basis": result.result_basis,
         "dqn_artifacts_read": False,
         "algorithm_errors": list(runner.technical_errors),
+        # Internal provenance so a stored result can be traced back to the logic
+        # that produced it. Never rendered on the main screens.
+        "algorithm_version": ALGORITHM_VERSION,
+        "data_signature": data_signature,
+        "analysis_timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+    report("complete")
     return result
 
 
@@ -826,6 +862,13 @@ def calculate_overview_kpis(recommendations: List[Mapping[str, object]], validat
     total_qty = sum(float(item.get("recommended_qty") or 0) for item in recommendations)
     route_count = len(recommendations)
     total_saving = sum(float(item.get("expected_saving") or 0) for item in recommendations)
+    # 순효과 = 절감액 − 이동 비용. Only candidates whose net benefit is actually
+    # computable are summed, so a missing cost never inflates the total.
+    net_values = [
+        float(item["net_benefit"]) for item in recommendations
+        if item.get("net_benefit") is not None
+    ]
+    total_net_benefit = sum(net_values) if net_values else None
     vhs_values = [float(item.get("vhs_score")) for item in recommendations if item.get("vhs_score") is not None]
     average_vhs = sum(vhs_values) / len(vhs_values) if vhs_values else None
     if isinstance(validation, ValidationReport):
@@ -838,6 +881,7 @@ def calculate_overview_kpis(recommendations: List[Mapping[str, object]], validat
         "total_recommended_qty": total_qty,
         "active_route_count": route_count,
         "total_expected_saving": total_saving,
+        "total_net_benefit": total_net_benefit,
         "average_vhs_score": average_vhs,
         "data_quality": quality,
     }

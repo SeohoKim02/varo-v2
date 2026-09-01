@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from components import cards
+from components.analysis_progress import AnalysisProgressView, completion_note
 from components.cards import render_empty_state, render_page_header, render_recommendation_summary, render_section_header
 from components.candidate_detail import (
     ledger_record,
@@ -18,7 +19,8 @@ from components.status import route_type_badge
 from components.tables import build_recommendation_rows, format_currency, format_number, render_capped_table
 from services import export_service, upload_quality, v2_summaries
 from services.analysis_pipeline import find_recommendation, sort_recommendations
-from services.app_state import has_app_data, resolve_selected_route_id
+from services.app_state import has_app_data, has_applied_data, resolve_selected_route_id
+from services.data_application import run_applied_analysis
 from services.vhs_score_engine import build_strategy_detail
 
 
@@ -145,9 +147,9 @@ def _render_best_recommendation(recommendation: dict) -> None:
     )
     cols = st.columns(4, gap="small")
     cols[0].metric("추천 수량", format_number(recommendation.get("recommended_qty"), "개"))
-    cols[1].metric("예상 절감액", format_currency(recommendation.get("expected_saving")))
-    cols[2].metric("VHS", format_number(recommendation.get("vhs_score")))
-    cols[3].metric("추천 신뢰도", format_number(recommendation.get("confidence_score")))
+    cols[1].metric("예상 순효과", format_currency(recommendation.get("net_benefit")))
+    cols[2].metric("추천 안정성", str(recommendation.get("robustness_status") or "-"))
+    cols[3].metric("추천 신뢰도", str(recommendation.get("confidence_level") or "-"))
     route_label = "DC 경유" if recommendation.get("route_type") == "VIA_DC" else "직접 이동"
     info_items = (
         ("이동 경로 방식", route_label),
@@ -227,6 +229,31 @@ def render_recommendations_page() -> None:
     recommendations = _all_recommendations()
     data_available = has_app_data(data, recommendations)
     render_page_header(st, "추천 실행", "재고 이동 후보를 비교하고 실행 우선순위를 확인합니다.")
+    # Shown once, on the first render after a successful run, then dropped so it
+    # cannot pile up across reruns.
+    if st.session_state.pop("analysis_completed_notice", None):
+        st.success(completion_note(st.session_state.get("analysis_elapsed_seconds")))
+    if has_applied_data(data) and st.session_state.get("analysis_run_required"):
+        quality = st.session_state.get("data_quality_summary") or {}
+        excluded = int(quality.get("excluded_rows") or 0)
+        if excluded:
+            st.caption(f"문제 행 {excluded}개를 제외한 적용 데이터로 추천을 계산합니다.")
+        running = bool(st.session_state.get("analysis_running"))
+        if st.button(
+            "추천 실행", key="run_applied_analysis", type="primary",
+            width="stretch", disabled=running,
+        ):
+            # The progress view streams each real stage while the (blocking) run
+            # is in flight, so the screen never looks frozen.
+            view = AnalysisProgressView(st)
+            succeeded = run_applied_analysis(st.session_state, progress_callback=view.callback)
+            view.finish(succeeded, st.session_state.get("analysis_elapsed_seconds"))
+            st.rerun()
+        error = st.session_state.get("analysis_run_error")
+        if error:
+            st.error(error)
+        st.info("추천 실행 전입니다. 적용된 데이터는 준비되어 있습니다.")
+        return
     if not data_available:
         # Data applied but no feasible move (모두 제외): show the excluded candidates
         # here so the home "제외 이유 확인" action lands on real content, not "데이터 없음".

@@ -32,6 +32,9 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 PAGE_RECOMMENDATIONS = "추천 실행"
 _PREVIEW_ROW_LIMIT = 200
+# A real upload can produce hundreds of row issues; the on-screen table stays
+# bounded and the full list is available through the CSV download.
+_ISSUE_TABLE_LIMIT = 200
 
 
 def _display_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -71,7 +74,7 @@ def _cancel_pending() -> None:
 
 
 def _render_pending_preview() -> None:
-    data = st.session_state.get("pending_varo_data")
+    data = st.session_state.get("pending_usable_data") or st.session_state.get("pending_varo_data")
     if not data:
         return
     with st.expander("검사 중 데이터 미리보기", expanded=False):
@@ -101,26 +104,66 @@ def _render_pending_check(view: dict) -> None:
         unsafe_allow_html=True,
     )
 
-    # Honest counts: analysis-usable/excluded only when the file is actually usable;
-    # otherwise show error/warning rows and let the messages explain why.
+    # Row counts are based on unique original rows, never issue-item counts.
     if pending["apply_allowed"]:
         cols = st.columns(4, gap="small")
         cols[0].metric("전체 행", pending["total_rows"])
         cols[1].metric("분석 사용 행", pending["usable_rows"])
         cols[2].metric("제외 행", pending["excluded_rows"])
         cols[3].metric("경고 행", pending["warning_rows"])
+        st.caption(f"전체 {pending['total_rows']}행 중 {pending['usable_rows']}행을 사용합니다.")
+        if pending["excluded_rows"]:
+            st.caption(f"{pending['excluded_rows']}개 행은 데이터 문제로 제외합니다.")
+        if pending.get("warning_included_rows"):
+            st.caption(f"경고가 있는 {pending['warning_included_rows']}개 행은 분석에 포함합니다.")
     else:
         cols = st.columns(3, gap="small")
         cols[0].metric("전체 행", pending["total_rows"])
         cols[1].metric("오류 행", pending["error_rows"])
         cols[2].metric("경고 행", pending["warning_rows"])
 
+    if pending.get("top_exclusion_reasons"):
+        st.caption("주요 제외 이유")
+        for reason, count in pending["top_exclusion_reasons"]:
+            st.markdown(f"- {reason} ({count}건)")
+
+    if pending.get("excluded_preview"):
+        with st.expander("제외 행 확인", expanded=False):
+            st.dataframe(pd.DataFrame(pending["excluded_preview"][:5]), hide_index=True, width="stretch")
+            if len(pending["excluded_preview"]) > 5:
+                st.caption(f"먼저 5건을 표시했습니다. 전체 {len(pending['excluded_preview'])}건은 아래에서 확인하세요.")
+        if len(pending["excluded_preview"]) > 5:
+            with st.expander("전체 제외 행 상세", expanded=False):
+                preview = pending["excluded_preview"][:_ISSUE_TABLE_LIMIT]
+                st.dataframe(pd.DataFrame(preview), hide_index=True, width="stretch")
+                if len(pending["excluded_preview"]) > len(preview):
+                    st.caption(
+                        f"{len(preview)}건까지 표시했습니다. "
+                        f"전체 {len(pending['excluded_preview'])}건은 아래 CSV로 내려받으세요."
+                    )
+
     if pending["top_rows"]:
         st.caption("가장 먼저 확인할 문제")
         st.dataframe(pd.DataFrame(pending["top_rows"]), hide_index=True, width="stretch")
         if pending["issue_count"] > len(pending["top_rows"]):
             with st.expander(f"전체 문제 보기 ({pending['issue_count']}건)", expanded=False):
-                st.dataframe(pd.DataFrame(detail_rows(pending["issues"])), hide_index=True, width="stretch")
+                problem_rows = [
+                    {
+                        "시트": item.get("시트", ""), "행": item.get("행", ""),
+                        "컬럼": item.get("컬럼", ""), "값": item.get("값", ""),
+                        "구분": item.get("구분", ""), "문제": item.get("문제", ""),
+                        "수정 방법": item.get("수정 방법", ""),
+                        "처리 결과": item.get("처리 결과", ""),
+                        "적용 데이터 포함 여부": item.get("적용 데이터 포함 여부", ""),
+                    }
+                    for item in pending["issues"][:_ISSUE_TABLE_LIMIT]
+                ]
+                st.dataframe(pd.DataFrame(problem_rows), hide_index=True, width="stretch")
+                if pending["issue_count"] > len(problem_rows):
+                    st.caption(
+                        f"{len(problem_rows)}건까지 표시했습니다. "
+                        f"전체 {pending['issue_count']}건은 아래 CSV로 내려받으세요."
+                    )
         st.download_button(
             "문제 목록 CSV 내려받기",
             data=issues_to_csv_bytes(pending["issues"]),
@@ -313,7 +356,12 @@ def _render_data_issues() -> None:
     issues = result["issues"]
     if len(issues) > len(top_rows):
         with st.expander(f"전체 문제 보기 ({len(issues)}건)", expanded=False):
-            st.dataframe(pd.DataFrame(detail_rows(issues)), hide_index=True, width="stretch")
+            shown = issues[:_ISSUE_TABLE_LIMIT]
+            st.dataframe(pd.DataFrame(detail_rows(shown)), hide_index=True, width="stretch")
+            if len(issues) > len(shown):
+                st.caption(
+                    f"{len(shown)}건까지 표시했습니다. 전체 {len(issues)}건은 아래 CSV로 내려받으세요."
+                )
     st.download_button(
         "문제 목록 CSV 내려받기",
         data=issues_to_csv_bytes(issues),

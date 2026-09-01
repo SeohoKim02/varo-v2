@@ -61,14 +61,18 @@ class SoftFlagTests(unittest.TestCase):
     def test_post_move_below_safety_is_check(self):
         ctx = _ctx(stock={("S1", "P1"): 10.0}, safety={("S1", "P1"): 8.0})
         rec = {"source_id": "S1", "target_id": "S2", "recommended_qty": 5, "route_type": "DIRECT",
-               "product_id": "P1", "estimated_cost": 100, "expected_saving": 50}
-        self.assertEqual(evaluate_feasibility(rec, ctx).status, STATUS_CHECK)
+               "product_id": "P1", "estimated_cost": 100, "expected_saving": 5000}
+        result = evaluate_feasibility(rec, ctx)
+        self.assertEqual(result.status, STATUS_CHECK)
+        self.assertEqual(result.reason_code, "post_move_below_safety")
 
     def test_oversupply_is_check(self):
         ctx = _ctx(stock={("S1", "P1"): 100.0}, demand={("S2", "P1"): 2.0})
         rec = {"source_id": "S1", "target_id": "S2", "recommended_qty": 50, "route_type": "DIRECT",
-               "product_id": "P1", "estimated_cost": 100, "expected_saving": 50}
-        self.assertEqual(evaluate_feasibility(rec, ctx).status, STATUS_CHECK)
+               "product_id": "P1", "estimated_cost": 100, "expected_saving": 5000}
+        result = evaluate_feasibility(rec, ctx)
+        self.assertEqual(result.status, STATUS_CHECK)
+        self.assertEqual(result.reason_code, "oversupply")
 
 
 class FeasibleTests(unittest.TestCase):

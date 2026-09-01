@@ -15,6 +15,24 @@ context and returns a 3-state status the UI can show directly:
 The detailed ``reason_code`` (for logs/tech docs) is separate from the short
 Korean ``reason`` shown on screen. No score is fabricated and no candidate is
 kept alive with an artificially low score to hide an impossible move.
+
+Hard constraint vs soft preference
+----------------------------------
+A **hard constraint** is a fact that makes the move wrong to execute, so it is
+enforced here by removing the candidate — never by lowering its VHS score:
+
+    출발지=도착지 · 수량 ≤ 0 · 경로 유형 불명 · VIA_DC인데 DC 없음 ·
+    이동 수량 > 출발 재고 · 음수 이동 비용 · 예상 효과 ≤ 이동 비용 · 중복 후보
+
+A **soft preference** is something an operator should weigh, so it stays here as
+데이터 확인 필요 and/or feeds a VHS component — never both as a block and a
+penalty for the same fact:
+
+    비용/절감액을 계산할 수 없음 · 이동 후 출발 재고가 안전재고 아래 ·
+    도착 필요량 대비 과다 이동 · 수요 불확실성 · 상대적으로 높은 비용·시간
+
+``services/decision_metrics.py`` computes the numbers both sides read, so the
+gate and the score can never disagree about the same quantity.
 """
 from __future__ import annotations
 
@@ -75,6 +93,10 @@ class InventoryContext:
     demand: dict[tuple[str, str], float]
     safety: dict[tuple[str, str], float]
     known_stores: set[str]
+    # Measured demand dispersion, only when the file actually carries it. Kept
+    # separate from ``safety`` because the safety floor is an estimate derived
+    # from it, while this is the raw value the scenario analysis needs.
+    dispersion: dict[tuple[str, str], float] = field(default_factory=dict)
 
     def source_stock(self, store: Any, product: Any) -> float | None:
         return self.stock.get(_key(store, product))
@@ -84,6 +106,10 @@ class InventoryContext:
 
     def safety_floor(self, store: Any, product: Any) -> float:
         return self.safety.get(_key(store, product), 0.0)
+
+    def demand_std(self, store: Any, product: Any) -> float | None:
+        """Measured demand standard deviation, or ``None`` when the file has none."""
+        return self.dispersion.get(_key(store, product))
 
 
 def build_inventory_context(data: Mapping[str, Any] | None) -> InventoryContext:
@@ -96,15 +122,16 @@ def build_inventory_context(data: Mapping[str, Any] | None) -> InventoryContext:
     stock: dict[tuple[str, str], float] = {}
     demand: dict[tuple[str, str], float] = {}
     safety: dict[tuple[str, str], float] = {}
+    dispersion: dict[tuple[str, str], float] = {}
     known: set[str] = set()
     inventory = (data or {}).get("inventory") if isinstance(data, Mapping) else None
     if not isinstance(inventory, pd.DataFrame) or inventory.empty:
-        return InventoryContext(stock, demand, safety, known)
+        return InventoryContext(stock, demand, safety, known, dispersion)
 
     store_col = next((c for c in ("store_id", "node_id") if c in inventory.columns), None)
     product_col = next((c for c in ("product_id", "item_id") if c in inventory.columns), None)
     if store_col is None or product_col is None:
-        return InventoryContext(stock, demand, safety, known)
+        return InventoryContext(stock, demand, safety, known, dispersion)
     stock_col = next((c for c in ("stock_qty", "current_stock", "quantity") if c in inventory.columns), None)
     demand_col = next((c for c in ("demand_qty", "avg_daily_sales", "sales_qty") if c in inventory.columns), None)
     demand_std_col = "demand_std" if "demand_std" in inventory.columns else None
@@ -128,7 +155,8 @@ def build_inventory_context(data: Mapping[str, Any] | None) -> InventoryContext:
             if std is not None:
                 # ~1 week of demand-std as a light safety cushion (estimate, not policy).
                 safety[key] = safety.get(key, 0.0) + std * 2.0
-    return InventoryContext(stock, demand, safety, known)
+                dispersion[key] = dispersion.get(key, 0.0) + std
+    return InventoryContext(stock, demand, safety, known, dispersion)
 
 
 def evaluate_feasibility(rec: Mapping[str, Any], context: InventoryContext | None = None) -> FeasibilityResult:
@@ -164,9 +192,22 @@ def evaluate_feasibility(rec: Mapping[str, Any], context: InventoryContext | Non
             {"source_stock": source_stock, "recommended_qty": qty},
         )
 
-    # --- Soft checks (kept, but flagged) ------------------------------------ #
     saving = _num(rec.get("expected_saving"))
     cost = _num(rec.get("estimated_cost")) if rec.get("estimated_cost") is not None else _num(rec.get("move_cost"))
+    if cost is not None and cost < 0:
+        return FeasibilityResult(STATUS_BLOCKED, "이동 비용이 음수입니다.", "negative_cost")
+    # Both sides known and the move costs more than it saves: an operator should
+    # never see this ranked. Uncomputable inputs are a *soft* check below, because
+    # "we cannot tell" is not the same as "we know it is not worth it".
+    if saving is not None and cost is not None and (saving - cost) <= 0:
+        return FeasibilityResult(
+            STATUS_BLOCKED,
+            "이동 비용이 예상 효과보다 크거나 같습니다.",
+            "non_positive_net_benefit",
+            {"expected_saving": saving, "estimated_cost": cost, "net_benefit": saving - cost},
+        )
+
+    # --- Soft checks (kept, but flagged) ------------------------------------ #
     if cost is None and _num(rec.get("distance_km")) is None:
         return FeasibilityResult(STATUS_CHECK, "이동 비용을 계산할 수 없습니다.", "cost_uncomputable")
     if saving is None:
@@ -199,6 +240,7 @@ def evaluate_feasibility(rec: Mapping[str, Any], context: InventoryContext | Non
 def annotate_feasibility(
     recommendations: Sequence[Mapping[str, Any]],
     data: Mapping[str, Any] | None = None,
+    context: InventoryContext | None = None,
 ) -> dict[str, Any]:
     """Attach feasibility status/reason to every candidate and split feasible/blocked.
 
@@ -210,7 +252,7 @@ def annotate_feasibility(
     * ``blocked``    — recs removed from the final set (with reasons)
     * ``summary``    — counts + status distribution for diagnostics/UI
     """
-    context = build_inventory_context(data)
+    context = context or build_inventory_context(data)
     annotated: list[dict[str, Any]] = []
     feasible: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []

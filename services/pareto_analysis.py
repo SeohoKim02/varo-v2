@@ -13,18 +13,21 @@ import math
 from typing import Any, Mapping, Sequence
 
 # Objectives, all "higher is better" after V2 normalization.
+#
+# Deliberately four, not every VHS component: each extra axis makes dominance
+# harder to achieve, so a long list pushes almost every candidate onto the front
+# and the check stops discriminating. These four are the objectives an operator
+# actually trades off — money, urgency, transport burden, and destination need.
 PARETO_OBJECTIVES: tuple[str, ...] = (
-    "savings_score",         # 절감액
-    "disposal_risk_score",   # 폐기 위험 감소
-    "route_cost_score",      # 경로 비용 (정규화: 높을수록 저비용)
-    "feasibility_score",     # 실행 가능성
-    "demand_fit_score",      # 수요 적합도
+    "net_benefit_score",     # 순효과 최대
+    "disposal_risk_score",   # 폐기 위험 감소 최대
+    "route_cost_score",      # 이동 부담 최소 (정규화: 높을수록 낮은 부담)
+    "demand_fit_score",      # 수요 적합도 최대
 )
 OBJECTIVE_LABELS: dict[str, str] = {
-    "savings_score": "절감액",
+    "net_benefit_score": "예상 순효과",
     "disposal_risk_score": "폐기 위험 감소",
-    "route_cost_score": "경로 비용",
-    "feasibility_score": "실행 가능성",
+    "route_cost_score": "이동 부담",
     "demand_fit_score": "수요 적합도",
 }
 
@@ -117,5 +120,5 @@ def pareto_summary(pareto_rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "front_ratio": round(front_size / total, 4) if total else 0.0,
         "objectives": list(PARETO_OBJECTIVES),
         "objective_labels": [OBJECTIVE_LABELS[name] for name in PARETO_OBJECTIVES],
-        "basis": "5개 목적함수 비지배 정렬(Pareto front) · 연구 확장용 비교 기준",
+        "basis": f"{len(PARETO_OBJECTIVES)}개 목적함수 비지배 정렬(Pareto front) · 보조 검증 기준",
     }

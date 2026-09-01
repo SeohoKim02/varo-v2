@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from collections.abc import Mapping, MutableMapping
 from datetime import datetime
 from pathlib import Path
@@ -11,9 +12,12 @@ from typing import Any
 import pandas as pd
 
 from services.analysis_pipeline import build_v2_state, ensure_recommendations, run_analysis_pipeline
-from services.app_state import apply_state_payload, build_applied_state_payload
-from services.data_issues import collect_data_issues
+from services.analysis_progress import ProgressCallback
+from services.app_state import (
+    apply_state_payload, build_applied_state_payload, default_selected_route_id,
+)
 from services.data_loader import DataLoadError
+from services.partial_data import build_usable_data, usable_data_signature
 from services.data_validator import ValidationReport, validate_workbook_data
 from services.file_reader import file_extension, read_uploaded_data
 from services.upload_quality import build_upload_report
@@ -27,6 +31,8 @@ PENDING_KEYS = (
     # Two-phase intake (inspect → apply) fields.
     "pending_data_signature", "pending_recommendation_source", "pending_apply_allowed",
     "pending_usable_rows", "pending_excluded_rows", "pending_status", "pending_created_at",
+    "pending_usable_data", "pending_usable_signature", "pending_source_signature",
+    "pending_data_issues", "pending_excluded_row_refs", "pending_quality_summary",
 )
 
 # Pending intake status codes (also used as user-facing labels).
@@ -198,7 +204,8 @@ def _has_stores(data: Any) -> bool:
 def _pending_status(
     state: Mapping[str, Any], signature: str, validation: ValidationReport, apply_allowed: bool,
 ) -> str:
-    if state.get("data_signature") == signature and _has_stores(state.get("varo_data")):
+    current_source = state.get("source_signature") or state.get("data_signature")
+    if current_source == signature and _has_stores(state.get("varo_data")):
         return PENDING_SAME
     if validation.has_errors or not apply_allowed:
         return PENDING_UNUSABLE
@@ -225,8 +232,10 @@ def prepare_pending_data(
         data, load_report = read_uploaded_data(source, filename, return_report=True)
         raw_data = dict(load_report.get("raw_sheets") or {})
         source_metadata = _build_source_metadata(load_report, filename, source_type)
-        data, recommendation_source, candidate_info = ensure_recommendations(data)
-        validation = validate_workbook_data(data)
+        partial = build_usable_data(data, raw_data, source_metadata)
+        validation = partial["validation"]
+        recommendation_source = partial["recommendation_source"]
+        candidate_info = partial["candidate_info"]
     except DataLoadError as exc:
         clear_pending(state)
         state["pending_load_error"] = str(exc)
@@ -237,14 +246,10 @@ def prepare_pending_data(
         state["pending_load_error"] = "파일을 처리할 수 없습니다. 파일 형식과 필수 컬럼을 확인한 뒤 다시 업로드해주세요."
         return "오류"
 
-    try:
-        issue_summary = collect_data_issues(data, raw_data, source_metadata)["summary"]
-    except Exception:  # pragma: no cover - defensive
-        issue_summary = {}
-    usable_rows = int(issue_summary.get("usable_rows") or 0)
-    excluded_rows = int(issue_summary.get("excluded_rows") or 0)
-    mostly_excluded = bool(issue_summary.get("mostly_excluded"))
-    apply_allowed = (not validation.has_errors) and usable_rows >= 1 and not mostly_excluded
+    quality = dict(partial["quality_summary"])
+    usable_rows = int(quality.get("usable_rows") or 0)
+    excluded_rows = int(quality.get("excluded_rows") or 0)
+    apply_allowed = bool(partial["apply_allowed"])
     upload_report = build_upload_report(
         load_report, validation, recommendation_source, candidate_info, filename
     )
@@ -252,6 +257,7 @@ def prepare_pending_data(
     clear_pending(state)
     state.pop("pending_load_error", None)
     state["pending_varo_data"] = data
+    state["pending_usable_data"] = partial["usable_data"]
     state["pending_raw_data"] = raw_data
     state["pending_source_metadata"] = source_metadata
     state["pending_varo_validation"] = validation
@@ -261,11 +267,18 @@ def prepare_pending_data(
     state["pending_upload_report"] = upload_report
     state["pending_recommendation_source"] = recommendation_source
     state["pending_data_signature"] = signature
+    state["pending_source_signature"] = signature
+    state["pending_usable_signature"] = partial["usable_signature"]
+    state["pending_data_issues"] = partial["issues"]
+    state["pending_excluded_row_refs"] = partial["excluded_row_refs"]
+    state["pending_quality_summary"] = quality
     state["pending_apply_allowed"] = apply_allowed
     state["pending_usable_rows"] = usable_rows
     state["pending_excluded_rows"] = excluded_rows
     state["pending_created_at"] = datetime.now().isoformat(timespec="seconds")
     status = _pending_status(state, signature, validation, apply_allowed)
+    if status == PENDING_USABLE and (excluded_rows or quality.get("warning_rows")):
+        status = PENDING_CHECK
     state["pending_status"] = status
     return status
 
@@ -284,12 +297,13 @@ def commit_pending_data(state: MutableMapping[str, Any]) -> bool:
     a plain user-facing message is set in ``data_apply_error`` (never a traceback).
     Only a different signature triggers a real apply + reset of prior results.
     """
-    data = state.get("pending_varo_data")
+    data = state.get("pending_usable_data")
     validation = state.get("pending_varo_validation")
-    signature = state.get("pending_data_signature")
+    source_sig = state.get("pending_source_signature") or state.get("pending_data_signature")
+    signature = state.get("pending_usable_signature")
 
     # Final re-check (spec: 적용 전 최종 재검증). Missing/mutated pending → 만료.
-    if not data or validation is None or not signature:
+    if not data or validation is None or not signature or not source_sig:
         state["data_apply_error"] = "검사 결과가 만료됐습니다. 파일을 다시 확인하세요."
         return False
     if getattr(validation, "has_errors", False) or not state.get("pending_apply_allowed"):
@@ -299,8 +313,28 @@ def commit_pending_data(state: MutableMapping[str, Any]) -> bool:
         state["data_apply_error"] = "검사 결과가 만료됐습니다. 파일을 다시 확인하세요."
         return False
 
-    # Same content as the current data → no unnecessary reset of existing results.
-    if state.get("data_signature") == signature and _has_stores(state.get("varo_data")):
+    try:
+        if usable_data_signature(data) != signature:
+            state["data_apply_error"] = "검사 결과가 변경됐습니다. 파일을 다시 확인하세요."
+            return False
+    except Exception:
+        state["data_apply_error"] = "검사 결과가 만료됐습니다. 파일을 다시 확인하세요."
+        return False
+    quality = dict(state.get("pending_quality_summary") or {})
+    excluded_refs = list(state.get("pending_excluded_row_refs") or [])
+    if int(quality.get("excluded_rows") or 0) != len({
+        (str(item.get("source_sheet") or ""), int(item.get("source_row_number") or 0))
+        for item in excluded_refs
+    }):
+        state["data_apply_error"] = "검사 결과가 변경됐습니다. 파일을 다시 확인하세요."
+        return False
+    final_validation = validate_workbook_data(data)
+    if final_validation.has_errors:
+        state["data_apply_error"] = "제외 후에도 필수 데이터 문제가 남아 있어 적용할 수 없습니다."
+        return False
+
+    # Same original content as the current data → no unnecessary reset.
+    if (state.get("source_signature") or state.get("data_signature")) == source_sig and _has_stores(state.get("varo_data")):
         clear_pending(state)
         state["data_apply_message"] = "현재 사용 중인 데이터와 같습니다."
         state.pop("data_apply_error", None)
@@ -311,30 +345,31 @@ def commit_pending_data(state: MutableMapping[str, Any]) -> bool:
         source_metadata = dict(state.get("pending_source_metadata") or {})
         source_type = state.get("pending_data_source_type") or "업로드된 추천 결과"
         recommendation_source = state.get("pending_recommendation_source") or "uploaded"
-        result = run_analysis_pipeline(
-            data, raw_data=raw_data, source_metadata=source_metadata, data_signature=signature,
-        )
-        pipeline_result = result.to_dict()
-        if result.status == "validation_error":
-            state["data_apply_error"] = "검사 결과가 만료됐습니다. 파일을 다시 확인하세요."
-            return False
         effective_source = "V2 생성 후보" if recommendation_source == "generated" else source_type
         payload = build_applied_state_payload(
             data=data,
-            validation=validation,
-            recommendations=result.recommendations,
+            validation=final_validation,
+            recommendations=[],
             filename=state.get("pending_uploaded_filename") or "-",
             source_type=effective_source,
-            pipeline_result=pipeline_result,
+            pipeline_result={},
             data_signature=signature,
             raw_data=raw_data,
             source_metadata=source_metadata,
+            source_signature=source_sig,
+            data_quality_summary=quality,
+            data_issues=state.get("pending_data_issues") or [],
+            excluded_row_refs=excluded_refs,
+            analysis_run_required=True,
         )
         payload["upload_report"] = dict(state.get("pending_upload_report") or {})
         payload["recommendation_source"] = recommendation_source
         apply_state_payload(state, payload)
         clear_pending(state)
-        state["data_apply_message"] = application_message(effective_source, pipeline_result)
+        if int(quality.get("excluded_rows") or 0):
+            state["data_apply_message"] = f"문제 행 {quality['excluded_rows']}개를 제외한 데이터가 적용되었습니다. 추천 실행을 시작하세요."
+        else:
+            state["data_apply_message"] = "데이터가 적용되었습니다. 추천 실행을 시작하세요."
         state.pop("data_apply_error", None)
         return True
     except Exception:  # pragma: no cover - defensive: never crash + preserve state
@@ -343,3 +378,56 @@ def commit_pending_data(state: MutableMapping[str, Any]) -> bool:
             "새 데이터를 적용하지 못했습니다. 현재 사용 중인 데이터는 그대로 유지했습니다. 검사 결과를 다시 확인하세요."
         )
         return False
+
+
+def run_applied_analysis(
+    state: MutableMapping[str, Any], progress_callback: ProgressCallback | None = None,
+) -> bool:
+    """Run algorithms only after the user explicitly requests recommendation execution.
+
+    ``progress_callback`` is optional and observational only: it receives one event
+    per real pipeline stage so a page can show progress. With no callback the
+    behaviour and the result are identical to before.
+
+    ``analysis_running`` marks the run for the UI and is always cleared, whether the
+    run succeeds, fails, or raises, so the button can never stay blocked.
+    """
+    data = state.get("varo_data")
+    if not _has_stores(data):
+        state["analysis_run_error"] = "먼저 데이터 관리에서 사용할 데이터를 적용하세요."
+        return False
+    state["analysis_running"] = True
+    state.pop("analysis_completed_notice", None)
+    started = time.perf_counter()
+    try:
+        result = run_analysis_pipeline(
+            data,
+            raw_data=state.get("raw_data") or {},
+            source_metadata=state.get("source_metadata") or {},
+            data_signature=state.get("data_signature"),
+            progress_callback=progress_callback,
+        )
+        if result.status in {"validation_error", "adapter_error"}:
+            state["analysis_run_error"] = "추천을 계산할 수 없습니다. 적용 데이터 상태를 확인하세요."
+            return False
+        pipeline = result.to_dict()
+        recommendations = [dict(item) for item in result.recommendations]
+        state["varo_recommendations"] = recommendations
+        state["varo_pipeline_result"] = pipeline
+        state["analysis_result"] = pipeline
+        state["pipeline_summary"] = pipeline.get("summary", {})
+        state["connected_algorithms"] = pipeline.get("connected_algorithms", [])
+        state["deferred_algorithms"] = pipeline.get("deferred_algorithms", [])
+        state["dqn_excluded"] = pipeline.get("excluded_dqn_artifacts", {})
+        state["selected_route_id"] = default_selected_route_id(recommendations)
+        state["analysis_run_required"] = False
+        state.pop("analysis_run_error", None)
+        state["analysis_elapsed_seconds"] = round(time.perf_counter() - started, 2)
+        state["analysis_completed_notice"] = True
+        return True
+    except Exception:  # pragma: no cover - defensive and user-safe
+        logger.exception("run_applied_analysis failed")
+        state["analysis_run_error"] = "추천 실행 중 문제가 발생했습니다. 적용 데이터는 그대로 유지했습니다."
+        return False
+    finally:
+        state.pop("analysis_running", None)

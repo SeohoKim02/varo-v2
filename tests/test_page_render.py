@@ -139,7 +139,7 @@ class PageRenderTests(unittest.TestCase):
         self.assertNotIn("추천 결과 CSV", button_labels)
         # home Top table is result-only: exactly the 7 operator columns
         columns = self._dataframe_columns(app)
-        for required_col in ("순위", "상품", "출발", "도착", "경로", "수량", "예상 절감액"):
+        for required_col in ("순위", "상품", "출발", "도착", "경로", "수량", "예상 순효과"):
             self.assertIn(required_col, columns, f"home Top5 must have column: {required_col}")
         for hidden in ("VHS", "VHS(재계산)", "DQN 상태", "Greedy", "신뢰도", "route_id", "상태"):
             self.assertNotIn(hidden, columns)
@@ -366,7 +366,7 @@ class PageRenderTests(unittest.TestCase):
         # header is present in the markdown (no dataframe virtualization).
         blob = self._markdown_blob(app)
         self.assertIn('class="v2-html-table"', blob)
-        for required in ("순위", "상품", "출발 점포", "도착 점포", "경로 유형", "수량", "예상 절감액", "추천 등급"):
+        for required in ("순위", "상품", "출발 점포", "도착 점포", "경로 유형", "수량", "예상 순효과", "안정성", "추천 등급"):
             self.assertIn(f"<th>{required}</th>", blob)
         for hidden in ("route_id", "VHS 점수", "Greedy 순위"):
             self.assertNotIn(f"<th>{hidden}</th>", blob)
@@ -733,9 +733,16 @@ class PageRenderTests(unittest.TestCase):
         self.assertEqual(button.label, "이 데이터 사용")
         button.click().run()
         self.assertFalse(app.exception)
-        self.assertTrue(app.session_state["varo_recommendations"])       # applied now
+        self.assertFalse(app.session_state["varo_recommendations"])      # no automatic analysis
+        self.assertTrue(app.session_state["analysis_run_required"])
+        self.assertIsNotNone(app.session_state["varo_data"])             # usable data applied now
         self.assertNotIn("pending_varo_data", app.session_state)         # pending cleared
         self.assertIn("현재 사용 중 데이터", self._markdown_blob(app))
+        app.session_state["current_menu"] = "추천 실행"
+        app.run()
+        self.assertFalse(app.exception)
+        self.assertIn("추천 실행 전입니다", " ".join(item.value for item in app.info))
+        self.assertIn("run_applied_analysis", {button.key for button in app.button})
 
     def test_data_management_warning_pending_shows_exclude_button(self):
         import pandas as pd
@@ -753,6 +760,44 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("확인 필요", self._markdown_blob(app))
         button = next(b for b in app.button if b.key == "apply_pending")
         self.assertEqual(button.label, "문제 행을 제외하고 사용")
+
+    def test_data_management_partial_preview_is_user_facing(self):
+        from tests.fixtures import sample_workbook, workbook_excel_bytes
+        workbook = sample_workbook()
+        workbook["inventory"].loc[0, "stock_qty"] = -1
+        pend = self._prepared_pending(workbook_excel_bytes(workbook), "부분적용.xlsx")
+        app = AppTest.from_file(APP_PATH, default_timeout=120)
+        app.run()
+        self._inject_pending(app, pend)
+        app.session_state["current_menu"] = "데이터 관리"
+        app.run()
+        self.assertFalse(app.exception)
+        blob = self._markdown_blob(app)
+        captions = " ".join(item.value for item in app.caption)
+        button = next(b for b in app.button if b.key == "apply_pending")
+        self.assertEqual(button.label, "문제 행을 제외하고 사용")
+        self.assertIn("전체 26행 중 25행을 사용합니다", captions)
+        self.assertIn("1개 행은 데이터 문제로 제외합니다", captions)
+        self.assertIn("제외 행 확인", {item.label for item in app.expander})
+        for hidden in ("issue_code", "canonical_column_name", "pending_usable_signature", "Traceback"):
+            self.assertNotIn(hidden, blob)
+
+    def test_data_management_retained_warning_has_no_exclude_wording(self):
+        from tests.fixtures import sample_workbook, workbook_excel_bytes
+        workbook = sample_workbook()
+        workbook["products"]["product_id"] = [1, 2]
+        workbook["inventory"]["product_id"] = workbook["inventory"]["product_id"].map({"P001": 1, "P002": 2})
+        workbook["recommendations"]["product_id"] = workbook["recommendations"]["product_id"].map({"P001": 1, "P002": 2})
+        pend = self._prepared_pending(workbook_excel_bytes(workbook), "경고유지.xlsx")
+        app = AppTest.from_file(APP_PATH, default_timeout=120)
+        app.run()
+        self._inject_pending(app, pend)
+        app.session_state["current_menu"] = "데이터 관리"
+        app.run()
+        self.assertFalse(app.exception)
+        button = next(b for b in app.button if b.key == "apply_pending")
+        self.assertEqual(button.label, "확인 후 이 데이터 사용")
+        self.assertNotIn("문제 행을 제외하고 사용", {b.label for b in app.button})
 
     def test_data_management_cancel_pending_keeps_applied(self):
         import warnings

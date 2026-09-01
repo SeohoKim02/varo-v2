@@ -13,14 +13,15 @@ from unittest import mock
 
 import pandas as pd
 
-from services.app_state import has_app_data
+from services.app_state import has_applied_data
 from services.data_application import (
     cancel_pending_data,
     commit_pending_data,
     load_and_apply,
     prepare_pending_data,
+    run_applied_analysis,
 )
-from services.home_state import READY, build_home_state
+from services.home_state import ANALYSIS_PENDING, READY, build_home_state
 from tests.fixtures import sample_workbook, workbook_excel_bytes
 
 
@@ -109,9 +110,13 @@ class CommitTests(unittest.TestCase):
         state: dict = {}
         _prepare(state, _valid_bytes())
         self.assertTrue(commit_pending_data(state))
-        self.assertTrue(has_app_data(state.get("varo_data"), state.get("varo_recommendations")))
+        self.assertTrue(has_applied_data(state.get("varo_data")))
+        self.assertFalse(state.get("varo_recommendations"))
+        self.assertTrue(state.get("analysis_run_required"))
         self.assertIsNone(state.get("pending_varo_data"))     # pending cleared
         self.assertTrue(state.get("data_apply_message"))
+        self.assertEqual(build_home_state(state)["state_code"], ANALYSIS_PENDING)
+        self.assertTrue(run_applied_analysis(state))
         self.assertEqual(build_home_state(state)["state_code"], READY)
 
     def test_commit_warning_applies_with_usable_rows(self):
@@ -120,7 +125,8 @@ class CommitTests(unittest.TestCase):
         self.assertEqual(status, "확인 필요")
         self.assertGreaterEqual(int(state.get("pending_usable_rows") or 0), 1)
         self.assertTrue(commit_pending_data(state))
-        self.assertTrue(state.get("varo_recommendations"))
+        self.assertFalse(state.get("varo_recommendations"))
+        self.assertTrue(state.get("analysis_run_required"))
 
 
 # --------------------------------------------------------------------------- #
@@ -146,13 +152,13 @@ class UnusableBlockTests(unittest.TestCase):
 # E. 적용 실패 시 기존 상태 보존 (exception path)
 # --------------------------------------------------------------------------- #
 class CommitFailurePreservationTests(unittest.TestCase):
-    def test_pipeline_exception_preserves_current_and_pending(self):
+    def test_apply_exception_preserves_current_and_pending(self):
         state = _applied_state()
         recs_before = list(state["varo_recommendations"])
         sig_before = state["data_signature"]
         _prepare(state, _valid_bytes(saving=777))     # a different valid file
         with mock.patch(
-            "services.data_application.run_analysis_pipeline", side_effect=RuntimeError("boom")
+            "services.data_application.apply_state_payload", side_effect=RuntimeError("boom")
         ):
             self.assertFalse(commit_pending_data(state))
         # current applied data + recs preserved
@@ -163,7 +169,7 @@ class CommitFailurePreservationTests(unittest.TestCase):
         # plain message, no internal exception text
         message = state.get("data_apply_error", "")
         self.assertTrue(message)
-        for internal in ("RuntimeError", "boom", "Traceback", "run_analysis_pipeline"):
+        for internal in ("RuntimeError", "boom", "Traceback", "apply_state_payload"):
             self.assertNotIn(internal, message)
 
 
@@ -204,9 +210,11 @@ class SignatureTests(unittest.TestCase):
         self.assertTrue(commit_pending_data(state))
         self.assertIsNone(state.get("dqn_training_result"))
         self.assertIsNone(state.get("simulation_snapshot"))
-        # selected candidate re-resolved to the new result's top (never a stale id)
-        valid_ids = {str(r["route_id"]) for r in state["varo_recommendations"]}
-        self.assertIn(str(state.get("selected_route_id")), valid_ids)
+        # Applying data clears every prior result; the next explicit run creates
+        # candidates against the new usable signature.
+        self.assertEqual(state["varo_recommendations"], [])
+        self.assertIsNone(state.get("selected_route_id"))
+        self.assertTrue(state.get("analysis_run_required"))
 
     def test_same_filename_different_content_is_new_pending(self):
         state = _applied_state()

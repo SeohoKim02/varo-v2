@@ -67,11 +67,12 @@ def app_status_badges(state) -> list[tuple[str, str]]:
     DQN(학습 전/비교 가능/검토 필요) · 지도(연결됨/미연결). Colours: 완료/정상=success,
     확인 필요/검토 필요=warning, 학습 전/미연결=neutral.
     """
-    from services.app_state import has_app_data
+    from services.app_state import has_app_data, has_applied_data
 
-    data_ok = has_app_data(state.get("varo_data"), state.get("varo_recommendations"))
+    data_ok = has_applied_data(state.get("varo_data"))
+    result_ok = has_app_data(state.get("varo_data"), state.get("varo_recommendations"))
     pipeline = state.get("analysis_result") or state.get("varo_pipeline_result") or {}
-    calc_ok = data_ok and bool(pipeline.get("connected_algorithms") or pipeline.get("v2_summary_functions"))
+    calc_ok = result_ok and bool(pipeline.get("connected_algorithms") or pipeline.get("v2_summary_functions"))
     dqn = state.get("dqn_training_result") or {}
     if not dqn:
         dqn_badge = ("DQN 학습 전", "neutral")

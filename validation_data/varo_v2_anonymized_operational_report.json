@@ -1,0 +1,1431 @@
+{
+  "workbook": "C:\\Projects\\Varo\\varo_v2\\validation_data\\varo_v2_anonymized_operational.xlsx",
+  "manifest": "C:\\Projects\\Varo\\varo_v2\\validation_data\\varo_v2_anonymized_operational_manifest.json",
+  "scale": {
+    "dc_count": 2,
+    "product_count": 30,
+    "source_rows_by_table": {
+      "inventory": 962,
+      "products": 30,
+      "recommendations": 68,
+      "routes": 1640,
+      "stores": 42
+    },
+    "store_count": 40,
+    "total_source_rows": 2742
+  },
+  "single_run_seconds": {
+    "prepare_seconds": 0.796,
+    "commit_seconds": 0.033,
+    "analysis_seconds": 4.754
+  },
+  "performance": {
+    "read": {
+      "first": 0.32,
+      "median": 0.372,
+      "min": 0.32,
+      "max": 0.489,
+      "runs": 3
+    },
+    "prepare": {
+      "first": 0.973,
+      "median": 0.973,
+      "min": 0.827,
+      "max": 1.011,
+      "runs": 3
+    },
+    "commit": {
+      "first": 0.029,
+      "median": 0.031,
+      "min": 0.029,
+      "max": 0.034,
+      "runs": 3
+    },
+    "analysis": {
+      "first": 4.131,
+      "median": 4.046,
+      "min": 3.942,
+      "max": 4.131,
+      "runs": 3
+    },
+    "total": {
+      "first": 5.453,
+      "median": 5.399,
+      "min": 5.359,
+      "max": 5.453,
+      "runs": 3
+    }
+  },
+  "stage_breakdown": {
+    "파일 읽기+정규화": {
+      "first": 0.326,
+      "median": 0.326,
+      "min": 0.325,
+      "max": 0.486
+    },
+    "정규화": {
+      "first": 0.023,
+      "median": 0.025,
+      "min": 0.023,
+      "max": 0.025
+    },
+    "검증·문제 분류": {
+      "first": 0.353,
+      "median": 0.353,
+      "min": 0.232,
+      "max": 0.366
+    },
+    "제외 대상 계산": {
+      "first": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    },
+    "참조 정리+usable data 생성(재검증 포함)": {
+      "first": 0.506,
+      "median": 0.506,
+      "min": 0.501,
+      "max": 0.66
+    },
+    "제외 후 재검증": {
+      "first": 0.017,
+      "median": 0.016,
+      "min": 0.015,
+      "max": 0.017
+    },
+    "적용 데이터 서명": {
+      "first": 0.014,
+      "median": 0.014,
+      "min": 0.014,
+      "max": 0.015
+    },
+    "pending 저장(전체 검사)": {
+      "first": 0.969,
+      "median": 0.969,
+      "min": 0.834,
+      "max": 0.972
+    }
+  },
+  "ui": {
+    "rendered_markdown_chars": {
+      "운영 현황": 53484,
+      "추천 실행": 33002,
+      "경로 상세": 22792,
+      "분석 및 검증": 32191,
+      "데이터 관리": 21958
+    }
+  },
+  "recommendation_summary": {
+    "final_recommendations": 58,
+    "ledger": {
+      "generated": 62,
+      "recommended": 1,
+      "recommendable_total": 58,
+      "check_needed": 0,
+      "blocked_move": 4,
+      "insufficient_data": 0,
+      "not_computable": 0,
+      "excluded_total": 4,
+      "status_counts": {
+        "추천": 1,
+        "추천 가능": 57,
+        "확인 필요": 0,
+        "이동 불가": 4,
+        "데이터 부족": 0,
+        "계산 불가": 0
+      },
+      "top_exclusion_reasons": [
+        {
+          "reason": "출발 점포 재고보다 이동 수량이 많습니다.",
+          "count": 2
+        },
+        {
+          "reason": "이동 비용이 예상 효과보다 크거나 같습니다.",
+          "count": 2
+        }
+      ]
+    },
+    "feasibility": {
+      "total": 62,
+      "feasible_count": 58,
+      "blocked_count": 4,
+      "check_count": 0,
+      "ok_count": 58,
+      "status_distribution": {
+        "추천 가능": 58,
+        "데이터 확인 필요": 0,
+        "이동 불가": 4
+      },
+      "blocked_reasons": [
+        "이동 비용이 예상 효과보다 크거나 같습니다.",
+        "출발 점포 재고보다 이동 수량이 많습니다."
+      ],
+      "all_feasible": false
+    }
+  },
+  "checks_total": 165,
+  "checks_failed": 0,
+  "failures": [],
+  "checks": [
+    {
+      "section": "생성",
+      "check": "워크북 파일 생성",
+      "ok": true,
+      "detail": "C:\\Projects\\Varo\\varo_v2\\validation_data\\varo_v2_anonymized_operational.xlsx"
+    },
+    {
+      "section": "생성",
+      "check": "기대값 manifest 생성",
+      "ok": true,
+      "detail": "C:\\Projects\\Varo\\varo_v2\\validation_data\\varo_v2_anonymized_operational_manifest.json"
+    },
+    {
+      "section": "생성",
+      "check": "익명화 선언 (개인정보·실제 업체 정보 없음)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "생성",
+      "check": "재생성 시 시트 구성 동일",
+      "ok": true,
+      "detail": {
+        "actual": [
+          "README",
+          "config",
+          "inventory",
+          "products",
+          "routes",
+          "stores",
+          "v2_recommendations"
+        ],
+        "expected": [
+          "README",
+          "config",
+          "inventory",
+          "products",
+          "routes",
+          "stores",
+          "v2_recommendations"
+        ]
+      }
+    },
+    {
+      "section": "생성",
+      "check": "재생성 시 모든 시트 내용 동일",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "생성",
+      "check": "재생성 시 manifest 동일",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "스키마",
+      "check": "필수 시트 인식",
+      "ok": true,
+      "detail": [
+        "config",
+        "inventory",
+        "products",
+        "readme",
+        "recommendations",
+        "routes",
+        "stores"
+      ]
+    },
+    {
+      "section": "스키마",
+      "check": "추천 입력 시트 인식",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "스키마",
+      "check": "점포 수",
+      "ok": true,
+      "detail": {
+        "actual": 40,
+        "expected": 40
+      }
+    },
+    {
+      "section": "스키마",
+      "check": "DC 수",
+      "ok": true,
+      "detail": {
+        "actual": 2,
+        "expected": 2
+      }
+    },
+    {
+      "section": "스키마",
+      "check": "상품 수",
+      "ok": true,
+      "detail": {
+        "actual": 30,
+        "expected": 30
+      }
+    },
+    {
+      "section": "스키마",
+      "check": "DIRECT 경로 행",
+      "ok": true,
+      "detail": {
+        "actual": 1560,
+        "expected": 1560
+      }
+    },
+    {
+      "section": "스키마",
+      "check": "VIA_DC 경로 행",
+      "ok": true,
+      "detail": {
+        "actual": 80,
+        "expected": 80
+      }
+    },
+    {
+      "section": "스키마",
+      "check": "DC01 관련 경로 행",
+      "ok": true,
+      "detail": {
+        "actual": 40,
+        "expected": 40
+      }
+    },
+    {
+      "section": "스키마",
+      "check": "DC02 관련 경로 행",
+      "ok": true,
+      "detail": {
+        "actual": 40,
+        "expected": 40
+      }
+    },
+    {
+      "section": "스키마",
+      "check": "모든 이름이 가상 명칭 규칙을 따름",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "스키마",
+      "check": "이름에 연락처·이메일 형태 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "검사",
+      "check": "파일 검사 성공",
+      "ok": true,
+      "detail": "확인 필요"
+    },
+    {
+      "section": "검사",
+      "check": "업로드만으로 자동 적용되지 않음",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "검사",
+      "check": "검사 후 현재 추천 없음",
+      "ok": true,
+      "detail": {
+        "actual": [],
+        "expected": []
+      }
+    },
+    {
+      "section": "검사",
+      "check": "검사 결과가 pending에만 저장됨",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "검사",
+      "check": "원본 전체 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 2742,
+        "expected": 2742
+      }
+    },
+    {
+      "section": "검사",
+      "check": "실제 적용 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 2623,
+        "expected": 2623
+      }
+    },
+    {
+      "section": "검사",
+      "check": "제외 예정 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 119,
+        "expected": 119
+      }
+    },
+    {
+      "section": "검사",
+      "check": "경고 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 7,
+        "expected": 7
+      }
+    },
+    {
+      "section": "검사",
+      "check": "유지 경고 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 4,
+        "expected": 4
+      }
+    },
+    {
+      "section": "검사",
+      "check": "테이블별 제외 행 수",
+      "ok": true,
+      "detail": {
+        "actual": {
+          "routes": 82,
+          "inventory": 30,
+          "recommendations": 6,
+          "stores": 1
+        },
+        "expected": {
+          "inventory": 30,
+          "recommendations": 6,
+          "routes": 82,
+          "stores": 1
+        }
+      }
+    },
+    {
+      "section": "검사",
+      "check": "원본 테이블별 행 수",
+      "ok": true,
+      "detail": {
+        "actual": {
+          "stores": 42,
+          "products": 30,
+          "inventory": 962,
+          "routes": 1640,
+          "recommendations": 68
+        },
+        "expected": {
+          "inventory": 962,
+          "products": 30,
+          "recommendations": 68,
+          "routes": 1640,
+          "stores": 42
+        }
+      }
+    },
+    {
+      "section": "검사",
+      "check": "파일 차단 오류 수",
+      "ok": true,
+      "detail": {
+        "actual": 0,
+        "expected": 0
+      }
+    },
+    {
+      "section": "검사",
+      "check": "부분 적용 허용",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "검사",
+      "check": "제외 원본 행이 기대값과 정확히 일치",
+      "ok": true,
+      "detail": {
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    {
+      "section": "검사",
+      "check": "유지 경고 행이 제외되지 않음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "검사",
+      "check": "제외 후 테이블별 행 수",
+      "ok": true,
+      "detail": {
+        "actual": {
+          "inventory": 932,
+          "products": 30,
+          "recommendations": 62,
+          "routes": 1558,
+          "stores": 41
+        },
+        "expected": {
+          "inventory": 932,
+          "products": 30,
+          "recommendations": 62,
+          "routes": 1558,
+          "stores": 41
+        }
+      }
+    },
+    {
+      "section": "검사",
+      "check": "유지 경고 행이 적용 데이터에 존재",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "검사",
+      "check": "제외 대상 행이 적용 데이터에 없음",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "참조",
+      "check": "재고→점포 고아 참조 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "참조",
+      "check": "재고→상품 고아 참조 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "참조",
+      "check": "경로 source_id→점포 고아 참조 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "참조",
+      "check": "추천 source_id→점포 고아 참조 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "참조",
+      "check": "경로 target_id→점포 고아 참조 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "참조",
+      "check": "추천 target_id→점포 고아 참조 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "참조",
+      "check": "추천→상품 고아 참조 없음",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "참조",
+      "check": "DIRECT 추천에 실제 경로 존재",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "참조",
+      "check": "VIA_DC 추천의 두 구간 경로 존재",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "참조",
+      "check": "VIA_DC 추천의 DC가 실제 DC",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "참조",
+      "check": "기준정보 오류 점포가 제외됨",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "참조",
+      "check": "오류 없는 점포·DC는 모두 유지",
+      "ok": true,
+      "detail": {
+        "actual": 41,
+        "expected": 41
+      }
+    },
+    {
+      "section": "참조",
+      "check": "오류 없는 상품은 모두 유지",
+      "ok": true,
+      "detail": {
+        "actual": 30,
+        "expected": 30
+      }
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC 기준정보 유지",
+      "ok": true,
+      "detail": {
+        "actual": [
+          "DC01",
+          "DC02"
+        ],
+        "expected": [
+          "DC01",
+          "DC02"
+        ]
+      }
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC 이름이 서로 다름",
+      "ok": true,
+      "detail": {
+        "DC01": "가상물류센터 1",
+        "DC02": "가상물류센터 2"
+      }
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC01 경유 경로 존재",
+      "ok": true,
+      "detail": 38
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC01 VIA_DC 추천 후보 존재",
+      "ok": true,
+      "detail": 8
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC02 경유 경로 존재",
+      "ok": true,
+      "detail": 40
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC02 VIA_DC 추천 후보 존재",
+      "ok": true,
+      "detail": 12
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC01 쪽 오류가 DC02 경로를 제거하지 않음",
+      "ok": true,
+      "detail": {
+        "actual": 40,
+        "expected": 40
+      }
+    },
+    {
+      "section": "다중 DC",
+      "check": "DIRECT 경로가 DC 오류로 불필요하게 제거되지 않음",
+      "ok": true,
+      "detail": {
+        "남은 DIRECT": 1480
+      }
+    },
+    {
+      "section": "다중 DC",
+      "check": "DIRECT 추천에는 경유 DC가 붙지 않음",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC01 오류가 DC02 추천을 제거하지 않음",
+      "ok": true,
+      "detail": [
+        "DC02"
+      ]
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC01 오류 시 DC01 경유 추천은 제외됨",
+      "ok": true,
+      "detail": [
+        "DC02"
+      ]
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC01 오류에도 DIRECT 추천 유지",
+      "ok": true,
+      "detail": 42
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC02 오류가 DC01 추천을 제거하지 않음",
+      "ok": true,
+      "detail": [
+        "DC01"
+      ]
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC02 오류 시 DC02 경유 추천은 제외됨",
+      "ok": true,
+      "detail": [
+        "DC01"
+      ]
+    },
+    {
+      "section": "다중 DC",
+      "check": "DC02 오류에도 DIRECT 추천 유지",
+      "ok": true,
+      "detail": 42
+    },
+    {
+      "section": "적용",
+      "check": "적용 버튼 전 현재 데이터 미변경",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "적용",
+      "check": "데이터 적용 성공",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "section": "적용",
+      "check": "적용 후 현재 데이터 교체됨",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "적용",
+      "check": "적용 후 pending 정리됨",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "적용",
+      "check": "적용 후 이전 추천 결과 초기화",
+      "ok": true,
+      "detail": {
+        "actual": [],
+        "expected": []
+      }
+    },
+    {
+      "section": "적용",
+      "check": "적용 후 파이프라인 결과 초기화",
+      "ok": true,
+      "detail": {
+        "actual": {},
+        "expected": {}
+      }
+    },
+    {
+      "section": "적용",
+      "check": "분석 자동 실행 없음 (실행 필요 상태)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "적용",
+      "check": "적용 데이터 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 2623,
+        "expected": 2623
+      }
+    },
+    {
+      "section": "적용",
+      "check": "적용 제외 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 119,
+        "expected": 119
+      }
+    },
+    {
+      "section": "적용",
+      "check": "원본 스냅샷 보존 (제외 전 행 수)",
+      "ok": true,
+      "detail": {
+        "actual": 962,
+        "expected": 962
+      }
+    },
+    {
+      "section": "추천",
+      "check": "실행 버튼 전 추천 0건",
+      "ok": true,
+      "detail": {
+        "actual": 0,
+        "expected": 0
+      }
+    },
+    {
+      "section": "추천",
+      "check": "추천 실행 성공",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "section": "추천",
+      "check": "추천 후보 1건 이상",
+      "ok": true,
+      "detail": 58
+    },
+    {
+      "section": "추천",
+      "check": "파이프라인 상태 정상",
+      "ok": true,
+      "detail": "success"
+    },
+    {
+      "section": "추천",
+      "check": "알고리즘 실행 오류 없음",
+      "ok": true,
+      "detail": {
+        "actual": [],
+        "expected": []
+      }
+    },
+    {
+      "section": "추천",
+      "check": "분석 실행 필요 상태 해제",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "추천",
+      "check": "후보 생성 수 = 적용된 추천 입력 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 62,
+        "expected": 62
+      }
+    },
+    {
+      "section": "추천",
+      "check": "후보 상태별 합계 = 전체 후보 수",
+      "ok": true,
+      "detail": {
+        "actual": 62,
+        "expected": 62
+      }
+    },
+    {
+      "section": "추천",
+      "check": "추천 + 제외 = 전체 후보",
+      "ok": true,
+      "detail": {
+        "actual": 62,
+        "expected": 62
+      }
+    },
+    {
+      "section": "추천",
+      "check": "재고 초과 요청이 추천 전에 차단됨",
+      "ok": true,
+      "detail": {
+        "blocked": [
+          "R0048",
+          "R0051",
+          "R0061",
+          "R0062"
+        ],
+        "expected_subset": [
+          "R0061",
+          "R0062"
+        ]
+      }
+    },
+    {
+      "section": "추천",
+      "check": "차단된 후보가 최종 추천에 없음",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "추천",
+      "check": "제외된 원본 행이 후보 생성에 포함되지 않음",
+      "ok": true,
+      "detail": "R0063"
+    },
+    {
+      "section": "역할",
+      "check": "VHS가 최종 점수 기준",
+      "ok": true,
+      "detail": "services.vhs_score_engine.apply_auto_vhs"
+    },
+    {
+      "section": "역할",
+      "check": "Greedy는 기준선",
+      "ok": true,
+      "detail": "heuristic_optimizer.add_heuristic_scores"
+    },
+    {
+      "section": "역할",
+      "check": "Pareto 보조 검증 결과 존재",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "역할",
+      "check": "DQN 자동 실행 없음",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "역할",
+      "check": "모든 후보의 DQN 상태가 미연결",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "역할",
+      "check": "DQN 학습 결과 미보유",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "추천",
+      "check": "계산 불가 값을 0으로 위장하지 않음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "추천",
+      "check": "권장 이동 수량이 모두 양수",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "추천",
+      "check": "이동 수량이 출발 재고를 넘지 않음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "추천",
+      "check": "DIRECT·VIA_DC가 모두 최종 추천에 존재",
+      "ok": true,
+      "detail": [
+        "DIRECT",
+        "VIA_DC"
+      ]
+    },
+    {
+      "section": "추천",
+      "check": "DC01·DC02가 모두 최종 추천에 존재",
+      "ok": true,
+      "detail": [
+        "DC01",
+        "DC02"
+      ]
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·추천 실행 후보 수",
+      "ok": true,
+      "detail": {
+        "actual": 58,
+        "expected": 58
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "데이터 관리·홈 후보 수",
+      "ok": true,
+      "detail": {
+        "actual": 58,
+        "expected": 58
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "검증 페이지 추천 가능 후보 수",
+      "ok": true,
+      "detail": {
+        "actual": 58,
+        "expected": 58
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·검증 이동 불가 후보 수",
+      "ok": true,
+      "detail": {
+        "actual": 4,
+        "expected": 4
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "데이터 관리·검사 전체 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 2742,
+        "expected": 2742
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "데이터 관리·적용 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 2623,
+        "expected": 2623
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "데이터 관리·제외 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 119,
+        "expected": 119
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "데이터 관리·경고 행 수",
+      "ok": true,
+      "detail": {
+        "actual": 7,
+        "expected": 7
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "데이터 관리 적용 행 수 = manifest",
+      "ok": true,
+      "detail": {
+        "actual": 2623,
+        "expected": 2623
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈 최우선 추천 존재",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·추천표 최우선 후보 동일",
+      "ok": true,
+      "detail": {
+        "actual": "R0005",
+        "expected": "R0005"
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·경로 상세 최우선 후보 동일",
+      "ok": true,
+      "detail": {
+        "actual": "R0005",
+        "expected": "R0005"
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·경로 상세 recommended_qty 동일",
+      "ok": true,
+      "detail": {
+        "actual": 60.0,
+        "expected": 60.0
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·경로 상세 route_type 동일",
+      "ok": true,
+      "detail": {
+        "actual": "DIRECT",
+        "expected": "DIRECT"
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·경로 상세 dc_id 동일",
+      "ok": true,
+      "detail": {
+        "actual": null,
+        "expected": null
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·경로 상세 estimated_cost 동일",
+      "ok": true,
+      "detail": {
+        "actual": 8500.0,
+        "expected": 8500.0
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·경로 상세 expected_saving 동일",
+      "ok": true,
+      "detail": {
+        "actual": 203180.0,
+        "expected": 203180.0
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·경로 상세 vhs_score 동일",
+      "ok": true,
+      "detail": {
+        "actual": 87.81,
+        "expected": 87.81
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·경로 상세 confidence 동일",
+      "ok": true,
+      "detail": {
+        "actual": 66.0,
+        "expected": 66.0
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·경로 상세 reason 동일",
+      "ok": true,
+      "detail": {
+        "actual": "유통기한 임박 · 냉동·냉장 과잉 상황과 재고·수요·비용 지표를 반영해 보류 전략을 권장합니다.",
+        "expected": "유통기한 임박 · 냉동·냉장 과잉 상황과 재고·수요·비용 지표를 반영해 보류 전략을 권장합니다."
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "선택된 후보가 추천 목록에 존재",
+      "ok": true,
+      "detail": {
+        "actual": true,
+        "expected": true
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "선택 후보 유효 표시",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "화면 일치",
+      "check": "최우선 후보의 원본 계보 기록 존재",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "화면 일치",
+      "check": "계보의 이동 수량이 추천표와 동일",
+      "ok": true,
+      "detail": {
+        "actual": 60.0,
+        "expected": 60.0
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "최우선 후보의 원본 행 위치 기록",
+      "ok": true,
+      "detail": 4
+    },
+    {
+      "section": "화면 일치",
+      "check": "화면에 표시되는 추천 이유 1~3문장",
+      "ok": true,
+      "detail": [
+        "재계산 VHS가 상위권이라 우선 검토할 수 있는 후보입니다.",
+        "예상 절감액이 약 203,180원으로 재배치 효과가 기대됩니다.",
+        "직접 이동 경로로 단순한 경로 구성입니다."
+      ]
+    },
+    {
+      "section": "화면 일치",
+      "check": "추천 이유 문장이 짧게 유지됨",
+      "ok": true,
+      "detail": [
+        33,
+        35,
+        23
+      ]
+    },
+    {
+      "section": "화면 일치",
+      "check": "신뢰도 상태가 계산 가능 여부와 함께 표시",
+      "ok": true,
+      "detail": "높음"
+    },
+    {
+      "section": "화면 일치",
+      "check": "안정성 상태 표시",
+      "ok": true,
+      "detail": "안정"
+    },
+    {
+      "section": "메모리",
+      "check": "적용 후 pending 대용량 객체 정리",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "메모리",
+      "check": "검사 취소 시 pending 해제",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "메모리",
+      "check": "후보별 원본 전체 복제 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "메모리",
+      "check": "계보 기록이 참조 정보 중심",
+      "ok": true,
+      "detail": 6
+    },
+    {
+      "section": "UI",
+      "check": "운영 현황 페이지 렌더 오류 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "UI",
+      "check": "운영 현황 내부 signature 미노출",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "운영 현황 traceback 미노출",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "운영 현황 내부 식별자 미노출 (candidate_id)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "운영 현황 내부 식별자 미노출 (usable_signature)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "운영 현황 내부 식별자 미노출 (pending_usable_data)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "운영 현황 내부 식별자 미노출 (C:\\\\Projects)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "추천 실행 페이지 렌더 오류 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "UI",
+      "check": "추천 실행 내부 signature 미노출",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "추천 실행 traceback 미노출",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "추천 실행 내부 식별자 미노출 (candidate_id)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "추천 실행 내부 식별자 미노출 (usable_signature)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "추천 실행 내부 식별자 미노출 (pending_usable_data)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "추천 실행 내부 식별자 미노출 (C:\\\\Projects)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "경로 상세 페이지 렌더 오류 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "UI",
+      "check": "경로 상세 내부 signature 미노출",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "경로 상세 traceback 미노출",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "경로 상세 내부 식별자 미노출 (candidate_id)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "경로 상세 내부 식별자 미노출 (usable_signature)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "경로 상세 내부 식별자 미노출 (pending_usable_data)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "경로 상세 내부 식별자 미노출 (C:\\\\Projects)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "분석 및 검증 페이지 렌더 오류 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "UI",
+      "check": "분석 및 검증 내부 signature 미노출",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "분석 및 검증 traceback 미노출",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "분석 및 검증 내부 식별자 미노출 (candidate_id)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "분석 및 검증 내부 식별자 미노출 (usable_signature)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "분석 및 검증 내부 식별자 미노출 (pending_usable_data)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "분석 및 검증 내부 식별자 미노출 (C:\\\\Projects)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "데이터 관리 페이지 렌더 오류 없음",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "section": "UI",
+      "check": "데이터 관리 내부 signature 미노출",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "데이터 관리 traceback 미노출",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "데이터 관리 내부 식별자 미노출 (candidate_id)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "데이터 관리 내부 식별자 미노출 (usable_signature)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "데이터 관리 내부 식별자 미노출 (pending_usable_data)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "UI",
+      "check": "데이터 관리 내부 식별자 미노출 (C:\\\\Projects)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "성능",
+      "check": "전체 흐름이 합리적인 시간 안에 완료",
+      "ok": true,
+      "detail": {
+        "first": 5.453,
+        "median": 5.399,
+        "min": 5.359,
+        "max": 5.453,
+        "runs": 3
+      }
+    }
+  ]
+}

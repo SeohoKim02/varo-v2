@@ -111,12 +111,15 @@ def _render_core_kpis(route: dict) -> None:
     render_section_header(st, "핵심 수치", "")
     row1 = st.columns(3, gap="small")
     row1[0].metric("추천 수량", format_number(route.get("recommended_qty"), "개"))
-    row1[1].metric("예상 절감액", format_currency(route.get("expected_saving")))
+    row1[1].metric("예상 순효과", format_currency(route.get("net_benefit")))
     row1[2].metric("추천 점수", format_number(route.get("vhs_score"), "점"))
     row2 = st.columns(3, gap="small")
     row2[0].metric("이동 거리", format_number(route.get("distance_km"), "km"))
     row2[1].metric("예상 시간", format_number(route.get("expected_time_min") or route.get("travel_time_min"), "분"))
     row2[2].metric("이동비용", format_currency(route.get("move_cost") or route.get("estimated_cost")))
+    st.caption(
+        f"예상 절감액 {format_currency(route.get('expected_saving'))}에서 이동비용을 뺀 값이 예상 순효과입니다."
+    )
 
 
 def _render_vhs_components(route: dict) -> None:

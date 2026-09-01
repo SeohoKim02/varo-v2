@@ -1,0 +1,813 @@
+{
+  "algorithm_version": "vhs-2.1",
+  "workbook": "C:\\Projects\\Varo\\varo_v2\\validation_data\\varo_v2_anonymized_operational.xlsx",
+  "top_k": 5,
+  "weights": {
+    "net_benefit_score": 0.27645,
+    "inventory_balance_score": 0.147106,
+    "disposal_risk_score": 0.124789,
+    "demand_fit_score": 0.113458,
+    "route_cost_score": 0.099898,
+    "feasibility_score": 0.102375,
+    "demand_risk_score": 0.064648,
+    "post_move_risk_score": 0.071275,
+    "dqn_reference_score": 0.0
+  },
+  "scenarios": {
+    "base": {
+      "status": "success",
+      "candidate_count": 62,
+      "recommendable": 58,
+      "feasible_ratio": 0.9355,
+      "blocked": 4,
+      "blocked_reasons": [
+        "이동 비용이 예상 효과보다 크거나 같습니다.",
+        "출발 점포 재고보다 이동 수량이 많습니다."
+      ],
+      "route_type_mix": {
+        "DIRECT": 40,
+        "VIA_DC": 18
+      },
+      "dc_mix": {
+        "DC01": 7,
+        "DC02": 11
+      },
+      "top1": {
+        "route_id": "R0005",
+        "route_type": "DIRECT",
+        "dc_id": null,
+        "recommended_qty": 60.0,
+        "net_benefit": 194680.0,
+        "vhs_score": 87.81,
+        "robustness": "안정",
+        "pareto_status": "비지배",
+        "demand_scenario": "안정"
+      },
+      "pareto_front_ratio": 0.1129,
+      "stability": "안정",
+      "confidence": "높음",
+      "comparison": {
+        "baseline": "절감액 우선 Greedy",
+        "objective": "예상 절감액 최대화 (단일 목적, 이동 비용·수요·이동 후 상태 미고려)",
+        "candidate_count": 58,
+        "top_k": 5,
+        "comparable": true,
+        "top1_match": false,
+        "topk_overlap": 3,
+        "topk_overlap_ratio": 0.6,
+        "vhs": {
+          "top1_route_id": "R0005",
+          "net_benefit_total": 984744.0,
+          "expected_saving_total": 1028244.0,
+          "move_cost_total": 43500.0,
+          "shortage_covered": 196.0,
+          "surplus_relieved": 296.0,
+          "top1_pareto_status": "비지배",
+          "top1_robustness": "안정",
+          "top1_demand_scenario": "안정"
+        },
+        "greedy": {
+          "top1_route_id": "R0013",
+          "net_benefit_total": 1063144.0,
+          "expected_saving_total": 1116044.0,
+          "move_cost_total": 52900.0,
+          "shortage_covered": 146.0,
+          "surplus_relieved": 296.0,
+          "top1_pareto_status": "지배됨",
+          "top1_robustness": "안정",
+          "top1_demand_scenario": "안정"
+        }
+      },
+      "seconds": 4.6,
+      "label": "정상 수요 (익명 운영 데이터 원본)"
+    },
+    "demand_volatile": {
+      "status": "success",
+      "candidate_count": 62,
+      "recommendable": 58,
+      "feasible_ratio": 0.9355,
+      "blocked": 4,
+      "blocked_reasons": [
+        "이동 비용이 예상 효과보다 크거나 같습니다.",
+        "출발 점포 재고보다 이동 수량이 많습니다."
+      ],
+      "route_type_mix": {
+        "DIRECT": 40,
+        "VIA_DC": 18
+      },
+      "dc_mix": {
+        "DC01": 7,
+        "DC02": 11
+      },
+      "top1": {
+        "route_id": "R0013",
+        "route_type": "DIRECT",
+        "dc_id": null,
+        "recommended_qty": 60.0,
+        "net_benefit": 215640.0,
+        "vhs_score": 86.08,
+        "robustness": "검토 필요",
+        "pareto_status": "지배됨",
+        "demand_scenario": "안정"
+      },
+      "pareto_front_ratio": 0.1129,
+      "stability": "불안정",
+      "confidence": "보통",
+      "comparison": {
+        "baseline": "절감액 우선 Greedy",
+        "objective": "예상 절감액 최대화 (단일 목적, 이동 비용·수요·이동 후 상태 미고려)",
+        "candidate_count": 58,
+        "top_k": 5,
+        "comparable": true,
+        "top1_match": true,
+        "topk_overlap": 4,
+        "topk_overlap_ratio": 0.8,
+        "vhs": {
+          "top1_route_id": "R0013",
+          "net_benefit_total": 1048944.0,
+          "expected_saving_total": 1098144.0,
+          "move_cost_total": 49200.0,
+          "shortage_covered": 168.0,
+          "surplus_relieved": 296.0,
+          "top1_pareto_status": "지배됨",
+          "top1_robustness": "검토 필요",
+          "top1_demand_scenario": "안정"
+        },
+        "greedy": {
+          "top1_route_id": "R0013",
+          "net_benefit_total": 1063144.0,
+          "expected_saving_total": 1116044.0,
+          "move_cost_total": 52900.0,
+          "shortage_covered": 146.0,
+          "surplus_relieved": 296.0,
+          "top1_pareto_status": "지배됨",
+          "top1_robustness": "검토 필요",
+          "top1_demand_scenario": "안정"
+        }
+      },
+      "seconds": 3.93,
+      "label": "수요 변동 큼 (표준편차 ×3)"
+    },
+    "high_transport_cost": {
+      "status": "success",
+      "candidate_count": 62,
+      "recommendable": 35,
+      "feasible_ratio": 0.5645,
+      "blocked": 27,
+      "blocked_reasons": [
+        "이동 비용이 예상 효과보다 크거나 같습니다.",
+        "출발 점포 재고보다 이동 수량이 많습니다."
+      ],
+      "route_type_mix": {
+        "DIRECT": 29,
+        "VIA_DC": 6
+      },
+      "dc_mix": {
+        "DC01": 3,
+        "DC02": 3
+      },
+      "top1": {
+        "route_id": "R0005",
+        "route_type": "DIRECT",
+        "dc_id": null,
+        "recommended_qty": 60.0,
+        "net_benefit": 152180.0,
+        "vhs_score": 89.72,
+        "robustness": "안정",
+        "pareto_status": "비지배",
+        "demand_scenario": "안정"
+      },
+      "pareto_front_ratio": 0.0806,
+      "stability": "안정",
+      "confidence": "높음",
+      "comparison": {
+        "baseline": "절감액 우선 Greedy",
+        "objective": "예상 절감액 최대화 (단일 목적, 이동 비용·수요·이동 후 상태 미고려)",
+        "candidate_count": 35,
+        "top_k": 5,
+        "comparable": true,
+        "top1_match": false,
+        "topk_overlap": 2,
+        "topk_overlap_ratio": 0.4,
+        "vhs": {
+          "top1_route_id": "R0005",
+          "net_benefit_total": 710700.0,
+          "expected_saving_total": 971700.0,
+          "move_cost_total": 261000.0,
+          "shortage_covered": 204.0,
+          "surplus_relieved": 300.0,
+          "top1_pareto_status": "비지배",
+          "top1_robustness": "안정",
+          "top1_demand_scenario": "안정"
+        },
+        "greedy": {
+          "top1_route_id": "R0013",
+          "net_benefit_total": 798644.0,
+          "expected_saving_total": 1116044.0,
+          "move_cost_total": 317400.0,
+          "shortage_covered": 146.0,
+          "surplus_relieved": 296.0,
+          "top1_pareto_status": "지배됨",
+          "top1_robustness": "안정",
+          "top1_demand_scenario": "안정"
+        }
+      },
+      "seconds": 4.03,
+      "label": "이동 비용 높음 (경로 비용 ×6)"
+    },
+    "sparse_routes": {
+      "status": "success",
+      "candidate_count": 34,
+      "recommendable": 31,
+      "feasible_ratio": 0.9118,
+      "blocked": 3,
+      "blocked_reasons": [
+        "이동 비용이 예상 효과보다 크거나 같습니다.",
+        "출발 점포 재고보다 이동 수량이 많습니다."
+      ],
+      "route_type_mix": {
+        "DIRECT": 13,
+        "VIA_DC": 18
+      },
+      "dc_mix": {
+        "DC01": 7,
+        "DC02": 11
+      },
+      "top1": {
+        "route_id": "R0035",
+        "route_type": "DIRECT",
+        "dc_id": null,
+        "recommended_qty": 60.0,
+        "net_benefit": 152920.0,
+        "vhs_score": 82.1,
+        "robustness": "검토 필요",
+        "pareto_status": "지배됨",
+        "demand_scenario": "안정"
+      },
+      "pareto_front_ratio": 0.0882,
+      "stability": "불안정",
+      "confidence": "보통",
+      "comparison": {
+        "baseline": "절감액 우선 Greedy",
+        "objective": "예상 절감액 최대화 (단일 목적, 이동 비용·수요·이동 후 상태 미고려)",
+        "candidate_count": 31,
+        "top_k": 5,
+        "comparable": true,
+        "top1_match": false,
+        "topk_overlap": 2,
+        "topk_overlap_ratio": 0.4,
+        "vhs": {
+          "top1_route_id": "R0035",
+          "net_benefit_total": 805424.0,
+          "expected_saving_total": 869224.0,
+          "move_cost_total": 63800.0,
+          "shortage_covered": 202.0,
+          "surplus_relieved": 296.0,
+          "top1_pareto_status": "지배됨",
+          "top1_robustness": "검토 필요",
+          "top1_demand_scenario": "안정"
+        },
+        "greedy": {
+          "top1_route_id": "R0026",
+          "net_benefit_total": 891984.0,
+          "expected_saving_total": 994584.0,
+          "move_cost_total": 102600.0,
+          "shortage_covered": 190.0,
+          "surplus_relieved": 296.0,
+          "top1_pareto_status": "비지배",
+          "top1_robustness": "검토 필요",
+          "top1_demand_scenario": "안정"
+        }
+      },
+      "seconds": 2.26,
+      "label": "경로 제한 많음 (DIRECT 경로 2/3 제거)"
+    },
+    "dc_favourable": {
+      "status": "success",
+      "candidate_count": 20,
+      "recommendable": 18,
+      "feasible_ratio": 0.9,
+      "blocked": 2,
+      "blocked_reasons": [
+        "이동 비용이 예상 효과보다 크거나 같습니다."
+      ],
+      "route_type_mix": {
+        "DIRECT": 0,
+        "VIA_DC": 18
+      },
+      "dc_mix": {
+        "DC01": 7,
+        "DC02": 11
+      },
+      "top1": {
+        "route_id": "R0033",
+        "route_type": "VIA_DC",
+        "dc_id": "DC02",
+        "recommended_qty": 60.0,
+        "net_benefit": 176240.0,
+        "vhs_score": 79.16,
+        "robustness": "안정",
+        "pareto_status": "비지배",
+        "demand_scenario": "안정"
+      },
+      "pareto_front_ratio": 0.3,
+      "stability": "안정",
+      "confidence": "높음",
+      "comparison": {
+        "baseline": "절감액 우선 Greedy",
+        "objective": "예상 절감액 최대화 (단일 목적, 이동 비용·수요·이동 후 상태 미고려)",
+        "candidate_count": 18,
+        "top_k": 5,
+        "comparable": true,
+        "top1_match": false,
+        "topk_overlap": 4,
+        "topk_overlap_ratio": 0.8,
+        "vhs": {
+          "top1_route_id": "R0033",
+          "net_benefit_total": 787280.0,
+          "expected_saving_total": 887680.0,
+          "move_cost_total": 100400.0,
+          "shortage_covered": 228.0,
+          "surplus_relieved": 300.0,
+          "top1_pareto_status": "비지배",
+          "top1_robustness": "안정",
+          "top1_demand_scenario": "안정"
+        },
+        "greedy": {
+          "top1_route_id": "R0006",
+          "net_benefit_total": 813840.0,
+          "expected_saving_total": 927240.0,
+          "move_cost_total": 113400.0,
+          "shortage_covered": 198.0,
+          "surplus_relieved": 300.0,
+          "top1_pareto_status": "비지배",
+          "top1_robustness": "검토 필요",
+          "top1_demand_scenario": "안정"
+        }
+      },
+      "seconds": 1.69,
+      "label": "DC 경유만 가능"
+    },
+    "direct_favourable": {
+      "status": "success",
+      "candidate_count": 42,
+      "recommendable": 40,
+      "feasible_ratio": 0.9524,
+      "blocked": 2,
+      "blocked_reasons": [
+        "출발 점포 재고보다 이동 수량이 많습니다."
+      ],
+      "route_type_mix": {
+        "DIRECT": 40,
+        "VIA_DC": 0
+      },
+      "dc_mix": {},
+      "top1": {
+        "route_id": "R0005",
+        "route_type": "DIRECT",
+        "dc_id": null,
+        "recommended_qty": 60.0,
+        "net_benefit": 194680.0,
+        "vhs_score": 87.23,
+        "robustness": "안정",
+        "pareto_status": "비지배",
+        "demand_scenario": "안정"
+      },
+      "pareto_front_ratio": 0.1667,
+      "stability": "안정",
+      "confidence": "높음",
+      "comparison": {
+        "baseline": "절감액 우선 Greedy",
+        "objective": "예상 절감액 최대화 (단일 목적, 이동 비용·수요·이동 후 상태 미고려)",
+        "candidate_count": 40,
+        "top_k": 5,
+        "comparable": true,
+        "top1_match": false,
+        "topk_overlap": 4,
+        "topk_overlap_ratio": 0.8,
+        "vhs": {
+          "top1_route_id": "R0005",
+          "net_benefit_total": 1048944.0,
+          "expected_saving_total": 1098144.0,
+          "move_cost_total": 49200.0,
+          "shortage_covered": 168.0,
+          "surplus_relieved": 296.0,
+          "top1_pareto_status": "비지배",
+          "top1_robustness": "안정",
+          "top1_demand_scenario": "안정"
+        },
+        "greedy": {
+          "top1_route_id": "R0013",
+          "net_benefit_total": 1063144.0,
+          "expected_saving_total": 1116044.0,
+          "move_cost_total": 52900.0,
+          "shortage_covered": 146.0,
+          "surplus_relieved": 296.0,
+          "top1_pareto_status": "지배됨",
+          "top1_robustness": "안정",
+          "top1_demand_scenario": "안정"
+        }
+      },
+      "seconds": 2.88,
+      "label": "DIRECT만 가능"
+    },
+    "surplus_concentrated": {
+      "status": "success",
+      "candidate_count": 62,
+      "recommendable": 39,
+      "feasible_ratio": 0.629,
+      "blocked": 23,
+      "blocked_reasons": [
+        "이동 비용이 예상 효과보다 크거나 같습니다.",
+        "출발 점포 재고보다 이동 수량이 많습니다."
+      ],
+      "route_type_mix": {
+        "DIRECT": 28,
+        "VIA_DC": 11
+      },
+      "dc_mix": {
+        "DC01": 5,
+        "DC02": 6
+      },
+      "top1": {
+        "route_id": "R0050",
+        "route_type": "DIRECT",
+        "dc_id": null,
+        "recommended_qty": 60.0,
+        "net_benefit": 220280.0,
+        "vhs_score": 89.79,
+        "robustness": "안정",
+        "pareto_status": "비지배",
+        "demand_scenario": "안정"
+      },
+      "pareto_front_ratio": 0.0968,
+      "stability": "안정",
+      "confidence": "보통",
+      "comparison": {
+        "baseline": "절감액 우선 Greedy",
+        "objective": "예상 절감액 최대화 (단일 목적, 이동 비용·수요·이동 후 상태 미고려)",
+        "candidate_count": 39,
+        "top_k": 5,
+        "comparable": true,
+        "top1_match": true,
+        "topk_overlap": 4,
+        "topk_overlap_ratio": 0.8,
+        "vhs": {
+          "top1_route_id": "R0050",
+          "net_benefit_total": 986424.0,
+          "expected_saving_total": 1032324.0,
+          "move_cost_total": 45900.0,
+          "shortage_covered": 170.2,
+          "surplus_relieved": 290.4,
+          "top1_pareto_status": "비지배",
+          "top1_robustness": "안정",
+          "top1_demand_scenario": "안정"
+        },
+        "greedy": {
+          "top1_route_id": "R0050",
+          "net_benefit_total": 1050624.0,
+          "expected_saving_total": 1102224.0,
+          "move_cost_total": 51600.0,
+          "shortage_covered": 149.2,
+          "surplus_relieved": 288.0,
+          "top1_pareto_status": "비지배",
+          "top1_robustness": "안정",
+          "top1_demand_scenario": "안정"
+        }
+      },
+      "seconds": 3.85,
+      "label": "과잉 재고 집중"
+    },
+    "many_shortage_stores": {
+      "status": "success",
+      "candidate_count": 62,
+      "recommendable": 25,
+      "feasible_ratio": 0.4032,
+      "blocked": 37,
+      "blocked_reasons": [
+        "이동 비용이 예상 효과보다 크거나 같습니다.",
+        "출발 점포 재고보다 이동 수량이 많습니다."
+      ],
+      "route_type_mix": {
+        "DIRECT": 14,
+        "VIA_DC": 11
+      },
+      "dc_mix": {
+        "DC01": 5,
+        "DC02": 6
+      },
+      "top1": {
+        "route_id": "R0026",
+        "route_type": "DIRECT",
+        "dc_id": null,
+        "recommended_qty": 56.0,
+        "net_benefit": 209464.0,
+        "vhs_score": 90.92,
+        "robustness": "안정",
+        "pareto_status": "비지배",
+        "demand_scenario": "안정"
+      },
+      "pareto_front_ratio": 0.0968,
+      "stability": "안정",
+      "confidence": "보통",
+      "comparison": {
+        "baseline": "절감액 우선 Greedy",
+        "objective": "예상 절감액 최대화 (단일 목적, 이동 비용·수요·이동 후 상태 미고려)",
+        "candidate_count": 25,
+        "top_k": 5,
+        "comparable": true,
+        "top1_match": false,
+        "topk_overlap": 3,
+        "topk_overlap_ratio": 0.6,
+        "vhs": {
+          "top1_route_id": "R0026",
+          "net_benefit_total": 875784.0,
+          "expected_saving_total": 931284.0,
+          "move_cost_total": 55500.0,
+          "shortage_covered": 232.5,
+          "surplus_relieved": 263.0,
+          "top1_pareto_status": "비지배",
+          "top1_robustness": "안정",
+          "top1_demand_scenario": "안정"
+        },
+        "greedy": {
+          "top1_route_id": "R0053",
+          "net_benefit_total": 941544.0,
+          "expected_saving_total": 1022244.0,
+          "move_cost_total": 80700.0,
+          "shortage_covered": 234.5,
+          "surplus_relieved": 277.4,
+          "top1_pareto_status": "비지배",
+          "top1_robustness": "안정",
+          "top1_demand_scenario": "안정"
+        }
+      },
+      "seconds": 3.8,
+      "label": "부족 점포 다수"
+    }
+  },
+  "ablation": {
+    "comparable": true,
+    "baseline": {
+      "top1_route_id": "R0005",
+      "net_benefit_total": 984744.0,
+      "move_cost_total": 43500.0,
+      "shortage_covered": 196.0,
+      "top1_robustness": "안정"
+    },
+    "rows": [
+      {
+        "component": "net_benefit_score",
+        "label": "예상 순효과",
+        "removed_weight": 0.2764,
+        "top1_changed": false,
+        "top1_route_id": "R0005",
+        "candidates_reordered": 55,
+        "net_benefit_delta": -472024.0,
+        "move_cost_delta": 2000.0,
+        "shortage_covered_delta": 21.0,
+        "top1_robustness": "안정"
+      },
+      {
+        "component": "inventory_balance_score",
+        "label": "재고 균형",
+        "removed_weight": 0.1471,
+        "top1_changed": true,
+        "top1_route_id": "R0026",
+        "candidates_reordered": 52,
+        "net_benefit_delta": 51680.0,
+        "move_cost_delta": 4400.0,
+        "shortage_covered_delta": -33.0,
+        "top1_robustness": "안정"
+      },
+      {
+        "component": "disposal_risk_score",
+        "label": "폐기 위험",
+        "removed_weight": 0.1248,
+        "top1_changed": false,
+        "top1_route_id": "R0005",
+        "candidates_reordered": 49,
+        "net_benefit_delta": 0.0,
+        "move_cost_delta": 0.0,
+        "shortage_covered_delta": 0.0,
+        "top1_robustness": "안정"
+      },
+      {
+        "component": "demand_fit_score",
+        "label": "수요 적합도",
+        "removed_weight": 0.1135,
+        "top1_changed": false,
+        "top1_route_id": "R0005",
+        "candidates_reordered": 10,
+        "net_benefit_delta": 0.0,
+        "move_cost_delta": 0.0,
+        "shortage_covered_delta": 0.0,
+        "top1_robustness": "안정"
+      },
+      {
+        "component": "route_cost_score",
+        "label": "이동 부담",
+        "removed_weight": 0.0999,
+        "top1_changed": false,
+        "top1_route_id": "R0005",
+        "candidates_reordered": 48,
+        "net_benefit_delta": 20160.0,
+        "move_cost_delta": 21000.0,
+        "shortage_covered_delta": -8.0,
+        "top1_robustness": "안정"
+      },
+      {
+        "component": "feasibility_score",
+        "label": "실행 여건",
+        "removed_weight": 0.1024,
+        "top1_changed": false,
+        "top1_route_id": "R0005",
+        "candidates_reordered": 0,
+        "net_benefit_delta": 0.0,
+        "move_cost_delta": 0.0,
+        "shortage_covered_delta": 0.0,
+        "top1_robustness": "안정"
+      },
+      {
+        "component": "demand_risk_score",
+        "label": "수요 안정성",
+        "removed_weight": 0.0646,
+        "top1_changed": false,
+        "top1_route_id": "R0005",
+        "candidates_reordered": 0,
+        "net_benefit_delta": 0.0,
+        "move_cost_delta": 0.0,
+        "shortage_covered_delta": 0.0,
+        "top1_robustness": "안정"
+      },
+      {
+        "component": "post_move_risk_score",
+        "label": "이동 후 위험",
+        "removed_weight": 0.0713,
+        "top1_changed": false,
+        "top1_route_id": "R0005",
+        "candidates_reordered": 4,
+        "net_benefit_delta": 0.0,
+        "move_cost_delta": 0.0,
+        "shortage_covered_delta": 0.0,
+        "top1_robustness": "안정"
+      }
+    ]
+  },
+  "stress": {
+    "cases": 15,
+    "failures": [],
+    "non_deterministic": [],
+    "nan_producing": [],
+    "rows": [
+      {
+        "case": "후보 0건",
+        "candidates": 0,
+        "ok": true,
+        "note": "후보 없음 · 빈 결과",
+        "nan_free": true,
+        "deterministic": true
+      },
+      {
+        "case": "후보 1건",
+        "candidates": 1,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "A",
+        "blocked": 0,
+        "feasible": 1
+      },
+      {
+        "case": "동일 점수 후보 다수",
+        "candidates": 8,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "S1",
+        "blocked": 7,
+        "feasible": 1
+      },
+      {
+        "case": "매우 큰 재고·수량",
+        "candidates": 2,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "A",
+        "blocked": 1,
+        "feasible": 1
+      },
+      {
+        "case": "매우 작은 수량",
+        "candidates": 2,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "A",
+        "blocked": 1,
+        "feasible": 1
+      },
+      {
+        "case": "이동 비용 0",
+        "candidates": 2,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "A",
+        "blocked": 1,
+        "feasible": 1
+      },
+      {
+        "case": "이동 비용 매우 큼",
+        "candidates": 2,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "B",
+        "blocked": 2,
+        "feasible": 0
+      },
+      {
+        "case": "이동 시간 0",
+        "candidates": 2,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "A",
+        "blocked": 1,
+        "feasible": 1
+      },
+      {
+        "case": "이동 시간 매우 김",
+        "candidates": 2,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "B",
+        "blocked": 1,
+        "feasible": 1
+      },
+      {
+        "case": "모든 순효과 음수",
+        "candidates": 2,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "B",
+        "blocked": 2,
+        "feasible": 0
+      },
+      {
+        "case": "절감액 계산 불가",
+        "candidates": 2,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "B",
+        "blocked": 1,
+        "feasible": 1
+      },
+      {
+        "case": "DIRECT만 존재",
+        "candidates": 2,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "A",
+        "blocked": 1,
+        "feasible": 1
+      },
+      {
+        "case": "VIA_DC만 존재",
+        "candidates": 2,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "A",
+        "blocked": 1,
+        "feasible": 1
+      },
+      {
+        "case": "DC 여러 개",
+        "candidates": 2,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "A",
+        "blocked": 1,
+        "feasible": 1
+      },
+      {
+        "case": "후보 300건",
+        "candidates": 300,
+        "ok": true,
+        "nan_free": true,
+        "deterministic": true,
+        "top1": "R0297",
+        "blocked": 299,
+        "feasible": 1
+      }
+    ]
+  }
+}

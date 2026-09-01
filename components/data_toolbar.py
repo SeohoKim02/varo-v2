@@ -5,7 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from services.app_state import has_app_data
+from services.app_state import has_applied_data
 from services.data_application import clear_pending, load_and_apply, prepare_pending_data, uploaded_signature
 from services.data_loader import SAMPLE_FILENAME, get_default_sample_path
 
@@ -83,16 +83,13 @@ def _render_feedback() -> None:
 
 def render_quick_data_bar() -> None:
     """Render onboarding controls when empty and a compact replacement bar otherwise."""
-    has_data = has_app_data(
-        st.session_state.get("varo_data"),
-        st.session_state.get("varo_recommendations"),
-    )
+    has_data = has_applied_data(st.session_state.get("varo_data"))
     if not has_data:
         st.markdown(
             """
             <div class="v2-wrap v2-data-onboarding">
               <div class="v2-data-title">엑셀을 먼저 업로드해주세요</div>
-              <div class="v2-card-caption">검증을 통과하면 운영 현황과 추천 결과가 자동으로 표시됩니다.</div>
+              <div class="v2-card-caption">검사 후 데이터를 적용하고 추천 실행을 시작할 수 있습니다.</div>
             </div>
             """,
             unsafe_allow_html=True,
