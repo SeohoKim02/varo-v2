@@ -1,16 +1,16 @@
 {
-  "algorithm_version": "vhs-2.1",
+  "algorithm_version": "vhs-2.2",
   "workbook": "C:\\Projects\\Varo\\varo_v2\\validation_data\\varo_v2_anonymized_operational.xlsx",
   "top_k": 5,
   "weights": {
-    "net_benefit_score": 0.27645,
-    "inventory_balance_score": 0.147106,
-    "disposal_risk_score": 0.124789,
-    "demand_fit_score": 0.113458,
-    "route_cost_score": 0.099898,
-    "feasibility_score": 0.102375,
-    "demand_risk_score": 0.064648,
-    "post_move_risk_score": 0.071275,
+    "net_benefit_score": 0.281042,
+    "inventory_balance_score": 0.149935,
+    "disposal_risk_score": 0.127479,
+    "demand_fit_score": 0.115478,
+    "route_cost_score": 0.102294,
+    "feasibility_score": 0.103722,
+    "demand_risk_score": 0.061222,
+    "post_move_risk_score": 0.058828,
     "dqn_reference_score": 0.0
   },
   "scenarios": {
@@ -22,7 +22,7 @@
       "blocked": 4,
       "blocked_reasons": [
         "이동 비용이 예상 효과보다 크거나 같습니다.",
-        "출발 점포 재고보다 이동 수량이 많습니다."
+        "이동 후 재고가 남겨야 할 재고보다 적습니다."
       ],
       "route_type_mix": {
         "DIRECT": 40,
@@ -38,12 +38,12 @@
         "dc_id": null,
         "recommended_qty": 60.0,
         "net_benefit": 194680.0,
-        "vhs_score": 87.81,
+        "vhs_score": 84.81,
         "robustness": "안정",
         "pareto_status": "비지배",
         "demand_scenario": "안정"
       },
-      "pareto_front_ratio": 0.1129,
+      "pareto_front_ratio": 0.1167,
       "stability": "안정",
       "confidence": "높음",
       "comparison": {
@@ -78,26 +78,26 @@
           "top1_demand_scenario": "안정"
         }
       },
-      "seconds": 4.6,
+      "seconds": 5.53,
       "label": "정상 수요 (익명 운영 데이터 원본)"
     },
     "demand_volatile": {
       "status": "success",
       "candidate_count": 62,
-      "recommendable": 58,
-      "feasible_ratio": 0.9355,
-      "blocked": 4,
+      "recommendable": 53,
+      "feasible_ratio": 0.8548,
+      "blocked": 9,
       "blocked_reasons": [
         "이동 비용이 예상 효과보다 크거나 같습니다.",
-        "출발 점포 재고보다 이동 수량이 많습니다."
+        "이동 후 재고가 남겨야 할 재고보다 적습니다."
       ],
       "route_type_mix": {
-        "DIRECT": 40,
-        "VIA_DC": 18
+        "DIRECT": 37,
+        "VIA_DC": 16
       },
       "dc_mix": {
         "DC01": 7,
-        "DC02": 11
+        "DC02": 9
       },
       "top1": {
         "route_id": "R0013",
@@ -105,18 +105,18 @@
         "dc_id": null,
         "recommended_qty": 60.0,
         "net_benefit": 215640.0,
-        "vhs_score": 86.08,
+        "vhs_score": 82.99,
         "robustness": "검토 필요",
         "pareto_status": "지배됨",
         "demand_scenario": "안정"
       },
-      "pareto_front_ratio": 0.1129,
+      "pareto_front_ratio": 0.1273,
       "stability": "불안정",
       "confidence": "보통",
       "comparison": {
         "baseline": "절감액 우선 Greedy",
         "objective": "예상 절감액 최대화 (단일 목적, 이동 비용·수요·이동 후 상태 미고려)",
-        "candidate_count": 58,
+        "candidate_count": 53,
         "top_k": 5,
         "comparable": true,
         "top1_match": true,
@@ -145,7 +145,7 @@
           "top1_demand_scenario": "안정"
         }
       },
-      "seconds": 3.93,
+      "seconds": 4.7,
       "label": "수요 변동 큼 (표준편차 ×3)"
     },
     "high_transport_cost": {
@@ -156,7 +156,7 @@
       "blocked": 27,
       "blocked_reasons": [
         "이동 비용이 예상 효과보다 크거나 같습니다.",
-        "출발 점포 재고보다 이동 수량이 많습니다."
+        "이동 후 재고가 남겨야 할 재고보다 적습니다."
       ],
       "route_type_mix": {
         "DIRECT": 29,
@@ -172,12 +172,12 @@
         "dc_id": null,
         "recommended_qty": 60.0,
         "net_benefit": 152180.0,
-        "vhs_score": 89.72,
+        "vhs_score": 86.76,
         "robustness": "안정",
         "pareto_status": "비지배",
         "demand_scenario": "안정"
       },
-      "pareto_front_ratio": 0.0806,
+      "pareto_front_ratio": 0.0833,
       "stability": "안정",
       "confidence": "높음",
       "comparison": {
@@ -191,11 +191,11 @@
         "topk_overlap_ratio": 0.4,
         "vhs": {
           "top1_route_id": "R0005",
-          "net_benefit_total": 710700.0,
-          "expected_saving_total": 971700.0,
-          "move_cost_total": 261000.0,
+          "net_benefit_total": 724700.0,
+          "expected_saving_total": 973700.0,
+          "move_cost_total": 249000.0,
           "shortage_covered": 204.0,
-          "surplus_relieved": 300.0,
+          "surplus_relieved": 240.0,
           "top1_pareto_status": "비지배",
           "top1_robustness": "안정",
           "top1_demand_scenario": "안정"
@@ -212,7 +212,7 @@
           "top1_demand_scenario": "안정"
         }
       },
-      "seconds": 4.03,
+      "seconds": 4.17,
       "label": "이동 비용 높음 (경로 비용 ×6)"
     },
     "sparse_routes": {
@@ -223,7 +223,7 @@
       "blocked": 3,
       "blocked_reasons": [
         "이동 비용이 예상 효과보다 크거나 같습니다.",
-        "출발 점포 재고보다 이동 수량이 많습니다."
+        "이동 후 재고가 남겨야 할 재고보다 적습니다."
       ],
       "route_type_mix": {
         "DIRECT": 13,
@@ -239,12 +239,12 @@
         "dc_id": null,
         "recommended_qty": 60.0,
         "net_benefit": 152920.0,
-        "vhs_score": 82.1,
+        "vhs_score": 79.01,
         "robustness": "검토 필요",
         "pareto_status": "지배됨",
         "demand_scenario": "안정"
       },
-      "pareto_front_ratio": 0.0882,
+      "pareto_front_ratio": 0.0909,
       "stability": "불안정",
       "confidence": "보통",
       "comparison": {
@@ -279,7 +279,7 @@
           "top1_demand_scenario": "안정"
         }
       },
-      "seconds": 2.26,
+      "seconds": 2.58,
       "label": "경로 제한 많음 (DIRECT 경로 2/3 제거)"
     },
     "dc_favourable": {
@@ -345,7 +345,7 @@
           "top1_demand_scenario": "안정"
         }
       },
-      "seconds": 1.69,
+      "seconds": 1.92,
       "label": "DC 경유만 가능"
     },
     "direct_favourable": {
@@ -355,7 +355,7 @@
       "feasible_ratio": 0.9524,
       "blocked": 2,
       "blocked_reasons": [
-        "출발 점포 재고보다 이동 수량이 많습니다."
+        "이동 후 재고가 남겨야 할 재고보다 적습니다."
       ],
       "route_type_mix": {
         "DIRECT": 40,
@@ -368,12 +368,12 @@
         "dc_id": null,
         "recommended_qty": 60.0,
         "net_benefit": 194680.0,
-        "vhs_score": 87.23,
+        "vhs_score": 84.19,
         "robustness": "안정",
         "pareto_status": "비지배",
         "demand_scenario": "안정"
       },
-      "pareto_front_ratio": 0.1667,
+      "pareto_front_ratio": 0.175,
       "stability": "안정",
       "confidence": "높음",
       "comparison": {
@@ -408,21 +408,21 @@
           "top1_demand_scenario": "안정"
         }
       },
-      "seconds": 2.88,
+      "seconds": 3.19,
       "label": "DIRECT만 가능"
     },
     "surplus_concentrated": {
       "status": "success",
       "candidate_count": 62,
-      "recommendable": 39,
-      "feasible_ratio": 0.629,
-      "blocked": 23,
+      "recommendable": 34,
+      "feasible_ratio": 0.5484,
+      "blocked": 28,
       "blocked_reasons": [
         "이동 비용이 예상 효과보다 크거나 같습니다.",
-        "출발 점포 재고보다 이동 수량이 많습니다."
+        "이동 후 재고가 남겨야 할 재고보다 적습니다."
       ],
       "route_type_mix": {
-        "DIRECT": 28,
+        "DIRECT": 23,
         "VIA_DC": 11
       },
       "dc_mix": {
@@ -435,66 +435,66 @@
         "dc_id": null,
         "recommended_qty": 60.0,
         "net_benefit": 220280.0,
-        "vhs_score": 89.79,
+        "vhs_score": 88.06,
         "robustness": "안정",
         "pareto_status": "비지배",
         "demand_scenario": "안정"
       },
-      "pareto_front_ratio": 0.0968,
+      "pareto_front_ratio": 0.1714,
       "stability": "안정",
       "confidence": "보통",
       "comparison": {
         "baseline": "절감액 우선 Greedy",
         "objective": "예상 절감액 최대화 (단일 목적, 이동 비용·수요·이동 후 상태 미고려)",
-        "candidate_count": 39,
+        "candidate_count": 34,
         "top_k": 5,
         "comparable": true,
         "top1_match": true,
-        "topk_overlap": 4,
-        "topk_overlap_ratio": 0.8,
+        "topk_overlap": 3,
+        "topk_overlap_ratio": 0.6,
         "vhs": {
           "top1_route_id": "R0050",
-          "net_benefit_total": 986424.0,
-          "expected_saving_total": 1032324.0,
-          "move_cost_total": 45900.0,
-          "shortage_covered": 170.2,
-          "surplus_relieved": 290.4,
+          "net_benefit_total": 927984.0,
+          "expected_saving_total": 968184.0,
+          "move_cost_total": 40200.0,
+          "shortage_covered": 186.8,
+          "surplus_relieved": 296.0,
           "top1_pareto_status": "비지배",
           "top1_robustness": "안정",
           "top1_demand_scenario": "안정"
         },
         "greedy": {
           "top1_route_id": "R0050",
-          "net_benefit_total": 1050624.0,
-          "expected_saving_total": 1102224.0,
-          "move_cost_total": 51600.0,
-          "shortage_covered": 149.2,
-          "surplus_relieved": 288.0,
+          "net_benefit_total": 994984.0,
+          "expected_saving_total": 1067684.0,
+          "move_cost_total": 72700.0,
+          "shortage_covered": 165.8,
+          "surplus_relieved": 296.0,
           "top1_pareto_status": "비지배",
           "top1_robustness": "안정",
           "top1_demand_scenario": "안정"
         }
       },
-      "seconds": 3.85,
+      "seconds": 3.78,
       "label": "과잉 재고 집중"
     },
     "many_shortage_stores": {
       "status": "success",
       "candidate_count": 62,
-      "recommendable": 25,
-      "feasible_ratio": 0.4032,
-      "blocked": 37,
+      "recommendable": 17,
+      "feasible_ratio": 0.2742,
+      "blocked": 45,
       "blocked_reasons": [
         "이동 비용이 예상 효과보다 크거나 같습니다.",
-        "출발 점포 재고보다 이동 수량이 많습니다."
+        "이동 후 재고가 남겨야 할 재고보다 적습니다."
       ],
       "route_type_mix": {
-        "DIRECT": 14,
-        "VIA_DC": 11
+        "DIRECT": 10,
+        "VIA_DC": 7
       },
       "dc_mix": {
-        "DC01": 5,
-        "DC02": 6
+        "DC01": 4,
+        "DC02": 3
       },
       "top1": {
         "route_id": "R0026",
@@ -502,47 +502,47 @@
         "dc_id": null,
         "recommended_qty": 56.0,
         "net_benefit": 209464.0,
-        "vhs_score": 90.92,
+        "vhs_score": 89.09,
         "robustness": "안정",
         "pareto_status": "비지배",
         "demand_scenario": "안정"
       },
-      "pareto_front_ratio": 0.0968,
+      "pareto_front_ratio": 0.3889,
       "stability": "안정",
-      "confidence": "보통",
+      "confidence": "높음",
       "comparison": {
         "baseline": "절감액 우선 Greedy",
         "objective": "예상 절감액 최대화 (단일 목적, 이동 비용·수요·이동 후 상태 미고려)",
-        "candidate_count": 25,
+        "candidate_count": 17,
         "top_k": 5,
         "comparable": true,
-        "top1_match": false,
-        "topk_overlap": 3,
-        "topk_overlap_ratio": 0.6,
+        "top1_match": true,
+        "topk_overlap": 4,
+        "topk_overlap_ratio": 0.8,
         "vhs": {
           "top1_route_id": "R0026",
-          "net_benefit_total": 875784.0,
-          "expected_saving_total": 931284.0,
-          "move_cost_total": 55500.0,
-          "shortage_covered": 232.5,
-          "surplus_relieved": 263.0,
+          "net_benefit_total": 661464.0,
+          "expected_saving_total": 720864.0,
+          "move_cost_total": 59400.0,
+          "shortage_covered": 199.7,
+          "surplus_relieved": 218.0,
           "top1_pareto_status": "비지배",
           "top1_robustness": "안정",
           "top1_demand_scenario": "안정"
         },
         "greedy": {
-          "top1_route_id": "R0053",
-          "net_benefit_total": 941544.0,
-          "expected_saving_total": 1022244.0,
-          "move_cost_total": 80700.0,
-          "shortage_covered": 234.5,
-          "surplus_relieved": 277.4,
+          "top1_route_id": "R0026",
+          "net_benefit_total": 750144.0,
+          "expected_saving_total": 820344.0,
+          "move_cost_total": 70200.0,
+          "shortage_covered": 228.4,
+          "surplus_relieved": 236.0,
           "top1_pareto_status": "비지배",
           "top1_robustness": "안정",
           "top1_demand_scenario": "안정"
         }
       },
-      "seconds": 3.8,
+      "seconds": 3.87,
       "label": "부족 점포 다수"
     }
   },
@@ -559,7 +559,7 @@
       {
         "component": "net_benefit_score",
         "label": "예상 순효과",
-        "removed_weight": 0.2764,
+        "removed_weight": 0.281,
         "top1_changed": false,
         "top1_route_id": "R0005",
         "candidates_reordered": 55,
@@ -571,7 +571,7 @@
       {
         "component": "inventory_balance_score",
         "label": "재고 균형",
-        "removed_weight": 0.1471,
+        "removed_weight": 0.1499,
         "top1_changed": true,
         "top1_route_id": "R0026",
         "candidates_reordered": 52,
@@ -583,10 +583,10 @@
       {
         "component": "disposal_risk_score",
         "label": "폐기 위험",
-        "removed_weight": 0.1248,
+        "removed_weight": 0.1275,
         "top1_changed": false,
         "top1_route_id": "R0005",
-        "candidates_reordered": 49,
+        "candidates_reordered": 48,
         "net_benefit_delta": 0.0,
         "move_cost_delta": 0.0,
         "shortage_covered_delta": 0.0,
@@ -595,10 +595,10 @@
       {
         "component": "demand_fit_score",
         "label": "수요 적합도",
-        "removed_weight": 0.1135,
+        "removed_weight": 0.1155,
         "top1_changed": false,
         "top1_route_id": "R0005",
-        "candidates_reordered": 10,
+        "candidates_reordered": 11,
         "net_benefit_delta": 0.0,
         "move_cost_delta": 0.0,
         "shortage_covered_delta": 0.0,
@@ -607,7 +607,7 @@
       {
         "component": "route_cost_score",
         "label": "이동 부담",
-        "removed_weight": 0.0999,
+        "removed_weight": 0.1023,
         "top1_changed": false,
         "top1_route_id": "R0005",
         "candidates_reordered": 48,
@@ -619,7 +619,7 @@
       {
         "component": "feasibility_score",
         "label": "실행 여건",
-        "removed_weight": 0.1024,
+        "removed_weight": 0.1037,
         "top1_changed": false,
         "top1_route_id": "R0005",
         "candidates_reordered": 0,
@@ -631,7 +631,7 @@
       {
         "component": "demand_risk_score",
         "label": "수요 안정성",
-        "removed_weight": 0.0646,
+        "removed_weight": 0.0612,
         "top1_changed": false,
         "top1_route_id": "R0005",
         "candidates_reordered": 0,
@@ -643,10 +643,10 @@
       {
         "component": "post_move_risk_score",
         "label": "이동 후 위험",
-        "removed_weight": 0.0713,
+        "removed_weight": 0.0588,
         "top1_changed": false,
         "top1_route_id": "R0005",
-        "candidates_reordered": 4,
+        "candidates_reordered": 0,
         "net_benefit_delta": 0.0,
         "move_cost_delta": 0.0,
         "shortage_covered_delta": 0.0,
@@ -809,5 +809,102 @@
         "feasible": 1
       }
     ]
+  },
+  "inventory_floor": {
+    "fixture_basis": "익명 운영 데이터 복사본: 5행 주기 미입력 1행·명시 0 1행·나머지는 일평균 수요 2일분, 현재고 상한. 민감도 0.75/1.00/1.25배",
+    "comparison": {
+      "explicit": {
+        "status": "success",
+        "candidate_count": 62,
+        "recommendable": 58,
+        "average_move_qty": 55.45,
+        "total_move_qty": 3216.0,
+        "inventory_floor_violations": 0,
+        "net_benefit_total": 6138936.0,
+        "shortage_covered": 1974.0,
+        "top1_route_id": "R0005",
+        "stability": "안정",
+        "floor_source_distribution": {
+          "unavailable": 1,
+          "explicit_safety_stock": 53,
+          "estimated": 8
+        },
+        "seconds": 3.32
+      },
+      "estimated": {
+        "status": "success",
+        "candidate_count": 62,
+        "recommendable": 58,
+        "average_move_qty": 55.45,
+        "total_move_qty": 3216.0,
+        "inventory_floor_violations": 0,
+        "net_benefit_total": 6138936.0,
+        "shortage_covered": 1974.0,
+        "top1_route_id": "R0005",
+        "stability": "안정",
+        "floor_source_distribution": {
+          "unavailable": 1,
+          "estimated": 61
+        },
+        "seconds": 3.44
+      }
+    },
+    "sensitivity": {
+      "low": {
+        "status": "success",
+        "candidate_count": 62,
+        "recommendable": 58,
+        "average_move_qty": 55.45,
+        "total_move_qty": 3216.0,
+        "inventory_floor_violations": 0,
+        "net_benefit_total": 6138936.0,
+        "shortage_covered": 1974.0,
+        "top1_route_id": "R0005",
+        "stability": "안정",
+        "floor_source_distribution": {
+          "unavailable": 1,
+          "explicit_safety_stock": 53,
+          "estimated": 8
+        },
+        "seconds": 3.33
+      },
+      "base": {
+        "status": "success",
+        "candidate_count": 62,
+        "recommendable": 58,
+        "average_move_qty": 55.45,
+        "total_move_qty": 3216.0,
+        "inventory_floor_violations": 0,
+        "net_benefit_total": 6138936.0,
+        "shortage_covered": 1974.0,
+        "top1_route_id": "R0005",
+        "stability": "안정",
+        "floor_source_distribution": {
+          "unavailable": 1,
+          "explicit_safety_stock": 53,
+          "estimated": 8
+        },
+        "seconds": 3.32
+      },
+      "high": {
+        "status": "success",
+        "candidate_count": 62,
+        "recommendable": 54,
+        "average_move_qty": 55.74,
+        "total_move_qty": 3010.0,
+        "inventory_floor_violations": 0,
+        "net_benefit_total": 5831856.0,
+        "shortage_covered": 1817.0,
+        "top1_route_id": "R0005",
+        "stability": "안정",
+        "floor_source_distribution": {
+          "unavailable": 1,
+          "estimated": 8,
+          "explicit_safety_stock": 53
+        },
+        "seconds": 3.37
+      }
+    },
+    "explicit_violation_free": true
   }
 }

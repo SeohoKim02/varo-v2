@@ -1,7 +1,9 @@
 """Operational inventory-floor contract: explicit policy first, safe fallback second."""
 from __future__ import annotations
 
+import json
 import unittest
+from pathlib import Path
 
 import pandas as pd
 
@@ -279,6 +281,17 @@ class UiContractTests(unittest.TestCase):
             self.assertIn(text, blob)
         for hidden in ("explicit_safety_stock", "inventory_floor", "demand_std", "× 2"):
             self.assertNotIn(hidden, blob)
+
+
+class BenchmarkArtifactTests(unittest.TestCase):
+    def test_committed_benchmark_has_explicit_vs_estimated_and_zero_violations(self):
+        path = Path(__file__).resolve().parents[1] / "validation_data" / "varo_v2_algorithm_benchmark.json"
+        report = json.loads(path.read_text(encoding="utf-8"))
+        floor = report["inventory_floor"]
+        self.assertTrue(floor["explicit_violation_free"])
+        self.assertEqual(floor["comparison"]["explicit"]["inventory_floor_violations"], 0)
+        self.assertEqual(floor["comparison"]["estimated"]["inventory_floor_violations"], 0)
+        self.assertEqual(set(floor["sensitivity"]), {"low", "base", "high"})
 
 
 if __name__ == "__main__":

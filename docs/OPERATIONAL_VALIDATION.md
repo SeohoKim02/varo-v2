@@ -483,6 +483,19 @@ VHS 구성요소·정규화·hard constraint를 강화한 뒤 같은 파일로 �
 
 변경 사유와 근거는 [`docs/ALGORITHM_BENCHMARK.md`](ALGORITHM_BENCHMARK.md) §14에 있습니다.
 
+### 13-1. 운영 재고 하한 적용 재검증 (`vhs-2.2`)
+
+등록 안전재고·최소재고 우선 정책과 재고 하한 hard constraint를 연결한 뒤 같은 익명 운영 파일을
+`--repeats 3`으로 다시 실행했습니다.
+
+- 165개 검증 항목 전부 통과, 실패 0.
+- 후보 62건 중 최종 추천 58건. 이동 불가 4건은 순효과가 0 이하인 2건과 재고 하한을 침범하는 2건입니다.
+- 1순위 R0005(DIRECT), 권장 60개, 순효과 194,680원, VHS 84.81, 안정성 `안정`.
+- 중앙값: 읽기 0.282초, 검사 준비 0.842초, 적용 0.028초, 추천 분석 3.444초, 전체 4.719초.
+- 별도 명시 안전재고 fixture와 추정값 비교에서도 하한 침범 0건을 확인했습니다. 상세 수치는
+  [`docs/ALGORITHM_BENCHMARK.md`](ALGORITHM_BENCHMARK.md) §10과
+  `validation_data/varo_v2_algorithm_benchmark.json`에 있습니다.
+
 ## 14. 재현 명령
 
 ```bash

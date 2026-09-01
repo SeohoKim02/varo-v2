@@ -44,8 +44,22 @@ Varo 워크북은 시트를 **이름으로** 인식합니다(stores/products/inv
 - **필수:** `store_id`, `product_id`, `stock_qty`
 - **권장(없으면 경고/제한):** `sales_qty`, 유통기한 계열(`expiry_days`/`expiry_date`/`shelf_life_days`/`days_to_expiry`),
   `demand_qty` 또는 `avg_daily_sales`, `dead_stock_qty`, `demand_std`, `lead_time_days`
+- **운영 정책(모두 선택):** `safety_stock`, `min_stock`, `reorder_point`, `target_stock`.
+  이 컬럼이 없어도 기존 파일은 그대로 동작합니다.
 - `stock_qty`는 숫자·**음수 불가**.
-- 실행 가능성 판정에 `stock_qty`(이동 후 음수 방지), `demand_qty`/`avg_daily_sales`(도착 수요), `demand_std`(안전재고 추정)를 사용합니다.
+- 실행 가능성 판정에 `stock_qty`(이동 후 음수 방지), `safety_stock`/`min_stock`(출발 재고 하한),
+  `demand_qty`/`avg_daily_sales`(도착 수요), `demand_std`(명시 하한이 없을 때만 추정)를 사용합니다.
+
+| 의미 | 표준 컬럼 | 허용 별칭 예 | 이동 하한 사용 |
+|---|---|---|---|
+| 등록 안전재고 | `safety_stock` | `safety_inventory`, `안전재고` | 예 |
+| 최소 보유재고 | `min_stock` | `minimum_stock`, `minimum_inventory`, `min_inventory`, `stock_floor`, `safety_floor`, `최소재고`, `최소 보유량`, `최소 보유재고` | 예 |
+| 재주문 트리거 | `reorder_point` | `reorder_level`, `재주문점` | 아니요(참고값) |
+| 도착 목표 수준 | `target_stock` | `target_inventory`, `목표재고` | 아니요(도착 부족량에 사용) |
+
+`safety_stock`과 `min_stock`이 모두 있으면 둘을 같은 필드로 덮어쓰지 않습니다. 두 등록 하한을 모두
+지키기 위해 더 큰 값을 출발 하한으로 적용하고 출처는 결합 정책으로 기록합니다. `reorder_point`는 발주
+트리거일 수 있고 `target_stock`은 도착 후 원하는 수준이므로 안전재고로 치환하지 않습니다.
 
 ## routes (경로)
 
@@ -101,7 +115,7 @@ Varo 워크북은 시트를 **이름으로** 인식합니다(stores/products/inv
 - **중복 키**: 재고는 `store_id + product_id`, 경로는 `source_id + target_id (+ route_type/dc)`,
   추천은 `route_id`.
 - **완전히 동일한 중복 행**(`exact_duplicate`): 첫 원본 행만 유지하고 이후 관련 행을 제외합니다.
-- **값이 충돌하는 중복**(`conflict_duplicate`, 같은 키·다른 값): 임의로 합치거나 마지막 값을 쓰지 않고
+- **값이 충돌하는 중복**(`conflict_duplicate`, 같은 키·재고/운영 정책 값이 다름): 임의로 합치거나 마지막 값을 쓰지 않고
   관련 원본 행 번호를 모두 남기고 어느 값도 임의 선택하지 않으며 관련 행을 모두 제외합니다.
 - 날짜/시점 컬럼(예: `snapshot_date`)으로 구분되는 **정상 시계열 다중 행**은 중복으로 보지 않습니다.
 
@@ -119,6 +133,8 @@ Varo 워크북은 시트를 **이름으로** 인식합니다(stores/products/inv
 
 - `node_type` ∈ {DC, STORE}, `route_type` ∈ {DIRECT, VIA_DC} 외 값은 오류.
 - 숫자 컬럼의 문자열/NaN/inf/음수는 오류 또는 정리 대상으로 처리하고, 화면은 `-`/`데이터 없음`으로 표시.
+- 안전재고·최소재고·재주문점·목표재고는 0 이상의 숫자만 사용합니다. 빈 선택값은 미입력으로 처리하고,
+  잘못된 값이 있는 재고 행은 기존 문제행 제외 정책으로 분리합니다.
 - 선택 컬럼이 없으면 해당 VHS 구성요소에 **중립값 50**을 적용(좋은 값 위장 아님)하고, 분석이 제한될 수 있음을 안내.
 - 컬럼명 앞뒤 공백·별칭은 자동 정규화(`column_aliases.py`).
 
@@ -152,3 +168,4 @@ DQN 학습 샘플 팩(`Varo_DQN_training_samples_10pack`)은 이 저장소에 �
 - `routes.source_id`가 `stores.node_id`에 없음 → 오류(존재하지 않는 점포/DC).
 - 출발지=도착지 추천 → 실행 불가능(제외).
 - 이동 수량 > 출발 점포 재고 → 이동 후 음수, 실행 불가능(제외).
+- 이동 후 출발 재고 < 적용 재고 하한 → 실행 불가능(제외). 정확히 하한과 같으면 허용.

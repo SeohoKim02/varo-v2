@@ -40,7 +40,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from services.analysis_pipeline import run_analysis_pipeline, sort_recommendations  # noqa: E402
 from services.decision_metrics import ALGORITHM_VERSION  # noqa: E402
-from services.feasibility import annotate_feasibility  # noqa: E402
+from services.feasibility import annotate_feasibility, build_inventory_context  # noqa: E402
 from services.file_reader import read_uploaded_data  # noqa: E402
 from services.greedy_baseline import compare_to_vhs, greedy_ranking  # noqa: E402
 from services.partial_data import build_usable_data  # noqa: E402
@@ -234,6 +234,112 @@ def run_scenarios(usable: Mapping[str, Any]) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# Operational inventory-floor comparison — explicit policy vs safe estimate
+# --------------------------------------------------------------------------- #
+def _explicit_floor_fixture(data: Mapping[str, Any], factor: float = 1.0) -> dict[str, Any]:
+    """Add a deterministic registered-policy fixture without touching the workbook.
+
+    The rule is deliberately uniform and published: rows are sorted by their
+    existing order; every fifth row is left blank (fallback coverage), the next is
+    an explicit zero, and the others use two days of measured average demand.  A
+    scenario factor only changes the copied fixture and is capped at current stock.
+    It is validation data, not a claim about a real customer's private policy.
+    """
+    result = _copy(data)
+    inventory = result["inventory"].reset_index(drop=True).copy()
+    stock_source = inventory["stock_qty"] if "stock_qty" in inventory.columns else pd.Series(float("nan"), index=inventory.index)
+    daily_source = inventory["avg_daily_sales"] if "avg_daily_sales" in inventory.columns else pd.Series(float("nan"), index=inventory.index)
+    stock = pd.to_numeric(stock_source, errors="coerce")
+    daily = pd.to_numeric(daily_source, errors="coerce")
+    if daily.isna().all():
+        fallback = inventory["sales_qty"] if "sales_qty" in inventory.columns else pd.Series(float("nan"), index=inventory.index)
+        daily = pd.to_numeric(fallback, errors="coerce")
+    values: list[float | None] = []
+    for position in range(len(inventory)):
+        current = _num(stock.iloc[position])
+        measured = _num(daily.iloc[position])
+        if position % 5 == 0:
+            values.append(None)
+        elif position % 5 == 1:
+            values.append(0.0)
+        elif current is None or measured is None:
+            values.append(None)
+        else:
+            values.append(round(min(current, max(0.0, measured * 2.0 * factor)), 2))
+    inventory["safety_stock"] = values
+    result["inventory"] = inventory
+    return result
+
+
+def _inventory_floor_metrics(data: Mapping[str, Any]) -> dict[str, Any]:
+    start = time.perf_counter()
+    result = run_analysis_pipeline(dict(data))
+    recommendations = list(result.recommendations)
+    context = build_inventory_context(data)
+    violations = 0
+    moved: list[float] = []
+    shortage_covered = 0.0
+    for row in recommendations:
+        quantity = _num(row.get("recommended_qty"))
+        stock = context.source_stock(row.get("source_id"), row.get("product_id"))
+        floor = context.safety_floor(row.get("source_id"), row.get("product_id"))
+        if quantity is not None:
+            moved.append(quantity)
+            need = _num(row.get("target_shortfall"))
+            if need is not None:
+                shortage_covered += min(quantity, max(0.0, need))
+        if quantity is not None and stock is not None and floor is not None and stock - quantity < floor - 1e-9:
+            violations += 1
+    ordered = sort_recommendations(recommendations)
+    sources: dict[str, int] = {}
+    for record in result.candidate_ledger:
+        source = str((record.get("quantity_basis") or {}).get("inventory_floor_source") or "unavailable")
+        sources[source] = sources.get(source, 0) + 1
+    benefits = [_num(row.get("net_benefit")) for row in recommendations]
+    usable_benefits = [value for value in benefits if value is not None]
+    return {
+        "status": result.status,
+        "candidate_count": len(result.candidate_ledger),
+        "recommendable": len(recommendations),
+        "average_move_qty": round(sum(moved) / len(moved), 2) if moved else None,
+        "total_move_qty": round(sum(moved), 2),
+        "inventory_floor_violations": violations,
+        "net_benefit_total": round(sum(usable_benefits), 2) if usable_benefits else None,
+        "shortage_covered": round(shortage_covered, 2),
+        "top1_route_id": ordered[0].get("route_id") if ordered else None,
+        "stability": (result.stability_analysis_status or {}).get("status"),
+        "floor_source_distribution": sources,
+        "seconds": round(time.perf_counter() - start, 2),
+    }
+
+
+def run_inventory_floor_benchmark(usable: Mapping[str, Any]) -> dict[str, Any]:
+    estimated = _copy(usable)
+    estimated["inventory"] = estimated["inventory"].drop(
+        columns=("safety_stock", "min_stock"), errors="ignore",
+    )
+    explicit_base = _explicit_floor_fixture(usable, 1.0)
+    comparison = {
+        "explicit": _inventory_floor_metrics(explicit_base),
+        "estimated": _inventory_floor_metrics(estimated),
+    }
+    sensitivity = {
+        "low": _inventory_floor_metrics(_explicit_floor_fixture(usable, 0.75)),
+        "base": comparison["explicit"],
+        "high": _inventory_floor_metrics(_explicit_floor_fixture(usable, 1.25)),
+    }
+    return {
+        "fixture_basis": (
+            "익명 운영 데이터 복사본: 5행 주기 미입력 1행·명시 0 1행·나머지는 "
+            "일평균 수요 2일분, 현재고 상한. 민감도 0.75/1.00/1.25배"
+        ),
+        "comparison": comparison,
+        "sensitivity": sensitivity,
+        "explicit_violation_free": comparison["explicit"]["inventory_floor_violations"] == 0,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Ablation — one component switched off, everything else identical
 # --------------------------------------------------------------------------- #
 def _selection_metrics(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
@@ -402,6 +508,7 @@ def run(output_dir: Path, regenerate: bool) -> tuple[int, dict[str, Any]]:
     base_result = run_analysis_pipeline(usable)
     ablation = run_ablation(base_result.recommendations, base_result.vhs_analysis.get("weights") or {})
     stress = run_stress()
+    inventory_floor = run_inventory_floor_benchmark(usable)
 
     report_data = {
         "algorithm_version": ALGORITHM_VERSION,
@@ -411,12 +518,14 @@ def run(output_dir: Path, regenerate: bool) -> tuple[int, dict[str, Any]]:
         "scenarios": scenarios,
         "ablation": ablation,
         "stress": stress,
+        "inventory_floor": inventory_floor,
     }
     (output_dir / REPORT_NAME).write_text(
         json.dumps(report_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
     )
     failed = bool(stress["failures"]) or bool(stress["non_deterministic"]) or bool(stress["nan_producing"])
     failed = failed or any(item["status"] not in ("success", "partial") for item in scenarios.values())
+    failed = failed or not inventory_floor["explicit_violation_free"]
     return (1 if failed else 0), report_data
 
 
@@ -448,6 +557,14 @@ def main() -> int:
     stress = report["stress"]
     print(f"\n[Stress] {stress['cases']}개 케이스 · 실패 {len(stress['failures'])} · "
           f"비결정 {len(stress['non_deterministic'])} · NaN {len(stress['nan_producing'])}")
+    floor = report["inventory_floor"]
+    print("\n[운영 재고 하한 · 명시값 vs 추정값]")
+    for key, item in floor["comparison"].items():
+        print(
+            f"  {key:10s} 후보 {item['candidate_count']:3d} → 추천 {item['recommendable']:3d} "
+            f"| 총 이동 {item['total_move_qty']:,.0f} | 하한 침범 {item['inventory_floor_violations']} "
+            f"| {item['seconds']:.1f}s"
+        )
     print(f"\n보고서: {args.output_dir / REPORT_NAME}")
     return code
 

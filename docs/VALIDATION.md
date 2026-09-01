@@ -47,6 +47,8 @@ python -m compileall -q app_v2.py router.py styles.py components services pages 
 
 - 필수 식별자 공백(`missing_id`), 비수치(`non_numeric`), 음수(`negative`), 이동 수량 0(`zero_quantity`),
   출발지=도착지(`same_source_target`) → **오류 · 분석 차단**.
+- 안전재고·최소재고·재주문점·목표재고가 있으면 숫자 변환 가능·유한값·0 이상인지 같은 체계로 확인합니다.
+  문제 목록에는 원본 행·원본 컬럼·입력값과 “0 이상의 숫자로 수정하세요.”를 표시합니다.
 - 값 충돌 중복(`conflict_duplicate`)과 완전 동일 중복(`exact_duplicate`)은 행 제외 대상으로 기록합니다.
 - 컬럼 별칭 충돌(`alias_conflict`)은 어떤 원본 컬럼이 맞는지 결정할 수 없어 **파일 구조 차단 오류**입니다.
 - 식별자 숫자화(`id_numeric`, 앞자리 0 손실 가능)는 행을 유지하는 경고입니다.
@@ -56,6 +58,8 @@ python -m compileall -q app_v2.py router.py styles.py components services pages 
   모두 표시하고, 임의로 하나를 고르지 않습니다.
 - **중복**: 관련된 모든 원본 행 번호(`related_rows`)를 기록합니다. 값 충돌 중복은 관련 행을 모두 제외하고,
   완전히 같은 중복은 첫 행만 유지합니다. 날짜/시점 컬럼으로 구분되는 정상 시계열 다중 행은 유지합니다.
+- 같은 점포×상품의 재고가 같아도 등록 안전재고/최소재고/재주문점/목표재고가 다르면 값 충돌 중복으로
+  처리합니다. 어느 운영 정책도 임의로 선택하지 않습니다.
 
 ## 심각도와 처리 정책 분리
 
@@ -221,7 +225,11 @@ python -m compileall -q app_v2.py router.py styles.py components services pages 
 ## 알고리즘 검증 방식
 
 - **실행 가능성 게이트** (`tests/test_feasibility.py`): 출발지=도착지, 이동 수량 ≤0/NaN/inf,
-  경로 없음, VIA_DC DC 없음, 재고 초과, 중복 등 하드 블록과 소프트 플래그, 정상 후보를 각각 검증.
+  경로 없음, VIA_DC DC 없음, 재고 초과, 운영 재고 하한 침범, 중복 등 하드 블록과 소프트 플래그,
+  정상 후보를 각각 검증.
+- **운영 재고 정책** (`tests/test_inventory_policy.py`): 영문/한글 alias, 명시값 우선과 추정 fallback,
+  명시 0/미입력 구분, 음수·inf·문자열·충돌 제외, 점포×상품 연결, 경계 수량, 목표재고 역할,
+  provenance와 사용자 문구 비노출 계약을 검증합니다.
 - **후보 판단 기록** (`tests/test_candidate_ledger.py`): 후보 식별자 안정성/분리, 원본 행 계보,
   제외 이유, 이동 수량 근거, 추천 이유, 화면 일관성(버킷 합·feasibility 일치), 상태 예외, 검토 CSV 안전성.
 - **홈 상태 모델** (`tests/test_home_state.py`): 상태 판정(데이터 없음/사용 불가/후보 0건/실패/stale/정상),
@@ -290,6 +298,7 @@ python -m pytest tests/test_operational_validation.py tests/test_operational_ui_
 ```bash
 python tools/generate_anonymized_operational_workbook.py   # 고정 seed로 워크북 + 기대값 manifest
 python tools/run_operational_validation.py --repeats 3     # 실제 서비스로 end-to-end 검증
+python tools/run_algorithm_benchmark.py                    # 명시 재고 하한 vs 추정 하한 비교 포함
 ```
 
 기대값은 앱 코드나 화면이 아니라 `validation_data/*_manifest.json`으로만 관리합니다.

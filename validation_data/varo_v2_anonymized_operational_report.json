@@ -15,65 +15,65 @@
     "total_source_rows": 2742
   },
   "single_run_seconds": {
-    "prepare_seconds": 0.796,
-    "commit_seconds": 0.033,
-    "analysis_seconds": 4.754
+    "prepare_seconds": 0.766,
+    "commit_seconds": 0.029,
+    "analysis_seconds": 4.3
   },
   "performance": {
     "read": {
-      "first": 0.32,
-      "median": 0.372,
-      "min": 0.32,
-      "max": 0.489,
+      "first": 0.282,
+      "median": 0.282,
+      "min": 0.282,
+      "max": 0.417,
       "runs": 3
     },
     "prepare": {
-      "first": 0.973,
-      "median": 0.973,
-      "min": 0.827,
-      "max": 1.011,
+      "first": 0.842,
+      "median": 0.842,
+      "min": 0.84,
+      "max": 0.856,
       "runs": 3
     },
     "commit": {
-      "first": 0.029,
-      "median": 0.031,
-      "min": 0.029,
-      "max": 0.034,
+      "first": 0.028,
+      "median": 0.028,
+      "min": 0.028,
+      "max": 0.029,
       "runs": 3
     },
     "analysis": {
-      "first": 4.131,
-      "median": 4.046,
-      "min": 3.942,
-      "max": 4.131,
+      "first": 3.577,
+      "median": 3.444,
+      "min": 3.415,
+      "max": 3.577,
       "runs": 3
     },
     "total": {
-      "first": 5.453,
-      "median": 5.399,
-      "min": 5.359,
-      "max": 5.453,
+      "first": 4.73,
+      "median": 4.719,
+      "min": 4.597,
+      "max": 4.73,
       "runs": 3
     }
   },
   "stage_breakdown": {
     "파일 읽기+정규화": {
-      "first": 0.326,
-      "median": 0.326,
-      "min": 0.325,
-      "max": 0.486
+      "first": 0.283,
+      "median": 0.283,
+      "min": 0.283,
+      "max": 0.417
     },
     "정규화": {
-      "first": 0.023,
-      "median": 0.025,
-      "min": 0.023,
-      "max": 0.025
+      "first": 0.02,
+      "median": 0.02,
+      "min": 0.02,
+      "max": 0.021
     },
     "검증·문제 분류": {
-      "first": 0.353,
-      "median": 0.353,
-      "min": 0.232,
-      "max": 0.366
+      "first": 0.325,
+      "median": 0.317,
+      "min": 0.19,
+      "max": 0.325
     },
     "제외 대상 계산": {
       "first": 0.0,
@@ -82,36 +82,36 @@
       "max": 0.0
     },
     "참조 정리+usable data 생성(재검증 포함)": {
-      "first": 0.506,
-      "median": 0.506,
-      "min": 0.501,
-      "max": 0.66
+      "first": 0.429,
+      "median": 0.429,
+      "min": 0.426,
+      "max": 0.567
     },
     "제외 후 재검증": {
       "first": 0.017,
-      "median": 0.016,
-      "min": 0.015,
+      "median": 0.017,
+      "min": 0.016,
       "max": 0.017
     },
     "적용 데이터 서명": {
-      "first": 0.014,
-      "median": 0.014,
-      "min": 0.014,
-      "max": 0.015
+      "first": 0.011,
+      "median": 0.012,
+      "min": 0.011,
+      "max": 0.012
     },
     "pending 저장(전체 검사)": {
-      "first": 0.969,
-      "median": 0.969,
-      "min": 0.834,
-      "max": 0.972
+      "first": 0.854,
+      "median": 0.838,
+      "min": 0.717,
+      "max": 0.854
     }
   },
   "ui": {
     "rendered_markdown_chars": {
       "운영 현황": 53484,
-      "추천 실행": 33002,
+      "추천 실행": 32987,
       "경로 상세": 22792,
-      "분석 및 검증": 32191,
+      "분석 및 검증": 32228,
       "데이터 관리": 21958
     }
   },
@@ -136,11 +136,11 @@
       },
       "top_exclusion_reasons": [
         {
-          "reason": "출발 점포 재고보다 이동 수량이 많습니다.",
+          "reason": "이동 비용이 예상 효과보다 크거나 같습니다.",
           "count": 2
         },
         {
-          "reason": "이동 비용이 예상 효과보다 크거나 같습니다.",
+          "reason": "이동 후 재고가 남겨야 할 재고보다 적습니다.",
           "count": 2
         }
       ]
@@ -158,7 +158,7 @@
       },
       "blocked_reasons": [
         "이동 비용이 예상 효과보다 크거나 같습니다.",
-        "출발 점포 재고보다 이동 수량이 많습니다."
+        "이동 후 재고가 남겨야 할 재고보다 적습니다."
       ],
       "all_feasible": false
     }
@@ -397,8 +397,8 @@
         "actual": {
           "routes": 82,
           "inventory": 30,
-          "recommendations": 6,
-          "stores": 1
+          "stores": 1,
+          "recommendations": 6
         },
         "expected": {
           "inventory": 30,
@@ -1091,8 +1091,8 @@
       "check": "홈·경로 상세 vhs_score 동일",
       "ok": true,
       "detail": {
-        "actual": 87.81,
-        "expected": 87.81
+        "actual": 84.81,
+        "expected": 84.81
       }
     },
     {
@@ -1420,10 +1420,10 @@
       "check": "전체 흐름이 합리적인 시간 안에 완료",
       "ok": true,
       "detail": {
-        "first": 5.453,
-        "median": 5.399,
-        "min": 5.359,
-        "max": 5.453,
+        "first": 4.73,
+        "median": 4.719,
+        "min": 4.597,
+        "max": 4.73,
         "runs": 3
       }
     }

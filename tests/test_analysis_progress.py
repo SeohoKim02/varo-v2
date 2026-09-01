@@ -345,7 +345,10 @@ class ResultRegressionTests(unittest.TestCase):
         "recommended_qty": 60.0,
         "estimated_cost": 8500.0,
         "expected_saving": 203180.0,
-        "vhs_score": 87.81,
+        # vhs-2.2 removes inventory-floor violations before VHS normalization;
+        # the winner and every operational value stay unchanged, while its score
+        # is recomputed against the executable candidate population only.
+        "vhs_score": 84.81,
         "confidence": 66.0,
     }
     BASELINE_COUNTS = {
