@@ -114,9 +114,11 @@ def render_recommendation_summary(st, recommendation: Optional[Mapping[str, obje
         render_empty_state(st, "선택한 추천 후보가 없습니다", compact=True)
         return
     review_route = "DC 경유" if recommendation.get("route_type") == "VIA_DC" else "직접 이동"
+    planned = recommendation.get("planned_qty")
     rows = [
         ("검토 경로", review_route),
-        ("추천 수량", format_number(recommendation.get("recommended_qty"), "개")),
+        ("실행 수량" if planned is not None else "추천 수량",
+         format_number(planned if planned is not None else recommendation.get("recommended_qty"), "개")),
         ("예상 순효과", format_currency(recommendation.get("net_benefit"))),
         ("추천 안정성", recommendation.get("robustness_status") or "-"),
     ]

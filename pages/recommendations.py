@@ -21,6 +21,7 @@ from services import export_service, upload_quality, v2_summaries
 from services.analysis_pipeline import find_recommendation, sort_recommendations
 from services.app_state import has_app_data, has_applied_data, resolve_selected_route_id
 from services.data_application import run_applied_analysis
+from services.execution_plan import planned_recommendations
 from services.vhs_score_engine import build_strategy_detail
 
 
@@ -48,6 +49,9 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def _all_recommendations() -> list[dict]:
+    pipeline = _pipeline_result()
+    if "execution_plan" in pipeline:
+        return planned_recommendations(pipeline)
     return sort_recommendations(st.session_state.get("varo_recommendations") or [])
 
 
@@ -117,23 +121,21 @@ def _pipeline_result() -> dict:
 
 
 def _render_decision_summary() -> None:
-    """One compact line: recommendation confidence + feasibility counts (no formulas)."""
+    """One action-focused line; formulas and solver details stay internal."""
     pipeline = _pipeline_result()
-    confidence = pipeline.get("confidence_status") or {}
-    feasibility = pipeline.get("feasibility_summary") or {}
-    conf_status = confidence.get("status") or "계산 불가"
+    plan = pipeline.get("execution_plan") or {}
     cols = st.columns(4, gap="small")
-    cols[0].metric("추천 신뢰도", conf_status)
-    cols[1].metric("실행 가능", feasibility.get("ok_count", 0))
-    cols[2].metric("데이터 확인 필요", feasibility.get("check_count", 0))
-    cols[3].metric("이동 불가(제외)", feasibility.get("blocked_count", 0))
-    reasons = confidence.get("reasons") or []
-    if reasons:
-        st.caption(reasons[0])
+    cols[0].metric("실행할 이동", format_number(plan.get("selected_candidates"), "건"))
+    cols[1].metric("총 이동 수량", format_number(plan.get("total_transfer_qty"), "개"))
+    cols[2].metric("예상 순효과", format_currency(plan.get("total_net_benefit")))
+    attention = int(plan.get("adjusted_candidates") or 0) + len(plan.get("unselected_candidates") or [])
+    cols[3].metric("주의 필요", format_number(attention, "건"))
+    if plan.get("user_message"):
+        st.caption(str(plan.get("user_message")))
 
 
 def _render_best_recommendation(recommendation: dict) -> None:
-    render_section_header(st, "1순위 추천", "")
+    render_section_header(st, "최우선 이동", "")
     st.markdown(
         f"""
         <div class="v2-wrap v2-card">
@@ -146,7 +148,8 @@ def _render_best_recommendation(recommendation: dict) -> None:
         unsafe_allow_html=True,
     )
     cols = st.columns(4, gap="small")
-    cols[0].metric("추천 수량", format_number(recommendation.get("recommended_qty"), "개"))
+    planned_qty = recommendation.get("planned_qty")
+    cols[0].metric("실행 수량", format_number(planned_qty if planned_qty is not None else recommendation.get("recommended_qty"), "개"))
     cols[1].metric("예상 순효과", format_currency(recommendation.get("net_benefit")))
     cols[2].metric("추천 안정성", str(recommendation.get("robustness_status") or "-"))
     cols[3].metric("추천 신뢰도", str(recommendation.get("confidence_level") or "-"))
@@ -158,6 +161,8 @@ def _render_best_recommendation(recommendation: dict) -> None:
         ("추천 등급", recommendation.get("recommendation_grade") or "-"),
     )
     st.caption(f"실행 상태: {recommendation.get('feasibility_status') or '추천 가능'}")
+    if recommendation.get("quantity_adjusted"):
+        st.caption(str(recommendation.get("selection_reason") or "다른 추천과 재고를 함께 배분해 실행 수량을 조정했습니다."))
     info_html = "".join(
         f'<div class="v2-info-item"><span class="v2-card-caption">{html.escape(label)}</span><strong>{html.escape(str(value))}</strong></div>'
         for label, value in info_items
@@ -196,24 +201,51 @@ def _render_selection(filtered: list[dict]) -> dict | None:
 
 
 def _render_downloads(filtered: list[dict]) -> None:
+    export_rows = [
+        {**row, "recommended_qty": row.get("planned_qty") if row.get("planned_qty") is not None else row.get("recommended_qty")}
+        for row in filtered
+    ]
     cols = st.columns([1, 1, 2.2], gap="small")
+    csv_label = "현재 추천 CSV"
+    excel_label = "현재 추천 Excel"
     cols[0].download_button(
-        "현재 추천 CSV",
-        data=export_service.recommendations_csv_bytes(filtered),
-        file_name="varo_v2_추천결과.csv",
+        csv_label,
+        data=export_service.recommendations_csv_bytes(export_rows),
+        file_name="varo_v2_실행계획.csv",
         mime="text/csv",
         width="stretch",
         key="dl_rec_page_csv",
     )
     cols[1].download_button(
-        "현재 추천 Excel",
-        data=export_service.recommendations_excel_bytes(filtered),
-        file_name="varo_v2_추천결과.xlsx",
+        excel_label,
+        data=export_service.recommendations_excel_bytes(export_rows),
+        file_name="varo_v2_실행계획.xlsx",
         mime=XLSX_MIME,
         width="stretch",
         key="dl_rec_page_xlsx",
     )
-    cols[2].caption("현재 필터가 적용된 추천 결과를 내려받습니다.")
+    cols[2].caption("현재 필터가 적용된 실제 실행 수량을 내려받습니다.")
+
+
+def _render_plan_exclusions(pipeline: dict) -> None:
+    plan = pipeline.get("execution_plan") or {}
+    rows = []
+    candidates = {
+        str(item.get("route_id")): item
+        for item in (st.session_state.get("varo_recommendations") or [])
+    }
+    for entry in plan.get("unselected_candidates") or []:
+        candidate = candidates.get(str(entry.get("route_id"))) or {}
+        rows.append({
+            "상품": candidate.get("product_name") or "-",
+            "출발": candidate.get("source_name") or candidate.get("source_id") or "-",
+            "도착": candidate.get("target_name") or candidate.get("target_id") or "-",
+            "경로": "DC 경유" if candidate.get("route_type") == "VIA_DC" else "직접 이동",
+            "제외 이유": entry.get("reason") or "전체 이동계획에서 다른 이동을 우선했습니다.",
+        })
+    if rows:
+        with st.expander(f"실행계획에 포함되지 않은 후보 ({len(rows)}건)", expanded=False):
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
 def _has_applied_stores(data: object) -> bool:
@@ -228,7 +260,7 @@ def render_recommendations_page() -> None:
     data = st.session_state.get("varo_data")
     recommendations = _all_recommendations()
     data_available = has_app_data(data, recommendations)
-    render_page_header(st, "추천 실행", "재고 이동 후보를 비교하고 실행 우선순위를 확인합니다.")
+    render_page_header(st, "오늘 권장 이동", "서로 충돌하지 않는 실제 실행 수량과 순서를 확인합니다.")
     # Shown once, on the first render after a successful run, then dropped so it
     # cannot pile up across reruns.
     if st.session_state.pop("analysis_completed_notice", None):
@@ -261,7 +293,9 @@ def render_recommendations_page() -> None:
         if _has_applied_stores(data) and (pipeline.get("candidate_ledger") or []):
             summary = pipeline.get("ledger_summary") or {}
             generated = int(summary.get("generated") or 0)
-            st.warning(f"현재 조건에서 추천 가능한 이동이 없습니다. 생성된 후보 {generated}건의 제외 이유를 확인하세요.")
+            plan = pipeline.get("execution_plan") or {}
+            st.warning(str(plan.get("user_message") or f"현재 조건에서 추천 가능한 이동이 없습니다. 생성된 후보 {generated}건의 제외 이유를 확인하세요."))
+            _render_plan_exclusions(pipeline)
             render_excluded_candidates(st, pipeline)
         else:
             render_empty_state(st, "분석 결과가 없습니다. 데이터 관리에서 엑셀 파일을 업로드하고 분석을 실행해주세요.")
@@ -280,7 +314,7 @@ def render_recommendations_page() -> None:
 
     _render_decision_summary()
     _render_best_recommendation(filtered[0])
-    render_section_header(st, "추천 후보", "")
+    render_section_header(st, "오늘 실행할 이동 · 추천 후보", "")
     render_capped_table(
         build_recommendation_rows(
             filtered, include_route_id=False, include_status=False,
@@ -294,6 +328,17 @@ def render_recommendations_page() -> None:
             st.dataframe(pd.DataFrame(comparison), hide_index=True, width="stretch")
         st.caption("넓은 표는 가로로 스크롤하세요.")
     _render_downloads(filtered)
+
+    with st.expander("전체 추천 후보 분석", expanded=False):
+        candidate_rows = build_recommendation_rows(
+            st.session_state.get("varo_recommendations") or [],
+            include_route_id=False, include_status=False, include_vhs=True,
+            include_grade=True, include_feasibility=True,
+        )
+        if candidate_rows:
+            st.dataframe(pd.DataFrame(candidate_rows), hide_index=True, width="stretch")
+
+    _render_plan_exclusions(_pipeline_result())
 
     render_excluded_candidates(st, _pipeline_result())
 
@@ -310,6 +355,11 @@ def render_recommendations_page() -> None:
     for line in sentences[:3]:
         st.markdown(f"- {line}")
     render_quantity_basis(st, record)
+    if (selected or {}).get("quantity_adjusted"):
+        st.caption(
+            f"후보 권장 {(selected or {}).get('recommended_qty'):,.0f}개 중 실제 실행 수량은 "
+            f"{(selected or {}).get('planned_qty'):,.0f}개입니다."
+        )
     render_source_locations(st, record)
 
     with st.expander("기술 정보", expanded=False):

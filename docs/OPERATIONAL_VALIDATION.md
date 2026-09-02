@@ -526,3 +526,32 @@ python -m streamlit run app_v2.py --server.headless true --server.port 8501
 - `validation_data/varo_v2_anonymized_operational.xlsx` — 익명화 검증 워크북
 - `validation_data/varo_v2_anonymized_operational_manifest.json` — 기대값(코드·화면에 하드코딩하지 않음)
 - `validation_data/varo_v2_anonymized_operational_report.json` — 실행 결과와 측정값 전체
+
+## 15. 전체 재배치 실행계획 운영 검증
+
+후보별 권장량을 그대로 합산하지 않고 출발 점포×상품의 이동 가능량과 도착 점포×상품의 실제 필요량을
+공유 제약으로 계산했습니다. 같은 상품·출발·도착의 DIRECT/VIA_DC/DC 대안은 한 경로만 선택합니다.
+계획 생성 뒤 별도 검증기가 원본 데이터에서 제약을 다시 계산하며, 실패 시에는 같은 제약을 지키는
+결정적 Greedy로 재계산합니다.
+
+2,742행 익명 운영 데이터 결과:
+
+- 후보 58건 중 실행 이동 56건, 총 2,985개
+- 이동 비용 812,747원, 예상 절감 6,541,465원, 예상 순효과 5,728,719원
+- 안전재고 침범 0건, 도착 필요량 초과 0건, 중복 계획 0건
+- 검증 상태 정상, fallback 미사용
+- 후보별 독립 추천을 합산하면 안전재고 충돌 2건과 도착 초과 5건이 발생함
+- constrained Greedy와 VHS 기반 전체계획은 이 스냅샷에서 같은 안전 계획을 선택함
+
+규모별 전체 분석은 852행 2.322초, 2,742행 3.573초, 7,397행 7.771초, 14,332행
+13.915초였습니다. 계획 계산 자체는 각 0.013~0.036초, 계획 검증은 0.016~0.238초였습니다.
+
+운영 검증은 홈·추천 실행·경로 상세가 동일한 `plan_id`와 `planned_qty`를 읽는지, 데이터 관리의
+후보 장부는 기존 전체 후보를 유지하는지, DQN이 자동 실행되지 않는지도 함께 확인합니다.
+
+재현 명령:
+
+```bash
+python tools/run_operational_validation.py --repeats 1
+python tools/run_execution_plan_benchmark.py
+```

@@ -115,6 +115,10 @@ class InventoryContext:
     floor_sources: dict[tuple[str, str], str] = field(default_factory=dict)
     target_levels: dict[tuple[str, str], float] = field(default_factory=dict)
     reorder_levels: dict[tuple[str, str], float] = field(default_factory=dict)
+    # The candidate generator's established no-target-stock rule: the gap to
+    # the product median plus seven days of observed demand.  Kept separate
+    # from ``demand`` so existing candidate scoring semantics do not change.
+    planning_shortfalls: dict[tuple[str, str], float] = field(default_factory=dict)
 
     def source_stock(self, store: Any, product: Any) -> float | None:
         return self.stock.get(_key(store, product))
@@ -142,6 +146,15 @@ class InventoryContext:
     def reorder_point(self, store: Any, product: Any) -> float | None:
         """Operational reorder trigger retained for diagnostics, never a move floor."""
         return self.reorder_levels.get(_key(store, product))
+
+    def planning_shortfall(self, store: Any, product: Any) -> float | None:
+        """Destination cap used by the existing candidate-generation policy."""
+        key = _key(store, product)
+        goal = self.target_levels.get(key)
+        stock = self.stock.get(key)
+        if goal is not None and stock is not None:
+            return max(0.0, goal - stock)
+        return self.planning_shortfalls.get(key)
 
     def demand_std(self, store: Any, product: Any) -> float | None:
         """Measured demand standard deviation, or ``None`` when the file has none."""
@@ -231,7 +244,31 @@ def build_inventory_context(data: Mapping[str, Any] | None) -> InventoryContext:
 
     target = {key: max(values) for key, values in target_levels.items() if values}
     reorder = {key: max(values) for key, values in reorder_levels.items() if values}
-    return InventoryContext(stock, demand, safety, known, dispersion, floor_sources, target, reorder)
+    # Match ``candidate_generator.generate_candidate_recommendations`` exactly
+    # when no explicit target_stock exists.  That service uses product median
+    # stock plus seven days of the first available daily-demand column.
+    planning_shortfalls: dict[tuple[str, str], float] = {}
+    planning_demand_col = next(
+        (column for column in ("avg_daily_sales", "sales_qty", "demand_qty") if column in inventory.columns),
+        None,
+    )
+    planning_rows: list[tuple[str, str, float, float]] = []
+    for _, row in inventory.iterrows():
+        store = str(row.get(store_col))
+        product = str(row.get(product_col))
+        stock_value = _num(row.get(stock_col)) if stock_col is not None else None
+        demand_value = _num(row.get(planning_demand_col)) if planning_demand_col is not None else 0.0
+        if stock_value is not None:
+            planning_rows.append((store, product, stock_value, demand_value or 0.0))
+    if planning_rows:
+        planning_frame = pd.DataFrame(planning_rows, columns=["store", "product", "stock", "demand"])
+        medians = planning_frame.groupby("product")["stock"].median().to_dict()
+        for row in planning_frame.itertuples(index=False):
+            key = _key(row.store, row.product)
+            planning_shortfalls[key] = max(0.0, float(medians[row.product]) - float(row.stock)) + max(0.0, float(row.demand)) * 7.0
+    return InventoryContext(
+        stock, demand, safety, known, dispersion, floor_sources, target, reorder, planning_shortfalls,
+    )
 
 
 def evaluate_feasibility(rec: Mapping[str, Any], context: InventoryContext | None = None) -> FeasibilityResult:
@@ -329,8 +366,10 @@ def annotate_feasibility(
 ) -> dict[str, Any]:
     """Attach feasibility status/reason to every candidate and split feasible/blocked.
 
-    Duplicate (product, source, target) candidates keep the first occurrence; the
-    later duplicates are blocked with a clear reason. Returns a dict with:
+    Exact duplicate route alternatives keep the first occurrence; DIRECT,
+    VIA_DC, and different DC choices for the same movement remain separate so
+    the execution-plan stage can choose one using their real values. Returns a
+    dict with:
 
     * ``annotated``  — every rec with feasibility_* fields (order preserved)
     * ``feasible``   — recs whose status is not 이동 불가 (used as the final set)
@@ -341,12 +380,18 @@ def annotate_feasibility(
     annotated: list[dict[str, Any]] = []
     feasible: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str, str]] = set()
     counts = {STATUS_OK: 0, STATUS_CHECK: 0, STATUS_BLOCKED: 0}
 
     for rec in recommendations or []:
         item = dict(rec)
-        dup_key = (str(rec.get("product_id")), str(rec.get("source_id")), str(rec.get("target_id")))
+        dup_key = (
+            str(rec.get("product_id")),
+            str(rec.get("source_id")),
+            str(rec.get("target_id")),
+            str(rec.get("route_type") or "").upper(),
+            str(rec.get("dc_id") or "-"),
+        )
         if dup_key in seen:
             result = FeasibilityResult(STATUS_BLOCKED, "동일 추천이 중복되었습니다.", "duplicate")
         else:

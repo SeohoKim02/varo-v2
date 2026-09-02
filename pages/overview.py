@@ -13,6 +13,7 @@ from components.status import badge_html, route_type_badge
 from components.tables import build_home_top_rows, format_currency, format_number, render_recommendation_table
 from services.analysis_pipeline import calculate_overview_kpis, sort_recommendations, top_recommendations
 from services.app_state import resolve_selected_route_id
+from services.execution_plan import planned_recommendations
 from services.home_state import READY, build_home_state
 from simulation.dynamic_network import (
     build_network_nodes,
@@ -36,6 +37,19 @@ def _safe(value) -> str:
 
 
 def _recommendations() -> list[dict]:
+    pipeline = st.session_state.get("analysis_result") or st.session_state.get("varo_pipeline_result") or {}
+    if isinstance(pipeline, Mapping) and "execution_plan" in pipeline:
+        planned = planned_recommendations(pipeline)
+        current = list(st.session_state.get("varo_recommendations") or [])
+        current_ids = {str(item.get("route_id") or "") for item in current}
+        # A replaced in-memory candidate list makes the cached plan stale.  This
+        # guard is mainly for deterministic simulation/test fixtures; normal app
+        # data application always refreshes both values atomically.
+        if planned and all(str(item.get("route_id") or "") in current_ids for item in planned):
+            return planned
+        if current_ids:
+            return sort_recommendations(current)
+        return planned
     return sort_recommendations(st.session_state.get("varo_recommendations") or [])
 
 
@@ -137,11 +151,15 @@ def _render_result_kpis(home: dict) -> None:
     kpis = pipeline_summary or calculate_overview_kpis(
         recommendations, st.session_state.get("varo_validation")
     )
+    pipeline = st.session_state.get("analysis_result") or st.session_state.get("varo_pipeline_result") or {}
+    plan = pipeline.get("execution_plan") if isinstance(pipeline, Mapping) else None
+    if not isinstance(plan, Mapping):
+        plan = {}
     confidence = home.get("confidence_status") or "계산 불가"
     cards = [
-        ("추천 후보", format_number(home.get("recommendation_count")), "실행을 검토할 이동 후보 수"),
-        ("권장 이동 수량", format_number(kpis.get("total_recommended_qty")), "추천 전체의 이동 대상 수량"),
-        ("예상 순효과", format_currency(kpis.get("total_net_benefit")), "이동 비용을 뺀 기대 효과"),
+        ("추천 후보", format_number(home.get("recommendation_count")), "오늘 실제로 실행할 이동 수"),
+        ("권장 이동 수량", format_number(plan.get("total_transfer_qty", kpis.get("total_recommended_qty"))), "공유 재고를 반영한 실행 수량"),
+        ("예상 순효과", format_currency(plan.get("total_net_benefit", kpis.get("total_net_benefit"))), "실행계획의 이동 비용을 뺀 기대 효과"),
         ("추천 신뢰도", str(confidence), "실행 가능성과 순위 안정성 기준"),
         ("데이터 상태", str(home.get("data_status") or "확인 필요"), "현재 사용 중인 데이터"),
     ]
@@ -428,7 +446,7 @@ def _render_running_routes(routes: list[dict], states: dict[str, str] | None = N
             '<div class="v2-running-route-meta">'
             f'<span>{_safe(route.get("source_name") or route.get("source_id"))} → {_safe(route.get("target_name") or route.get("target_id"))}</span>'
             f'<span>방식 {_safe(route_label)}</span>'
-            f'<span>수량 {_safe(format_number(route.get("recommended_qty"), "개"))}</span>'
+            f'<span>수량 {_safe(format_number(route.get("planned_qty") if route.get("planned_qty") is not None else route.get("recommended_qty"), "개"))}</span>'
             f'<span>예상 절감 {_safe(format_currency(route.get("expected_saving")))}</span>'
             '</div>'
             f'<div style="margin-top:0.3rem;">{move_badge}</div>'
@@ -470,7 +488,7 @@ def _render_controls() -> None:
 
 
 def _render_home_top(top_routes: list[dict]) -> None:
-    render_section_header(st, "추천 Top 5", "")
+    render_section_header(st, "오늘 권장 이동 · 추천 Top 5", "")
     if not top_routes:
         render_empty_state(st, "추천 결과가 없습니다", compact=True)
         return
@@ -505,7 +523,7 @@ def _render_best_recommendation_card(top: dict, confidence: str | None) -> None:
         '<div class="v2-running-route-meta" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:0.6rem;">'
         f'<span>방식 {_safe(route_label)}</span>'
         f'{dc_line}'
-        f'<span>수량 {_safe(format_number(top.get("recommended_qty"), "개"))}</span>'
+        f'<span>수량 {_safe(format_number(top.get("planned_qty") if top.get("planned_qty") is not None else top.get("recommended_qty"), "개"))}</span>'
         f'<span>예상 순효과 {_safe(format_currency(top.get("net_benefit")))}</span>'
         f'<span>추천 안정성 {_safe(top.get("robustness_status") or "-")}</span>'
         f'<span>추천 신뢰도 {_safe(confidence or "-")}</span>'
@@ -548,8 +566,8 @@ def render_overview_page() -> None:
     if selected_route_id != st.session_state.get("selected_route_id"):
         st.session_state["selected_route_id"] = selected_route_id
 
-    top5_routes = top_recommendations(recommendations, limit=5)
-    sim_routes = top_recommendations(recommendations, limit=3)
+    top5_routes = recommendations[:5]
+    sim_routes = recommendations[:3]
     states = _store_inventory_states(data or {}, recommendations)
     nodes = _nodes_from_data(recommendations, states)
     all_routes = _network_routes_from_data()

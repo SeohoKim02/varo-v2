@@ -15,8 +15,9 @@ Design facts it relies on (verified in code, not invented):
   the whole workspace as 사용 불가.
 * Uploaded data enters an explicit "추천 실행 전" state. The quick sample path
   remains a one-step demonstration path.
-* ``varo_recommendations`` is the final feasible set and the single ranking
-  source — the home never re-sorts or re-computes candidates.
+* When present, ``execution_plan.items`` is the single action source shared with
+  the execution and route-detail pages. Legacy state without a plan falls back
+  to ``varo_recommendations`` for backward-compatible loading.
 
 Nothing here raises to the UI: every lookup is defensive and, if inputs are
 missing, it degrades to a safe "데이터 없음 / 확인 필요" state instead of a fake
@@ -27,6 +28,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from services.analysis_pipeline import top_recommendations
+from services.execution_plan import planned_recommendations
 
 # Internal state codes (never shown to the user).
 NO_DATA = "no_data"
@@ -130,7 +132,18 @@ def _result_signature(pipeline: Mapping[str, Any]) -> str | None:
 
 def _no_candidate_cause(pipeline: Mapping[str, Any], state: Mapping[str, Any]) -> str:
     """One or two plain-language reasons why there is no recommendable move."""
+    plan = pipeline.get("execution_plan")
     summary = pipeline.get("ledger_summary") or {}
+    if (
+        isinstance(plan, Mapping)
+        and int(plan.get("total_candidates") or 0) > 0
+        and plan.get("user_message")
+    ):
+        candidate_count = int(plan.get("total_candidates") or 0)
+        reasons = summary.get("top_exclusion_reasons") or []
+        top_reason = str(reasons[0].get("reason") or "").strip() if reasons else ""
+        detail = f" 주요 원인: {top_reason}" if top_reason else ""
+        return f"추천 후보 {candidate_count}건을 함께 검토했습니다. {plan.get('user_message')}{detail}"
     generated = int(summary.get("generated") or 0)
     if generated == 0:
         info = state.get("upload_report") or {}
@@ -185,6 +198,10 @@ def _build(state: Mapping[str, Any]) -> dict[str, Any]:
     data = state.get("varo_data")
     validation = state.get("varo_validation")
     pipeline = _pipeline(state)
+    plan_present = isinstance(pipeline.get("execution_plan"), Mapping)
+    action_recommendations = (
+        planned_recommendations(pipeline) if plan_present else recommendations
+    )
     ledger_summary = pipeline.get("ledger_summary") or {}
     data_signature = state.get("data_signature")
 
@@ -290,22 +307,24 @@ def _build(state: Mapping[str, Any]) -> dict[str, Any]:
         }
 
     # 4) Recommendations present → ready result (single ranking source).
-    if recommendations:
-        top = _top_recommendation(recommendations)
+    if action_recommendations:
+        # Plan items are already in the final VHS action order; never derive a
+        # second ranking on the home screen.
+        top = dict(action_recommendations[0]) if plan_present else _top_recommendation(action_recommendations)
         confidence = (pipeline.get("confidence_status") or {}).get("status")
         selected = str(state.get("selected_route_id") or "")
-        valid_ids = {str(rec.get("route_id")) for rec in recommendations}
+        valid_ids = {str(rec.get("route_id")) for rec in action_recommendations}
         return {
             **base,
             "state_code": READY,
-            "title": "추천 결과를 확인하세요",
-            "short_message": "가장 우선순위가 높은 이동부터 검토할 수 있습니다.",
+            "title": "오늘 권장 이동을 확인하세요" if plan_present else "추천 결과를 확인하세요",
+            "short_message": str((pipeline.get("execution_plan") or {}).get("user_message") or "가장 우선순위가 높은 이동부터 검토할 수 있습니다."),
             "next_action_label": "추천 상세 보기",
             "next_page": PAGE_ROUTE_DETAIL,
             "data_status": data_status_label,
             "analysis_status": "완료",
             "recommendation_status": "추천 있음",
-            "recommendation_count": len(recommendations),
+            "recommendation_count": len(action_recommendations),
             "warning_count": warning_count,
             "show_result_kpis": True,
             "top_recommendation": top,

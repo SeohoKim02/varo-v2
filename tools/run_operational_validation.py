@@ -36,6 +36,7 @@ from services.data_application import (  # noqa: E402
 )
 from services.data_management_view import build_data_management_view  # noqa: E402
 from services.file_reader import read_uploaded_data  # noqa: E402
+from services.execution_plan import planned_recommendations  # noqa: E402
 from services.home_state import build_home_state  # noqa: E402
 from tools.generate_anonymized_operational_workbook import (  # noqa: E402
     MANIFEST_NAME, OUTPUT_DIR, WORKBOOK_NAME, generate,
@@ -453,6 +454,19 @@ def check_analysis(checks: Checks, state: dict[str, Any], manifest: dict[str, An
     )
     checks.check("역할", "DQN 학습 결과 미보유", state.get("dqn_training_result") is None)
 
+    plan = pipeline.get("execution_plan") or {}
+    plan_validation = plan.get("validation") or {}
+    checks.check("실행계획", "전체 실행계획 생성", bool(plan))
+    checks.check("실행계획", "독립 계획 검증 통과", bool(plan_validation.get("valid")), plan_validation)
+    checks.equal("실행계획", "안전재고 침범 0", plan_validation.get("safety_stock_violations"), 0)
+    checks.equal("실행계획", "도착 필요량 초과 0", plan_validation.get("destination_overfill_violations"), 0)
+    checks.equal("실행계획", "경로 대안 중복 0", plan_validation.get("duplicate_plan_violations"), 0)
+    checks.check("실행계획", "실행 수량은 양의 정수", all(
+        isinstance(item.get("planned_qty"), int) and item.get("planned_qty") > 0
+        for item in plan.get("items") or []
+    ))
+    checks.check("실행계획", "Greedy 비교 결과 존재", bool(pipeline.get("plan_comparison")))
+
     zero_disguise = [
         str(item.get("route_id")) for item in recommendations
         if item.get("expected_saving") == 0 and item.get("estimated_cost") == 0
@@ -484,14 +498,15 @@ def check_consistency(checks: Checks, state: dict[str, Any], manifest: dict[str,
     view = build_data_management_view(state)
     current = view["current"]
     recommendations = state["varo_recommendations"]
-    ordered = sort_recommendations(recommendations)
-    detail = find_recommendation(recommendations, state.get("selected_route_id"))
     pipeline = state["varo_pipeline_result"]
+    actions = planned_recommendations(pipeline)
+    ordered = list(actions)
+    detail = find_recommendation(actions, state.get("selected_route_id"))
     ledger = pipeline["ledger_summary"]
     quality = state["data_quality_summary"]
 
-    checks.equal("화면 일치", "홈·추천 실행 후보 수", home["recommendation_count"], len(recommendations))
-    checks.equal("화면 일치", "데이터 관리·홈 후보 수", current["recommendation_count"], home["recommendation_count"])
+    checks.equal("화면 일치", "홈·추천 실행 계획 수", home["recommendation_count"], len(actions))
+    checks.equal("화면 일치", "데이터 관리 후보 수", current["recommendation_count"], len(recommendations))
     checks.equal("화면 일치", "검증 페이지 추천 가능 후보 수", ledger["recommendable_total"], len(recommendations))
     checks.equal("화면 일치", "홈·검증 이동 불가 후보 수", home["blocked_count"], ledger["excluded_total"])
 
@@ -503,10 +518,10 @@ def check_consistency(checks: Checks, state: dict[str, Any], manifest: dict[str,
 
     top = home["top_recommendation"]
     checks.check("화면 일치", "홈 최우선 추천 존재", bool(top))
-    checks.equal("화면 일치", "홈·추천표 최우선 후보 동일", str(top["route_id"]), str(ordered[0]["route_id"]))
-    checks.equal("화면 일치", "홈·경로 상세 최우선 후보 동일", str(top["route_id"]), str(detail["route_id"]))
+    checks.equal("화면 일치", "홈·실행계획 최우선 이동 동일", str(top["route_id"]), str(ordered[0]["route_id"]))
+    checks.equal("화면 일치", "홈·경로 상세 최우선 이동 동일", str(top["route_id"]), str(detail["route_id"]))
     for field in (
-        "recommended_qty", "route_type", "dc_id", "estimated_cost",
+        "recommended_qty", "planned_qty", "route_type", "dc_id", "estimated_cost",
         "expected_saving", "vhs_score", "confidence", "reason",
     ):
         checks.equal(
@@ -515,7 +530,7 @@ def check_consistency(checks: Checks, state: dict[str, Any], manifest: dict[str,
         )
     checks.equal(
         "화면 일치", "선택된 후보가 추천 목록에 존재",
-        str(state["selected_route_id"]) in {str(item["route_id"]) for item in recommendations}, True,
+        str(state["selected_route_id"]) in {str(item["route_id"]) for item in actions}, True,
     )
     checks.check("화면 일치", "선택 후보 유효 표시", bool(home["selected_candidate_valid"]))
 
@@ -736,6 +751,15 @@ def run(output_dir: Path, repeats: int, regenerate: bool, skip_ui: bool) -> tupl
             "final_recommendations": len(state["varo_recommendations"]),
             "ledger": state["varo_pipeline_result"]["ledger_summary"],
             "feasibility": state["varo_pipeline_result"]["feasibility_summary"],
+            "execution_plan": {
+                key: state["varo_pipeline_result"]["execution_plan"].get(key)
+                for key in (
+                    "plan_status", "selected_candidates", "total_transfer_qty",
+                    "total_cost", "total_expected_saving", "total_net_benefit",
+                    "optimization_seconds", "validation_seconds",
+                )
+            },
+            "plan_validation": state["varo_pipeline_result"]["plan_validation"],
         },
         "checks_total": len(checks.results),
         "checks_failed": len(checks.failures),

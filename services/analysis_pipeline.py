@@ -29,6 +29,11 @@ from services.decision_support import recommendation_confidence, recommendation_
 from services.greedy_baseline import compare_to_vhs
 from services.dqn_guard import dqn_exclusion_report, is_dqn_column, strip_dqn_columns
 from services.feasibility import annotate_feasibility
+from services.execution_plan import (
+    build_execution_plan,
+    compare_execution_plans,
+    planned_recommendations,
+)
 from services.legacy_adapters.data_adapter import (
     add_cluster_context,
     build_candidate_frame,
@@ -89,6 +94,10 @@ class PipelineResult:
     candidate_ledger: List[Dict[str, Any]] = field(default_factory=list)
     excluded_candidates: List[Dict[str, Any]] = field(default_factory=list)
     ledger_summary: Dict[str, Any] = field(default_factory=dict)
+    execution_plan: Dict[str, Any] = field(default_factory=dict)
+    greedy_execution_plan: Dict[str, Any] = field(default_factory=dict)
+    plan_comparison: Dict[str, Any] = field(default_factory=dict)
+    plan_validation: Dict[str, Any] = field(default_factory=dict)
     stability_analysis_status: Dict[str, Any] = field(default_factory=dict)
     confidence_status: Dict[str, Any] = field(default_factory=dict)
     v2_summary_functions: List[str] = field(default_factory=list)
@@ -776,9 +785,46 @@ def run_analysis_pipeline(
     result.excluded_candidates = excluded_candidates(result.candidate_ledger)
     result.ledger_summary = ledger_summary(result.candidate_ledger)
 
+    # Candidate ranking and plan allocation are intentionally separate. VHS has
+    # already scored and validated the candidates above; this final layer only
+    # allocates shared source inventory and destination need across them.
+    result.execution_plan = build_execution_plan(
+        standard_recommendations,
+        uploaded_data,
+        result.candidate_ledger,
+        data_signature,
+    )
+    result.greedy_execution_plan = build_execution_plan(
+        standard_recommendations,
+        uploaded_data,
+        result.candidate_ledger,
+        data_signature,
+        strategy="greedy",
+    )
+    result.plan_validation = dict(result.execution_plan.get("validation") or {})
+    result.plan_comparison = compare_execution_plans(
+        result.execution_plan,
+        result.greedy_execution_plan,
+        standard_recommendations,
+        uploaded_data,
+    )
+    # top5 is now the shared action list, not a second independently sorted view.
+    result.top5 = planned_recommendations(result.to_dict())[:5]
+    result.validation_report.update({
+        "execution_plan": result.execution_plan,
+        "plan_validation": result.plan_validation,
+        "plan_comparison": result.plan_comparison,
+    })
+
     result.summary = calculate_overview_kpis(standard_recommendations, validation)
     result.summary.update({
         "recommendation_count": len(standard_recommendations),
+        "plan_status": result.execution_plan.get("plan_status"),
+        "planned_move_count": result.execution_plan.get("selected_candidates", 0),
+        "total_planned_qty": result.execution_plan.get("total_transfer_qty", 0),
+        "total_planned_cost": result.execution_plan.get("total_cost", 0),
+        "total_planned_saving": result.execution_plan.get("total_expected_saving", 0),
+        "total_planned_net_benefit": result.execution_plan.get("total_net_benefit", 0),
         "connected_algorithm_count": len(result.connected_algorithms),
         "deferred_algorithm_count": len(result.deferred_algorithms),
         "sources": kpi_sources(),
@@ -813,6 +859,8 @@ def run_analysis_pipeline(
         "algorithm_version": ALGORITHM_VERSION,
         "data_signature": data_signature,
         "analysis_timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "execution_plan_id": result.execution_plan.get("plan_id"),
+        "execution_plan_valid": result.plan_validation.get("valid", False),
     }
     report("complete")
     return result
@@ -869,7 +917,8 @@ def build_v2_state(
 def sort_recommendations(recommendations: List[Mapping[str, object]]) -> List[Dict[str, object]]:
     def rank_key(item: Mapping[str, object]) -> tuple[float, float, float]:
         raw_rank = (
-            item.get("varo_final_rank")
+            item.get("plan_rank")
+            or item.get("varo_final_rank")
             or item.get("vhs_rank")
             or item.get("rank")
             or item.get("recommendation_rank")
@@ -890,7 +939,10 @@ def top_recommendations(recommendations: List[Mapping[str, object]], limit: int 
 
 
 def calculate_overview_kpis(recommendations: List[Mapping[str, object]], validation: Optional[ValidationReport | Dict[str, object]] = None) -> Dict[str, object]:
-    total_qty = sum(float(item.get("recommended_qty") or 0) for item in recommendations)
+    total_qty = sum(
+        float(item.get("planned_qty") if item.get("planned_qty") is not None else item.get("recommended_qty") or 0)
+        for item in recommendations
+    )
     route_count = len(recommendations)
     total_saving = sum(float(item.get("expected_saving") or 0) for item in recommendations)
     # 순효과 = 절감액 − 이동 비용. Only candidates whose net benefit is actually

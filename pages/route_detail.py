@@ -12,6 +12,7 @@ from components.tables import format_currency, format_number
 from services import upload_quality, v2_summaries
 from services.analysis_pipeline import find_recommendation, sort_recommendations
 from services.app_state import has_app_data, resolve_selected_route_id
+from services.execution_plan import planned_recommendations
 from services.kakao_service import build_kakao_map_html, build_route_payload, get_kakao_key_from_sources
 from simulation.route_animation import build_route_legs
 
@@ -38,6 +39,9 @@ def _reason_detail(route: dict) -> dict:
 
 
 def _recommendations() -> list[dict]:
+    pipeline = _pipeline_result()
+    if "execution_plan" in pipeline:
+        return planned_recommendations(pipeline)
     return sort_recommendations(st.session_state.get("varo_recommendations") or [])
 
 
@@ -110,7 +114,8 @@ def _render_steps(route: dict) -> None:
 def _render_core_kpis(route: dict) -> None:
     render_section_header(st, "핵심 수치", "")
     row1 = st.columns(3, gap="small")
-    row1[0].metric("추천 수량", format_number(route.get("recommended_qty"), "개"))
+    planned_qty = route.get("planned_qty")
+    row1[0].metric("실행 수량", format_number(planned_qty if planned_qty is not None else route.get("recommended_qty"), "개"))
     row1[1].metric("예상 순효과", format_currency(route.get("net_benefit")))
     row1[2].metric("추천 점수", format_number(route.get("vhs_score"), "점"))
     row2 = st.columns(3, gap="small")
@@ -120,6 +125,12 @@ def _render_core_kpis(route: dict) -> None:
     st.caption(
         f"예상 절감액 {format_currency(route.get('expected_saving'))}에서 이동비용을 뺀 값이 예상 순효과입니다."
     )
+    if route.get("quantity_adjusted"):
+        st.caption(
+            f"후보 권장 {format_number(route.get('recommended_qty'), '개')}에서 "
+            f"실행 수량 {format_number(route.get('planned_qty'), '개')}로 조정되었습니다. "
+            "다른 추천과 출발 재고·도착 필요 수량을 함께 배분한 결과입니다."
+        )
 
 
 def _render_vhs_components(route: dict) -> None:
@@ -222,6 +233,8 @@ def _render_reasons(route: dict) -> None:
     ]
     for line in sentences[:3]:
         st.markdown(f"- {line}")
+    if route.get("selection_reason"):
+        st.markdown(f"- {route.get('selection_reason')}")
     render_quantity_basis(st, record)
     render_source_locations(st, record)
 
@@ -257,7 +270,7 @@ def render_route_detail_page() -> None:
     data = st.session_state.get("varo_data")
     recommendations = _recommendations()
     data_available = has_app_data(data, recommendations)
-    render_page_header(st, "경로 상세", "선택한 추천 경로의 이동 조건과 대안을 확인합니다.")
+    render_page_header(st, "경로 상세", "선택한 권장 이동의 실제 실행 수량과 경로를 확인합니다.")
     if not data_available:
         render_empty_state(st, "추천 경로가 선택되면 지도가 표시됩니다.")
         return

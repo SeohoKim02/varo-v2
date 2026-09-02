@@ -1,0 +1,674 @@
+{
+  "algorithm_version": "execution-plan-1.0",
+  "generated_at": "2026-09-01T22:32:03.394215+00:00",
+  "scenario_count": 11,
+  "scenarios": {
+    "supply_shortage": {
+      "label": "공급 부족",
+      "optimized_status": "일부 추천 가능",
+      "optimized_valid": true,
+      "optimized_routes": [
+        "R1",
+        "R2"
+      ],
+      "comparison": {
+        "independent_candidates": {
+          "selected_candidates": 3,
+          "total_transfer_qty": 120.0,
+          "total_cost": 3000.0,
+          "total_expected_saving": 24000.0,
+          "total_net_benefit": 21000.0,
+          "total_shortage_relief": 120.0,
+          "total_excess_relief": 120.0,
+          "safety_stock_violations": 1,
+          "destination_overfill_violations": 0
+        },
+        "constrained_greedy": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 60,
+          "total_cost": 1500.0,
+          "total_expected_saving": 14000.0,
+          "total_net_benefit": 12500.0,
+          "total_shortage_relief": 60,
+          "total_excess_relief": 60,
+          "optimization_seconds": 1.1e-05,
+          "validation_seconds": 0.002101,
+          "total_seconds": 0.003596,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        },
+        "vhs_optimized_plan": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 60,
+          "total_cost": 1500.0,
+          "total_expected_saving": 14000.0,
+          "total_net_benefit": 12500.0,
+          "total_shortage_relief": 60,
+          "total_excess_relief": 60,
+          "optimization_seconds": 0.328517,
+          "validation_seconds": 0.002349,
+          "total_seconds": 0.333397,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        }
+      }
+    },
+    "supply_surplus": {
+      "label": "공급 과다",
+      "optimized_status": "일부 추천 가능",
+      "optimized_valid": true,
+      "optimized_routes": [
+        "R1",
+        "R2",
+        "R3"
+      ],
+      "comparison": {
+        "independent_candidates": {
+          "selected_candidates": 3,
+          "total_transfer_qty": 120.0,
+          "total_cost": 3000.0,
+          "total_expected_saving": 24000.0,
+          "total_net_benefit": 21000.0,
+          "total_shortage_relief": 120.0,
+          "total_excess_relief": 120.0,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 3
+        },
+        "constrained_greedy": {
+          "selected_candidates": 3,
+          "total_transfer_qty": 60,
+          "total_cost": 1500.0,
+          "total_expected_saving": 12000.0,
+          "total_net_benefit": 10500.0,
+          "total_shortage_relief": 60,
+          "total_excess_relief": 60,
+          "optimization_seconds": 1.2e-05,
+          "validation_seconds": 0.001275,
+          "total_seconds": 0.00272,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        },
+        "vhs_optimized_plan": {
+          "selected_candidates": 3,
+          "total_transfer_qty": 60,
+          "total_cost": 1500.0,
+          "total_expected_saving": 12000.0,
+          "total_net_benefit": 10500.0,
+          "total_shortage_relief": 60,
+          "total_excess_relief": 60,
+          "optimization_seconds": 0.002529,
+          "validation_seconds": 0.00136,
+          "total_seconds": 0.005367,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        }
+      }
+    },
+    "source_concentration": {
+      "label": "한 출발점 과잉 집중",
+      "optimized_status": "일부 추천 가능",
+      "optimized_valid": true,
+      "optimized_routes": [
+        "R2"
+      ],
+      "comparison": {
+        "independent_candidates": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 100.0,
+          "total_cost": 2000.0,
+          "total_expected_saving": 19000.0,
+          "total_net_benefit": 17000.0,
+          "total_shortage_relief": 100.0,
+          "total_excess_relief": 100.0,
+          "safety_stock_violations": 1,
+          "destination_overfill_violations": 0
+        },
+        "constrained_greedy": {
+          "selected_candidates": 1,
+          "total_transfer_qty": 50,
+          "total_cost": 1000.0,
+          "total_expected_saving": 4000.0,
+          "total_net_benefit": 3000.0,
+          "total_shortage_relief": 50,
+          "total_excess_relief": 50,
+          "optimization_seconds": 9e-06,
+          "validation_seconds": 0.001071,
+          "total_seconds": 0.002161,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        },
+        "vhs_optimized_plan": {
+          "selected_candidates": 1,
+          "total_transfer_qty": 50,
+          "total_cost": 1000.0,
+          "total_expected_saving": 15000.0,
+          "total_net_benefit": 14000.0,
+          "total_shortage_relief": 50,
+          "total_excess_relief": 50,
+          "optimization_seconds": 0.008852,
+          "validation_seconds": 0.001257,
+          "total_seconds": 0.011364,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        }
+      }
+    },
+    "target_concentration": {
+      "label": "한 도착점 부족 집중",
+      "optimized_status": "일부 추천 가능",
+      "optimized_valid": true,
+      "optimized_routes": [
+        "R1",
+        "R2"
+      ],
+      "comparison": {
+        "independent_candidates": {
+          "selected_candidates": 3,
+          "total_transfer_qty": 120.0,
+          "total_cost": 3000.0,
+          "total_expected_saving": 24000.0,
+          "total_net_benefit": 21000.0,
+          "total_shortage_relief": 120.0,
+          "total_excess_relief": 120.0,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 1
+        },
+        "constrained_greedy": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 60,
+          "total_cost": 1500.0,
+          "total_expected_saving": 14000.0,
+          "total_net_benefit": 12500.0,
+          "total_shortage_relief": 60,
+          "total_excess_relief": 60,
+          "optimization_seconds": 9e-06,
+          "validation_seconds": 0.001285,
+          "total_seconds": 0.002577,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        },
+        "vhs_optimized_plan": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 60,
+          "total_cost": 1500.0,
+          "total_expected_saving": 14000.0,
+          "total_net_benefit": 12500.0,
+          "total_shortage_relief": 60,
+          "total_excess_relief": 60,
+          "optimization_seconds": 0.015183,
+          "validation_seconds": 0.001707,
+          "total_seconds": 0.018521,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        }
+      }
+    },
+    "multi_supply_single_demand": {
+      "label": "다중 공급·단일 수요",
+      "optimized_status": "일부 추천 가능",
+      "optimized_valid": true,
+      "optimized_routes": [
+        "R1",
+        "R2"
+      ],
+      "comparison": {
+        "independent_candidates": {
+          "selected_candidates": 3,
+          "total_transfer_qty": 120.0,
+          "total_cost": 3000.0,
+          "total_expected_saving": 24000.0,
+          "total_net_benefit": 21000.0,
+          "total_shortage_relief": 120.0,
+          "total_excess_relief": 120.0,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 1
+        },
+        "constrained_greedy": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 50,
+          "total_cost": 1250.0,
+          "total_expected_saving": 12000.0,
+          "total_net_benefit": 10750.0,
+          "total_shortage_relief": 50,
+          "total_excess_relief": 50,
+          "optimization_seconds": 9e-06,
+          "validation_seconds": 0.001185,
+          "total_seconds": 0.002528,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        },
+        "vhs_optimized_plan": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 50,
+          "total_cost": 1250.0,
+          "total_expected_saving": 12000.0,
+          "total_net_benefit": 10750.0,
+          "total_shortage_relief": 50,
+          "total_excess_relief": 50,
+          "optimization_seconds": 0.016178,
+          "validation_seconds": 0.002125,
+          "total_seconds": 0.019708,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        }
+      }
+    },
+    "single_supply_multi_demand": {
+      "label": "단일 공급·다중 수요",
+      "optimized_status": "일부 추천 가능",
+      "optimized_valid": true,
+      "optimized_routes": [
+        "R1",
+        "R2"
+      ],
+      "comparison": {
+        "independent_candidates": {
+          "selected_candidates": 3,
+          "total_transfer_qty": 120.0,
+          "total_cost": 3000.0,
+          "total_expected_saving": 24000.0,
+          "total_net_benefit": 21000.0,
+          "total_shortage_relief": 120.0,
+          "total_excess_relief": 120.0,
+          "safety_stock_violations": 1,
+          "destination_overfill_violations": 0
+        },
+        "constrained_greedy": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 50,
+          "total_cost": 1250.0,
+          "total_expected_saving": 12000.0,
+          "total_net_benefit": 10750.0,
+          "total_shortage_relief": 50,
+          "total_excess_relief": 50,
+          "optimization_seconds": 8e-06,
+          "validation_seconds": 0.001185,
+          "total_seconds": 0.002388,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        },
+        "vhs_optimized_plan": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 50,
+          "total_cost": 1250.0,
+          "total_expected_saving": 12000.0,
+          "total_net_benefit": 10750.0,
+          "total_shortage_relief": 50,
+          "total_excess_relief": 50,
+          "optimization_seconds": 0.014892,
+          "validation_seconds": 0.001685,
+          "total_seconds": 0.017938,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        }
+      }
+    },
+    "direct_favourable": {
+      "label": "DIRECT 우세",
+      "optimized_status": "일부 추천 가능",
+      "optimized_valid": true,
+      "optimized_routes": [
+        "RD"
+      ],
+      "comparison": {
+        "independent_candidates": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 80.0,
+          "total_cost": 3000.0,
+          "total_expected_saving": 18000.0,
+          "total_net_benefit": 15000.0,
+          "total_shortage_relief": 80.0,
+          "total_excess_relief": 80.0,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 1
+        },
+        "constrained_greedy": {
+          "selected_candidates": 1,
+          "total_transfer_qty": 40,
+          "total_cost": 1000.0,
+          "total_expected_saving": 10000.0,
+          "total_net_benefit": 9000.0,
+          "total_shortage_relief": 40,
+          "total_excess_relief": 40,
+          "optimization_seconds": 7e-06,
+          "validation_seconds": 0.001073,
+          "total_seconds": 0.002242,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        },
+        "vhs_optimized_plan": {
+          "selected_candidates": 1,
+          "total_transfer_qty": 40,
+          "total_cost": 1000.0,
+          "total_expected_saving": 10000.0,
+          "total_net_benefit": 9000.0,
+          "total_shortage_relief": 40,
+          "total_excess_relief": 40,
+          "optimization_seconds": 0.010017,
+          "validation_seconds": 0.001833,
+          "total_seconds": 0.013225,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        }
+      }
+    },
+    "via_dc_favourable": {
+      "label": "VIA_DC 우세",
+      "optimized_status": "일부 추천 가능",
+      "optimized_valid": true,
+      "optimized_routes": [
+        "RV"
+      ],
+      "comparison": {
+        "independent_candidates": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 80.0,
+          "total_cost": 2000.0,
+          "total_expected_saving": 23000.0,
+          "total_net_benefit": 21000.0,
+          "total_shortage_relief": 80.0,
+          "total_excess_relief": 80.0,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 1
+        },
+        "constrained_greedy": {
+          "selected_candidates": 1,
+          "total_transfer_qty": 40,
+          "total_cost": 1000.0,
+          "total_expected_saving": 10000.0,
+          "total_net_benefit": 9000.0,
+          "total_shortage_relief": 40,
+          "total_excess_relief": 40,
+          "optimization_seconds": 7e-06,
+          "validation_seconds": 0.001093,
+          "total_seconds": 0.002234,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        },
+        "vhs_optimized_plan": {
+          "selected_candidates": 1,
+          "total_transfer_qty": 40,
+          "total_cost": 1000.0,
+          "total_expected_saving": 13000.0,
+          "total_net_benefit": 12000.0,
+          "total_shortage_relief": 40,
+          "total_excess_relief": 40,
+          "optimization_seconds": 0.00856,
+          "validation_seconds": 0.001506,
+          "total_seconds": 0.011354,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        }
+      }
+    },
+    "multi_dc": {
+      "label": "다중 DC",
+      "optimized_status": "일부 추천 가능",
+      "optimized_valid": true,
+      "optimized_routes": [
+        "RDC2"
+      ],
+      "comparison": {
+        "independent_candidates": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 80.0,
+          "total_cost": 3000.0,
+          "total_expected_saving": 18000.0,
+          "total_net_benefit": 15000.0,
+          "total_shortage_relief": 80.0,
+          "total_excess_relief": 80.0,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 1
+        },
+        "constrained_greedy": {
+          "selected_candidates": 1,
+          "total_transfer_qty": 40,
+          "total_cost": 2000.0,
+          "total_expected_saving": 8000.0,
+          "total_net_benefit": 6000.0,
+          "total_shortage_relief": 40,
+          "total_excess_relief": 40,
+          "optimization_seconds": 6e-06,
+          "validation_seconds": 0.001123,
+          "total_seconds": 0.002202,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        },
+        "vhs_optimized_plan": {
+          "selected_candidates": 1,
+          "total_transfer_qty": 40,
+          "total_cost": 1000.0,
+          "total_expected_saving": 10000.0,
+          "total_net_benefit": 9000.0,
+          "total_shortage_relief": 40,
+          "total_excess_relief": 40,
+          "optimization_seconds": 0.009852,
+          "validation_seconds": 0.001374,
+          "total_seconds": 0.012468,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        }
+      }
+    },
+    "high_transport_cost": {
+      "label": "높은 운송비",
+      "optimized_status": "일부 추천 가능",
+      "optimized_valid": true,
+      "optimized_routes": [
+        "R1",
+        "R2"
+      ],
+      "comparison": {
+        "independent_candidates": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 80.0,
+          "total_cost": 16500.0,
+          "total_expected_saving": 18000.0,
+          "total_net_benefit": 1500.0,
+          "total_shortage_relief": 80.0,
+          "total_excess_relief": 80.0,
+          "safety_stock_violations": 1,
+          "destination_overfill_violations": 0
+        },
+        "constrained_greedy": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 60,
+          "total_cost": 12750.0,
+          "total_expected_saving": 14000.0,
+          "total_net_benefit": 1250.0,
+          "total_shortage_relief": 60,
+          "total_excess_relief": 60,
+          "optimization_seconds": 7e-06,
+          "validation_seconds": 0.001056,
+          "total_seconds": 0.00216,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        },
+        "vhs_optimized_plan": {
+          "selected_candidates": 2,
+          "total_transfer_qty": 60,
+          "total_cost": 12750.0,
+          "total_expected_saving": 14000.0,
+          "total_net_benefit": 1250.0,
+          "total_shortage_relief": 60,
+          "total_excess_relief": 60,
+          "optimization_seconds": 0.011905,
+          "validation_seconds": 0.001441,
+          "total_seconds": 0.014545,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        }
+      }
+    },
+    "high_safety_stock": {
+      "label": "안전재고 높음",
+      "optimized_status": "일부 추천 가능",
+      "optimized_valid": true,
+      "optimized_routes": [
+        "R1"
+      ],
+      "comparison": {
+        "independent_candidates": {
+          "selected_candidates": 3,
+          "total_transfer_qty": 120.0,
+          "total_cost": 3000.0,
+          "total_expected_saving": 24000.0,
+          "total_net_benefit": 21000.0,
+          "total_shortage_relief": 120.0,
+          "total_excess_relief": 120.0,
+          "safety_stock_violations": 1,
+          "destination_overfill_violations": 0
+        },
+        "constrained_greedy": {
+          "selected_candidates": 1,
+          "total_transfer_qty": 10,
+          "total_cost": 250.0,
+          "total_expected_saving": 2500.0,
+          "total_net_benefit": 2250.0,
+          "total_shortage_relief": 10,
+          "total_excess_relief": 10,
+          "optimization_seconds": 9e-06,
+          "validation_seconds": 0.001212,
+          "total_seconds": 0.002659,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        },
+        "vhs_optimized_plan": {
+          "selected_candidates": 1,
+          "total_transfer_qty": 10,
+          "total_cost": 250.0,
+          "total_expected_saving": 2500.0,
+          "total_net_benefit": 2250.0,
+          "total_shortage_relief": 10,
+          "total_excess_relief": 10,
+          "optimization_seconds": 0.014474,
+          "validation_seconds": 0.001789,
+          "total_seconds": 0.017569,
+          "safety_stock_violations": 0,
+          "destination_overfill_violations": 0
+        }
+      }
+    }
+  },
+  "scale_performance": [
+    {
+      "stores": 20,
+      "products": 20,
+      "source_rows": 852,
+      "applied_rows": 781,
+      "final_candidates": 57,
+      "planned_moves": 54,
+      "candidate_generation_seconds": 0.8602,
+      "candidate_evaluation_seconds": 0.5973,
+      "plan_optimization_seconds": 0.022275,
+      "plan_validation_seconds": 0.016147,
+      "total_analysis_seconds": 2.3215,
+      "plan_valid": true,
+      "fallback_used": false
+    },
+    {
+      "stores": 40,
+      "products": 30,
+      "source_rows": 2742,
+      "applied_rows": 2623,
+      "final_candidates": 58,
+      "planned_moves": 56,
+      "candidate_generation_seconds": 0.3059,
+      "candidate_evaluation_seconds": 0.7569,
+      "plan_optimization_seconds": 0.034417,
+      "plan_validation_seconds": 0.049363,
+      "total_analysis_seconds": 3.5732,
+      "plan_valid": true,
+      "fallback_used": false
+    },
+    {
+      "stores": 70,
+      "products": 45,
+      "source_rows": 7397,
+      "applied_rows": 7210,
+      "final_candidates": 54,
+      "planned_moves": 54,
+      "candidate_generation_seconds": 0.2944,
+      "candidate_evaluation_seconds": 1.0872,
+      "plan_optimization_seconds": 0.035821,
+      "plan_validation_seconds": 0.126948,
+      "total_analysis_seconds": 7.7709,
+      "plan_valid": true,
+      "fallback_used": false
+    },
+    {
+      "stores": 100,
+      "products": 60,
+      "source_rows": 14332,
+      "applied_rows": 14077,
+      "final_candidates": 55,
+      "planned_moves": 54,
+      "candidate_generation_seconds": 0.3288,
+      "candidate_evaluation_seconds": 1.4551,
+      "plan_optimization_seconds": 0.013065,
+      "plan_validation_seconds": 0.23825,
+      "total_analysis_seconds": 13.9145,
+      "plan_valid": true,
+      "fallback_used": false
+    }
+  ],
+  "operational_plan": {
+    "plan_status": "일부 추천 가능",
+    "selected_candidates": 56,
+    "total_transfer_qty": 2985,
+    "total_cost": 812746.666666,
+    "total_expected_saving": 6541465.333334,
+    "total_net_benefit": 5728718.666666,
+    "validation": {
+      "valid": true,
+      "issues": [],
+      "checked_items": 56,
+      "source_group_count": 54,
+      "target_group_count": 53,
+      "safety_stock_violations": 0,
+      "destination_overfill_violations": 0,
+      "duplicate_plan_violations": 0
+    },
+    "comparison": {
+      "independent_candidates": {
+        "selected_candidates": 58,
+        "total_transfer_qty": 3216.0,
+        "total_cost": 874100.0,
+        "total_expected_saving": 7013036.0,
+        "total_net_benefit": 6138936.0,
+        "total_shortage_relief": 3216.0,
+        "total_excess_relief": 3216.0,
+        "safety_stock_violations": 2,
+        "destination_overfill_violations": 5
+      },
+      "constrained_greedy": {
+        "selected_candidates": 56,
+        "total_transfer_qty": 2985,
+        "total_cost": 812746.666666,
+        "total_expected_saving": 6541465.333334,
+        "total_net_benefit": 5728718.666666,
+        "total_shortage_relief": 2985,
+        "total_excess_relief": 2985,
+        "optimization_seconds": 7.2e-05,
+        "validation_seconds": 0.049545,
+        "total_seconds": 0.098703,
+        "safety_stock_violations": 0,
+        "destination_overfill_violations": 0
+      },
+      "vhs_optimized_plan": {
+        "selected_candidates": 56,
+        "total_transfer_qty": 2985,
+        "total_cost": 812746.666666,
+        "total_expected_saving": 6541465.333334,
+        "total_net_benefit": 5728718.666666,
+        "total_shortage_relief": 2985,
+        "total_excess_relief": 2985,
+        "optimization_seconds": 0.035075,
+        "validation_seconds": 0.050887,
+        "total_seconds": 0.135432,
+        "safety_stock_violations": 0,
+        "destination_overfill_violations": 0
+      }
+    }
+  }
+}

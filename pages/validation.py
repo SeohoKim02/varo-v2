@@ -790,9 +790,65 @@ def _render_candidate_status(pipeline: dict) -> None:
     render_excluded_candidates(st, pipeline)
 
 
+def _render_execution_plan_status(pipeline: dict) -> None:
+    """Operational plan facts only; no solver names or mathematical internals."""
+    plan = pipeline.get("execution_plan") or {}
+    if not plan:
+        return
+    excluded = plan.get("unselected_candidates") or []
+    source_conflicts = sum(1 for row in excluded if row.get("reason_code") == "shared_source_inventory")
+    target_conflicts = sum(1 for row in excluded if row.get("reason_code") == "destination_fulfilled")
+    validation = plan.get("validation") or {}
+    items = plan.get("items") or []
+    stable = sum(
+        1 for item in items
+        if "안정" in str(item.get("robustness_status") or item.get("stability") or "")
+    )
+    dominated = sum(1 for item in items if str(item.get("pareto_status") or "") == "지배됨")
+
+    render_section_header(st, "전체 실행계획", "공유 재고와 도착 필요 수량을 함께 반영한 결과입니다.")
+    top = st.columns(5, gap="small")
+    top[0].metric("전체 후보", _int_str(plan.get("total_candidates")))
+    top[1].metric("실행가능 후보", _int_str(plan.get("eligible_candidates")))
+    top[2].metric("계획 선택", _int_str(plan.get("selected_candidates")))
+    top[3].metric("재고 충돌 제외", _int_str(source_conflicts))
+    top[4].metric("필요량 충족 제외", _int_str(target_conflicts))
+    bottom = st.columns(5, gap="small")
+    bottom[0].metric("총 이동량", _int_str(plan.get("total_transfer_qty")))
+    bottom[1].metric("총 이동비용", _won(plan.get("total_cost")))
+    bottom[2].metric("총 예상 절감", _won(plan.get("total_expected_saving")))
+    bottom[3].metric("총 순효과", _won(plan.get("total_net_benefit")))
+    bottom[4].metric("계획 상태", str(plan.get("plan_status") or "-"))
+    st.caption(
+        f"계획 검증 {'통과' if validation.get('valid') else '확인 필요'} · "
+        f"안정 후보 {stable}건 · Pareto 지배 후보 {dominated}건"
+    )
+
+    comparison = pipeline.get("plan_comparison") or {}
+    labels = {
+        "constrained_greedy": "Greedy 실행계획",
+        "vhs_optimized_plan": "VHS 실행계획",
+    }
+    rows = []
+    for key in ("constrained_greedy", "vhs_optimized_plan"):
+        values = comparison.get(key) or {}
+        rows.append({
+            "비교 기준": labels[key],
+            "선택 이동": _int_str(values.get("selected_candidates")),
+            "총 이동량": _int_str(values.get("total_transfer_qty")),
+            "총 이동비용": _won(values.get("total_cost")),
+            "총 순효과": _won(values.get("total_net_benefit")),
+            "안전재고 침범": _int_str(values.get("safety_stock_violations")),
+            "도착 필요량 초과": _int_str(values.get("destination_overfill_violations")),
+        })
+    if rows:
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+
+
 def _render_verification(pipeline: dict) -> None:
     recommendations = st.session_state.get("varo_recommendations") or []
     _render_candidate_status(pipeline)
+    _render_execution_plan_status(pipeline)
     confidence = pipeline.get("confidence_analysis") or {}
     greedy = pipeline.get("greedy_analysis") or {}
     weight_sensitivity = pipeline.get("weight_sensitivity_analysis") or {}
@@ -899,6 +955,7 @@ def render_validation_page() -> None:
         render_state_action_card(home, key="validation_primary_action")
         if home.get("state_code") == NO_CANDIDATES:
             _render_candidate_status(pipeline)
+            _render_execution_plan_status(pipeline)
         return
 
     tabs = st.tabs(TABS)

@@ -39,7 +39,10 @@ RECOMMENDATION_FIELDS = (
     "inventory_floor_value", "inventory_floor_source", "available_to_move",
     "quantity_limit_reason", "target_stock_goal", "target_stock_basis",
     "demand_scenario_status", "robustness_status", "robustness_detail",
-    "algorithm_version",
+    "algorithm_version", "candidate_id", "plan_id", "plan_rank",
+    "planned_qty", "quantity_adjusted", "recommended_expected_saving",
+    "planned_expected_saving", "planned_cost", "planned_net_benefit",
+    "selection_reason_code", "selection_reason", "stability",
 )
 NUMERIC_FIELDS = (
     "recommended_qty", "distance_km", "expected_time_min", "travel_time_min",
@@ -55,6 +58,8 @@ NUMERIC_FIELDS = (
     "feasibility_score", "demand_risk_score", "post_move_risk_score",
     "pareto_rank", "net_benefit", "source_movable", "target_shortfall",
     "inventory_floor_value", "available_to_move", "target_stock_goal",
+    "plan_rank", "planned_qty", "recommended_expected_saving",
+    "planned_expected_saving", "planned_cost", "planned_net_benefit",
 )
 
 _ACTION_ALIASES = {
@@ -172,6 +177,20 @@ class StandardRecommendation:
     robustness_status: Optional[str] = None
     robustness_detail: Optional[str] = None
     algorithm_version: Optional[str] = None
+    # Execution-plan fields are populated only after candidate ranking.  The
+    # original recommended_qty is retained beside the actual planned_qty.
+    candidate_id: Optional[str] = None
+    plan_id: Optional[str] = None
+    plan_rank: Optional[float] = None
+    planned_qty: Optional[float] = None
+    quantity_adjusted: Optional[bool] = None
+    recommended_expected_saving: Optional[float] = None
+    planned_expected_saving: Optional[float] = None
+    planned_cost: Optional[float] = None
+    planned_net_benefit: Optional[float] = None
+    selection_reason_code: Optional[str] = None
+    selection_reason: Optional[str] = None
+    stability: Optional[str] = None
 
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
@@ -362,6 +381,18 @@ def normalize_standard_recommendation(item: Mapping[str, object]) -> Dict[str, o
         "robustness_status": _first(item, "robustness_status"),
         "robustness_detail": _first(item, "robustness_detail"),
         "algorithm_version": _first(item, "algorithm_version"),
+        "candidate_id": _first(item, "candidate_id"),
+        "plan_id": _first(item, "plan_id"),
+        "plan_rank": _first(item, "plan_rank"),
+        "planned_qty": _first(item, "planned_qty"),
+        "quantity_adjusted": _boolean(_first(item, "quantity_adjusted"), None),
+        "recommended_expected_saving": _first(item, "recommended_expected_saving"),
+        "planned_expected_saving": _first(item, "planned_expected_saving"),
+        "planned_cost": _first(item, "planned_cost"),
+        "planned_net_benefit": _first(item, "planned_net_benefit"),
+        "selection_reason_code": _first(item, "selection_reason_code"),
+        "selection_reason": _first(item, "selection_reason"),
+        "stability": _first(item, "stability"),
     }
     for key in (
         "route_id", "product_id", "product_name", "source_id", "source_name", "target_id", "target_name",
@@ -375,7 +406,8 @@ def normalize_standard_recommendation(item: Mapping[str, object]) -> Dict[str, o
         "weight_profile_id", "weight_summary", "pareto_status",
         "qty_limiting_factor", "inventory_floor_source", "quantity_limit_reason",
         "target_stock_basis", "demand_scenario_status", "robustness_status",
-        "robustness_detail", "algorithm_version",
+        "robustness_detail", "algorithm_version", "candidate_id", "plan_id",
+        "selection_reason_code", "selection_reason", "stability",
     ):
         normalized[key] = _clean_text(normalized.get(key))
     for key in NUMERIC_FIELDS:

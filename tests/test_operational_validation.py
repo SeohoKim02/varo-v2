@@ -32,6 +32,7 @@ from services.data_loader import normalize_loaded_data
 from services.data_management_view import build_data_management_view
 from services.data_validator import validate_workbook_data
 from services.file_reader import read_uploaded_data
+from services.execution_plan import planned_recommendations
 from services.home_state import build_home_state
 from services.partial_data import build_usable_data
 from tools.generate_anonymized_operational_workbook import (
@@ -479,7 +480,7 @@ class RecommendationPipelineTests(unittest.TestCase):
         self.assertIsNone(self.state.get("dqn_training_result"))
 
     def test_final_ranking_comes_from_the_single_recommendation_list(self):
-        ordered = sort_recommendations(self.recommendations)
+        ordered = planned_recommendations(self.pipeline)
         self.assertEqual(
             str(self.state["selected_route_id"]), str(ordered[0]["route_id"]),
         )
@@ -520,19 +521,20 @@ class ScreenConsistencyTests(unittest.TestCase):
         self.home = build_home_state(self.state)
         self.view = build_data_management_view(self.state)
         self.recommendations = self.state["varo_recommendations"]
+        self.actions = planned_recommendations(self.state["varo_pipeline_result"])
 
     def test_home_and_recommendation_page_share_the_top_candidate(self):
-        ordered = sort_recommendations(self.recommendations)
         self.assertEqual(
-            str(self.home["top_recommendation"]["route_id"]), str(ordered[0]["route_id"])
+            str(self.home["top_recommendation"]["route_id"]), str(self.actions[0]["route_id"])
         )
-        self.assertEqual(self.home["recommendation_count"], len(self.recommendations))
+        self.assertEqual(self.home["recommendation_count"], len(self.actions))
+        self.assertEqual(self.home["top_recommendation"]["plan_id"], self.actions[0]["plan_id"])
 
     def test_route_detail_matches_the_recommendation_table(self):
         top = self.home["top_recommendation"]
-        detail = find_recommendation(self.recommendations, self.state["selected_route_id"])
+        detail = find_recommendation(self.actions, self.state["selected_route_id"])
         for field in (
-            "route_id", "recommended_qty", "route_type", "dc_id",
+            "route_id", "recommended_qty", "planned_qty", "route_type", "dc_id",
             "estimated_cost", "expected_saving", "vhs_score", "confidence", "reason",
         ):
             self.assertEqual(detail.get(field), top.get(field), msg=field)
@@ -545,11 +547,15 @@ class ScreenConsistencyTests(unittest.TestCase):
         self.assertEqual(current["usable_rows"], expected["applied_rows"])
         self.assertEqual(current["excluded_rows"], expected["excluded_rows"])
         self.assertEqual(current["warning_rows"], quality["warning_rows"])
-        self.assertEqual(current["recommendation_count"], self.home["recommendation_count"])
+        self.assertEqual(current["recommendation_count"], len(self.recommendations))
 
     def test_validation_page_counts_match_the_home_counts(self):
         ledger = self.state["varo_pipeline_result"]["ledger_summary"]
-        self.assertEqual(ledger["recommendable_total"], self.home["recommendation_count"])
+        self.assertEqual(ledger["recommendable_total"], len(self.recommendations))
+        self.assertEqual(
+            self.state["varo_pipeline_result"]["execution_plan"]["selected_candidates"],
+            self.home["recommendation_count"],
+        )
         self.assertEqual(ledger["excluded_total"], self.home["blocked_count"])
 
     def test_top_candidate_keeps_its_original_row_lineage(self):

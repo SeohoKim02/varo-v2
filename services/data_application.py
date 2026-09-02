@@ -16,6 +16,7 @@ from services.analysis_progress import ProgressCallback
 from services.app_state import (
     apply_state_payload, build_applied_state_payload, default_selected_route_id,
 )
+from services.execution_plan import planned_recommendations
 from services.data_loader import DataLoadError
 from services.partial_data import build_usable_data, usable_data_signature
 from services.data_validator import ValidationReport, validate_workbook_data
@@ -419,7 +420,8 @@ def run_applied_analysis(
         state["connected_algorithms"] = pipeline.get("connected_algorithms", [])
         state["deferred_algorithms"] = pipeline.get("deferred_algorithms", [])
         state["dqn_excluded"] = pipeline.get("excluded_dqn_artifacts", {})
-        state["selected_route_id"] = default_selected_route_id(recommendations)
+        actions = planned_recommendations(pipeline) if "execution_plan" in pipeline else recommendations
+        state["selected_route_id"] = default_selected_route_id(actions)
         state["analysis_run_required"] = False
         state.pop("analysis_run_error", None)
         state["analysis_elapsed_seconds"] = round(time.perf_counter() - started, 2)

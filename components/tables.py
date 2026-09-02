@@ -63,7 +63,7 @@ def build_recommendation_rows(
             "출발 점포": rec.get("source_name") or rec.get("source_id") or "-",
             "도착 점포": rec.get("target_name") or rec.get("target_id") or "-",
             "경로 유형": route_type_label(rec.get("route_type")),
-            "수량": format_number(rec.get("recommended_qty"), "개"),
+            "수량": format_number(rec.get("planned_qty") if rec.get("planned_qty") is not None else rec.get("recommended_qty"), "개"),
             # 순효과(절감액 − 이동비용)가 실제 판단 기준이므로 기본 표에는 이 값을 둔다.
             # 절감액·이동비용 각각은 후보 상세에서 그대로 확인할 수 있다.
             "예상 순효과": format_currency(rec.get("net_benefit")),
@@ -103,7 +103,7 @@ def build_home_top_rows(recommendations: Iterable[dict], limit: int = 5) -> list
             "출발": rec.get("source_name") or rec.get("source_id") or "-",
             "도착": rec.get("target_name") or rec.get("target_id") or "-",
             "경로": route_type_label(rec.get("route_type")),
-            "수량": format_number(rec.get("recommended_qty"), "개"),
+            "수량": format_number(rec.get("planned_qty") if rec.get("planned_qty") is not None else rec.get("recommended_qty"), "개"),
             "예상 순효과": format_currency(rec.get("net_benefit")),
         })
     return rows

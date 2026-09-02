@@ -5,6 +5,7 @@ from collections.abc import Mapping, MutableMapping, Sequence
 from typing import Any
 
 from services.analysis_pipeline import top_recommendations
+from services.execution_plan import planned_recommendations
 
 CANONICAL_DATA_KEYS = (
     "varo_data",
@@ -177,6 +178,10 @@ def build_applied_state_payload(
         raise ValueError("검증 오류가 있는 데이터는 앱에 적용할 수 없습니다.")
     recommendation_list = [dict(item) for item in recommendations]
     pipeline = dict(pipeline_result or {})
+    actions = (
+        planned_recommendations(pipeline)
+        if "execution_plan" in pipeline else recommendation_list
+    )
     return {
         "varo_data": dict(data),
         "raw_data": dict(raw_data or {}),
@@ -189,7 +194,7 @@ def build_applied_state_payload(
         "connected_algorithms": pipeline.get("connected_algorithms", []),
         "deferred_algorithms": pipeline.get("deferred_algorithms", []),
         "dqn_excluded": pipeline.get("excluded_dqn_artifacts", {}),
-        "selected_route_id": default_selected_route_id(recommendation_list),
+        "selected_route_id": default_selected_route_id(actions),
         "uploaded_filename": filename,
         "data_source_type": source_type,
         "upload_report": {},

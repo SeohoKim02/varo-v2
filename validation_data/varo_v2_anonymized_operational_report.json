@@ -15,65 +15,65 @@
     "total_source_rows": 2742
   },
   "single_run_seconds": {
-    "prepare_seconds": 0.766,
-    "commit_seconds": 0.029,
-    "analysis_seconds": 4.3
+    "prepare_seconds": 0.73,
+    "commit_seconds": 0.027,
+    "analysis_seconds": 4.439
   },
   "performance": {
     "read": {
-      "first": 0.282,
-      "median": 0.282,
-      "min": 0.282,
-      "max": 0.417,
-      "runs": 3
+      "first": 0.408,
+      "median": 0.408,
+      "min": 0.408,
+      "max": 0.408,
+      "runs": 1
     },
     "prepare": {
-      "first": 0.842,
-      "median": 0.842,
-      "min": 0.84,
-      "max": 0.856,
-      "runs": 3
+      "first": 0.695,
+      "median": 0.695,
+      "min": 0.695,
+      "max": 0.695,
+      "runs": 1
     },
     "commit": {
-      "first": 0.028,
-      "median": 0.028,
-      "min": 0.028,
-      "max": 0.029,
-      "runs": 3
+      "first": 0.027,
+      "median": 0.027,
+      "min": 0.027,
+      "max": 0.027,
+      "runs": 1
     },
     "analysis": {
-      "first": 3.577,
-      "median": 3.444,
-      "min": 3.415,
-      "max": 3.577,
-      "runs": 3
+      "first": 3.784,
+      "median": 3.784,
+      "min": 3.784,
+      "max": 3.784,
+      "runs": 1
     },
     "total": {
-      "first": 4.73,
-      "median": 4.719,
-      "min": 4.597,
-      "max": 4.73,
-      "runs": 3
+      "first": 4.914,
+      "median": 4.914,
+      "min": 4.914,
+      "max": 4.914,
+      "runs": 1
     }
   },
   "stage_breakdown": {
     "파일 읽기+정규화": {
-      "first": 0.283,
-      "median": 0.283,
-      "min": 0.283,
-      "max": 0.417
+      "first": 0.276,
+      "median": 0.276,
+      "min": 0.276,
+      "max": 0.276
     },
     "정규화": {
       "first": 0.02,
       "median": 0.02,
       "min": 0.02,
-      "max": 0.021
+      "max": 0.02
     },
     "검증·문제 분류": {
-      "first": 0.325,
-      "median": 0.317,
-      "min": 0.19,
-      "max": 0.325
+      "first": 0.315,
+      "median": 0.315,
+      "min": 0.315,
+      "max": 0.315
     },
     "제외 대상 계산": {
       "first": 0.0,
@@ -82,37 +82,37 @@
       "max": 0.0
     },
     "참조 정리+usable data 생성(재검증 포함)": {
-      "first": 0.429,
-      "median": 0.429,
-      "min": 0.426,
-      "max": 0.567
+      "first": 0.418,
+      "median": 0.418,
+      "min": 0.418,
+      "max": 0.418
     },
     "제외 후 재검증": {
-      "first": 0.017,
-      "median": 0.017,
+      "first": 0.016,
+      "median": 0.016,
       "min": 0.016,
-      "max": 0.017
+      "max": 0.016
     },
     "적용 데이터 서명": {
       "first": 0.011,
-      "median": 0.012,
+      "median": 0.011,
       "min": 0.011,
-      "max": 0.012
+      "max": 0.011
     },
     "pending 저장(전체 검사)": {
-      "first": 0.854,
-      "median": 0.838,
-      "min": 0.717,
-      "max": 0.854
+      "first": 0.82,
+      "median": 0.82,
+      "min": 0.82,
+      "max": 0.82
     }
   },
   "ui": {
     "rendered_markdown_chars": {
-      "운영 현황": 53484,
-      "추천 실행": 32987,
-      "경로 상세": 22792,
-      "분석 및 검증": 32228,
-      "데이터 관리": 21958
+      "운영 현황": 53502,
+      "추천 실행": 32707,
+      "경로 상세": 22829,
+      "분석 및 검증": 32411,
+      "데이터 관리": 21997
     }
   },
   "recommendation_summary": {
@@ -161,9 +161,29 @@
         "이동 후 재고가 남겨야 할 재고보다 적습니다."
       ],
       "all_feasible": false
+    },
+    "execution_plan": {
+      "plan_status": "일부 추천 가능",
+      "selected_candidates": 56,
+      "total_transfer_qty": 2985,
+      "total_cost": 812746.666666,
+      "total_expected_saving": 6541465.333334,
+      "total_net_benefit": 5728718.666666,
+      "optimization_seconds": 0.036138,
+      "validation_seconds": 0.048458
+    },
+    "plan_validation": {
+      "valid": true,
+      "issues": [],
+      "checked_items": 56,
+      "source_group_count": 54,
+      "target_group_count": 53,
+      "safety_stock_violations": 0,
+      "destination_overfill_violations": 0,
+      "duplicate_plan_violations": 0
     }
   },
-  "checks_total": 165,
+  "checks_total": 173,
   "checks_failed": 0,
   "failures": [],
   "checks": [
@@ -395,10 +415,10 @@
       "ok": true,
       "detail": {
         "actual": {
-          "routes": 82,
           "inventory": 30,
-          "stores": 1,
-          "recommendations": 6
+          "routes": 82,
+          "recommendations": 6,
+          "stores": 1
         },
         "expected": {
           "inventory": 30,
@@ -901,6 +921,66 @@
       "detail": ""
     },
     {
+      "section": "실행계획",
+      "check": "전체 실행계획 생성",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "실행계획",
+      "check": "독립 계획 검증 통과",
+      "ok": true,
+      "detail": {
+        "valid": true,
+        "issues": [],
+        "checked_items": 56,
+        "source_group_count": 54,
+        "target_group_count": 53,
+        "safety_stock_violations": 0,
+        "destination_overfill_violations": 0,
+        "duplicate_plan_violations": 0
+      }
+    },
+    {
+      "section": "실행계획",
+      "check": "안전재고 침범 0",
+      "ok": true,
+      "detail": {
+        "actual": 0,
+        "expected": 0
+      }
+    },
+    {
+      "section": "실행계획",
+      "check": "도착 필요량 초과 0",
+      "ok": true,
+      "detail": {
+        "actual": 0,
+        "expected": 0
+      }
+    },
+    {
+      "section": "실행계획",
+      "check": "경로 대안 중복 0",
+      "ok": true,
+      "detail": {
+        "actual": 0,
+        "expected": 0
+      }
+    },
+    {
+      "section": "실행계획",
+      "check": "실행 수량은 양의 정수",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "실행계획",
+      "check": "Greedy 비교 결과 존재",
+      "ok": true,
+      "detail": ""
+    },
+    {
       "section": "추천",
       "check": "계산 불가 값을 0으로 위장하지 않음",
       "ok": true,
@@ -938,16 +1018,16 @@
     },
     {
       "section": "화면 일치",
-      "check": "홈·추천 실행 후보 수",
+      "check": "홈·추천 실행 계획 수",
       "ok": true,
       "detail": {
-        "actual": 58,
-        "expected": 58
+        "actual": 56,
+        "expected": 56
       }
     },
     {
       "section": "화면 일치",
-      "check": "데이터 관리·홈 후보 수",
+      "check": "데이터 관리 후보 수",
       "ok": true,
       "detail": {
         "actual": 58,
@@ -1025,7 +1105,7 @@
     },
     {
       "section": "화면 일치",
-      "check": "홈·추천표 최우선 후보 동일",
+      "check": "홈·실행계획 최우선 이동 동일",
       "ok": true,
       "detail": {
         "actual": "R0005",
@@ -1034,7 +1114,7 @@
     },
     {
       "section": "화면 일치",
-      "check": "홈·경로 상세 최우선 후보 동일",
+      "check": "홈·경로 상세 최우선 이동 동일",
       "ok": true,
       "detail": {
         "actual": "R0005",
@@ -1046,8 +1126,17 @@
       "check": "홈·경로 상세 recommended_qty 동일",
       "ok": true,
       "detail": {
-        "actual": 60.0,
-        "expected": 60.0
+        "actual": 60,
+        "expected": 60
+      }
+    },
+    {
+      "section": "화면 일치",
+      "check": "홈·경로 상세 planned_qty 동일",
+      "ok": true,
+      "detail": {
+        "actual": 60,
+        "expected": 60
       }
     },
     {
@@ -1140,7 +1229,7 @@
       "ok": true,
       "detail": {
         "actual": 60.0,
-        "expected": 60.0
+        "expected": 60
       }
     },
     {
@@ -1420,11 +1509,11 @@
       "check": "전체 흐름이 합리적인 시간 안에 완료",
       "ok": true,
       "detail": {
-        "first": 4.73,
-        "median": 4.719,
-        "min": 4.597,
-        "max": 4.73,
-        "runs": 3
+        "first": 4.914,
+        "median": 4.914,
+        "min": 4.914,
+        "max": 4.914,
+        "runs": 1
       }
     }
   ]
