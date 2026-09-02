@@ -30,13 +30,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from services.analysis_pipeline import find_recommendation, sort_recommendations  # noqa: E402
-from services.app_state import has_applied_data  # noqa: E402
+from services.app_state import clear_applied_data, has_applied_data  # noqa: E402
 from services.data_application import (  # noqa: E402
     cancel_pending_data, commit_pending_data, prepare_pending_data, run_applied_analysis,
 )
 from services.data_management_view import build_data_management_view  # noqa: E402
 from services.file_reader import read_uploaded_data  # noqa: E402
 from services.execution_plan import planned_recommendations  # noqa: E402
+from services.execution_history import (  # noqa: E402
+    execution_history_metrics, export_execution_history_csv, get_recorded_plan,
+    list_recorded_plans, record_execution_plan, update_execution_item,
+)
 from services.home_state import build_home_state  # noqa: E402
 from tools.generate_anonymized_operational_workbook import (  # noqa: E402
     MANIFEST_NAME, OUTPUT_DIR, WORKBOOK_NAME, generate,
@@ -709,6 +713,104 @@ def check_memory_behaviour(checks: Checks, workbook: Path) -> None:
     )
 
 
+def check_execution_history(checks: Checks, state: dict[str, Any], temp_dir: Path) -> dict[str, Any]:
+    """Exercise the real shadow-operation persistence flow without real company data."""
+    db_path = temp_dir / "operational_execution_history.sqlite3"
+    pipeline = state.get("varo_pipeline_result") or {}
+    plan = pipeline.get("execution_plan") or {}
+    before = {
+        "candidate_count": len(state.get("varo_recommendations") or []),
+        "plan_count": int(plan.get("selected_candidates") or 0),
+        "plan_qty": int(plan.get("total_transfer_qty") or 0),
+        "cost": plan.get("total_cost"),
+        "saving": plan.get("total_expected_saving"),
+        "net": plan.get("total_net_benefit"),
+        "items": [(item.get("candidate_id"), item.get("planned_qty")) for item in plan.get("items") or []],
+    }
+    recorded = record_execution_plan(plan, db_path)
+    checks.check("실행 이력", "사용자 명시 동작으로 계획 기록", recorded.get("code") == "recorded", recorded)
+    duplicate = record_execution_plan(plan, db_path)
+    checks.check("실행 이력", "동일 계획 중복 저장 방지", duplicate.get("code") == "duplicate", duplicate)
+
+    items = list(plan.get("items") or [])
+    checks.check("실행 이력", "운영 계획에 기록할 이동 존재", len(items) >= 3, len(items))
+    update_results: list[dict[str, Any]] = []
+    if len(items) >= 3:
+        first, second, third = items[:3]
+        update_results.append(update_execution_item(
+            plan["plan_id"], first["candidate_id"], "실행", first["planned_qty"],
+            outcomes={
+                "post_source_stock": 100, "post_destination_stock": 80,
+                "actual_sales_qty": 12, "actual_waste_qty": 1,
+                "actual_stockout_occurred": "없음", "actual_stockout_qty": 0, "actual_transport_cost": 1234,
+                "actual_saving": 5678,
+            }, db_path=db_path,
+        ))
+        partial_qty = max(1, int(second["planned_qty"]) - 1)
+        update_results.append(update_execution_item(
+            plan["plan_id"], second["candidate_id"], "일부 실행", partial_qty,
+            nonexecution_reason="현장 판단", db_path=db_path,
+        ))
+        update_results.append(update_execution_item(
+            plan["plan_id"], third["candidate_id"], "미실행", 0,
+            nonexecution_reason="운송 불가", db_path=db_path,
+        ))
+    checks.check("실행 이력", "실행·일부 실행·미실행 저장", all(result.get("ok") for result in update_results), update_results)
+
+    # Every call opens a new connection, equivalent to a process/session restart
+    # from the persistence layer's perspective.
+    reloaded = get_recorded_plan(str(plan.get("plan_id")), db_path)
+    status_set = {item.get("execution_status") for item in reloaded.get("items") or []}
+    checks.check("실행 이력", "앱 재시작 가정 재조회", reloaded.get("ok") and len(reloaded.get("items") or []) == len(items))
+    checks.check("실행 이력", "세 가지 현장 상태 재조회", {"executed", "partial", "not_executed"}.issubset(status_set), status_set)
+    checks.equal("실행 이력", "계획 알고리즘 버전 추적", (reloaded.get("plan") or {}).get("algorithm_version"), plan.get("algorithm_version"))
+    checks.equal("실행 이력", "데이터 서명 추적", (reloaded.get("plan") or {}).get("data_signature"), plan.get("data_signature"))
+
+    cleared_state = dict(state)
+    clear_applied_data(cleared_state)
+    history_after_clear = get_recorded_plan(str(plan.get("plan_id")), db_path)
+    checks.check(
+        "실행 이력", "현재 데이터 초기화 후 과거 이력 유지",
+        cleared_state.get("varo_data") is None and history_after_clear.get("ok"),
+    )
+    exported = export_execution_history_csv(db_path)
+    checks.check(
+        "실행 이력", "UTF-8 BOM CSV 내보내기",
+        exported.get("ok") and exported.get("row_count") == len(items)
+        and bytes(exported.get("data") or b"").startswith(b"\xef\xbb\xbf"),
+        {"code": exported.get("code"), "rows": exported.get("row_count")},
+    )
+    checks.check(
+        "실행 이력", "CSV에 로컬 DB 경로 미포함",
+        str(db_path).encode("utf-8") not in bytes(exported.get("data") or b""),
+    )
+    metrics = execution_history_metrics(db_path)
+    checks.check(
+        "실행 이력", "실제 결과 표본 수와 준수율 계산",
+        metrics.get("ok") and metrics.get("confirmed_items") == 3
+        and (metrics.get("net_benefit_error") or {}).get("sample_count") == 1,
+        metrics,
+    )
+    after_plan = (state.get("varo_pipeline_result") or {}).get("execution_plan") or {}
+    after = {
+        "candidate_count": len(state.get("varo_recommendations") or []),
+        "plan_count": int(after_plan.get("selected_candidates") or 0),
+        "plan_qty": int(after_plan.get("total_transfer_qty") or 0),
+        "cost": after_plan.get("total_cost"),
+        "saving": after_plan.get("total_expected_saving"),
+        "net": after_plan.get("total_net_benefit"),
+        "items": [(item.get("candidate_id"), item.get("planned_qty")) for item in after_plan.get("items") or []],
+    }
+    checks.equal("실행 이력", "이력 기록 전후 알고리즘 결과 동일", after, before)
+    plans = list_recorded_plans(db_path)["plans"]
+    return {
+        "recorded_plans": len(plans), "recorded_items": len(items),
+        "confirmed_items": metrics.get("confirmed_items"),
+        "actual_result_samples": (metrics.get("net_benefit_error") or {}).get("sample_count"),
+        "csv_rows": exported.get("row_count"),
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Entry point
 # --------------------------------------------------------------------------- #
@@ -734,6 +836,7 @@ def run(output_dir: Path, repeats: int, regenerate: bool, skip_ui: bool) -> tupl
         timings.update({k: round(v, 3) for k, v in check_apply(checks, state, manifest).items()})
         timings.update({k: round(v, 3) for k, v in check_analysis(checks, state, manifest).items()})
         check_consistency(checks, state, manifest)
+        history_summary = check_execution_history(checks, state, temp_dir)
         check_memory_behaviour(checks, workbook)
         ui = {} if skip_ui else check_ui(checks, state)
         performance = measure_performance(checks, workbook, repeats)
@@ -747,6 +850,7 @@ def run(output_dir: Path, repeats: int, regenerate: bool, skip_ui: bool) -> tupl
         "performance": performance,
         "stage_breakdown": stage_breakdown,
         "ui": ui,
+        "execution_history": history_summary,
         "recommendation_summary": {
             "final_recommendations": len(state["varo_recommendations"]),
             "ledger": state["varo_pipeline_result"]["ledger_summary"],

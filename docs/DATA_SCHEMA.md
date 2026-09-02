@@ -169,3 +169,25 @@ DQN 학습 샘플 팩(`Varo_DQN_training_samples_10pack`)은 이 저장소에 �
 - 출발지=도착지 추천 → 실행 불가능(제외).
 - 이동 수량 > 출발 점포 재고 → 이동 후 음수, 실행 불가능(제외).
 - 이동 후 출발 재고 < 적용 재고 하한 → 실행 불가능(제외). 정확히 하한과 같으면 허용.
+
+## 로컬 실행 이력 저장 구조
+
+실행 이력은 업로드 원본이나 추천 알고리즘 테이블과 분리된 SQLite DB에 저장합니다. 기본 위치는
+`runtime_data/varo_execution_history.sqlite3`이며 `VARO_HISTORY_DB_PATH` 환경변수로 서버별 저장 위치를
+바꿀 수 있습니다. `runtime_data/`, `*.sqlite`, `*.sqlite3`와 SQLite 보조 파일은 Git에서 제외됩니다.
+
+schema version은 SQLite `user_version`으로 관리합니다. 현재 version 1의 테이블은 다음과 같습니다.
+
+- `execution_plans`: plan ID, 실행계획 알고리즘 버전, 후보 평가 알고리즘 버전, 데이터 signature,
+  생성·기록·수정 시각, 상태, 계획 건수·수량, 예상 비용·절감·순효과.
+- `execution_items`: plan/candidate 연결, 출발·도착·상품·경로·DC, 계획 수량과 예상값, VHS·안정성·신뢰도,
+  실제 실행 상태·수량·사유·메모, 선택적 사후 재고·판매·폐기·품절·운송비·절감액.
+- `execution_item_events`: 상태나 실제 수량을 수정할 때 이전/새 상태와 수량을 남기는 최소 변경 기록.
+
+계획과 전체 항목은 하나의 transaction으로 저장됩니다. 같은 `plan_id`는 다시 생성하지 않지만 해당 계획의
+실행 상태와 실제값은 수정할 수 있습니다. 삭제 API는 제공하지 않으며 취소 상태 또는 수정 기록을 사용합니다.
+실제값이 없는 컬럼은 `NULL`이고 예상값을 복사하거나 0으로 대체하지 않습니다. 실제 순효과는 실제 운송비와
+실제 절감액이 모두 입력된 경우에만 계산합니다.
+
+CSV export는 plan/candidate 연결에 필요한 ID와 알고리즘 lineage, 계획 당시의 제한된 VHS feature snapshot,
+실제 실행·사후 결과만 포함합니다. 로컬 DB 경로와 자유 메모는 포함하지 않으며 UTF-8 BOM으로 생성합니다.

@@ -244,6 +244,11 @@ python -m compileall -q app_v2.py router.py styles.py components services pages 
   데이터 관리 상태별(없음/적용/사용 불가 pending+적용 동시) element tree와 현재 데이터 초기화.
 - **데이터 관리 view** (`tests/test_data_management_view.py`): 현재/검사 중 구분, 홈과 상태 일치,
   행 수 vs 문제 항목 수, 적용 실패 시 기존 데이터 보존, 현재 데이터 초기화(원본 파일 미삭제), 내부 정보 미노출.
+- **실행 이력 저장** (`tests/test_execution_history.py`): SQLite 최초 생성과 schema version, 계획·항목 원자 저장,
+  중복 방지, rollback, 새 연결 재조회, 실행 상태와 정수 수량, 계획 초과 경고, 선택형 사유, 선택적 실제 결과,
+  표본 수 기반 오차·준수율, 변경 이벤트, UTF-8 BOM CSV, 현재 데이터 초기화 후 과거 이력 보존을 검증합니다.
+- **실행 이력 UI** (`tests/test_execution_history_ui.py`): 명시적 계획 기록 버튼, 자동 기록 방지, 실제 상태·수량·
+  비용·절감액 입력, 내부 plan/candidate/signature·DB 경로·traceback 비노출을 검증합니다.
 
 ## DQN 품질 판정
 

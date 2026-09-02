@@ -15,6 +15,7 @@ from components.candidate_detail import (
     render_quantity_basis,
     render_source_locations,
 )
+from components.execution_history_panel import render_execution_history_panel
 from components.status import route_type_badge
 from components.tables import build_recommendation_rows, format_currency, format_number, render_capped_table
 from services import export_service, upload_quality, v2_summaries
@@ -265,6 +266,7 @@ def render_recommendations_page() -> None:
     # cannot pile up across reruns.
     if st.session_state.pop("analysis_completed_notice", None):
         st.success(completion_note(st.session_state.get("analysis_elapsed_seconds")))
+    render_execution_history_panel((_pipeline_result().get("execution_plan") or {}))
     if has_applied_data(data) and st.session_state.get("analysis_run_required"):
         quality = st.session_state.get("data_quality_summary") or {}
         excluded = int(quality.get("excluded_rows") or 0)

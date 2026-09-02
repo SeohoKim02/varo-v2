@@ -15,65 +15,65 @@
     "total_source_rows": 2742
   },
   "single_run_seconds": {
-    "prepare_seconds": 0.73,
+    "prepare_seconds": 0.695,
     "commit_seconds": 0.027,
-    "analysis_seconds": 4.439
+    "analysis_seconds": 4.373
   },
   "performance": {
     "read": {
-      "first": 0.408,
-      "median": 0.408,
-      "min": 0.408,
-      "max": 0.408,
-      "runs": 1
+      "first": 0.342,
+      "median": 0.276,
+      "min": 0.274,
+      "max": 0.342,
+      "runs": 3
     },
     "prepare": {
-      "first": 0.695,
-      "median": 0.695,
-      "min": 0.695,
-      "max": 0.695,
-      "runs": 1
+      "first": 0.679,
+      "median": 0.746,
+      "min": 0.679,
+      "max": 0.762,
+      "runs": 3
     },
     "commit": {
-      "first": 0.027,
+      "first": 0.029,
       "median": 0.027,
       "min": 0.027,
-      "max": 0.027,
-      "runs": 1
+      "max": 0.029,
+      "runs": 3
     },
     "analysis": {
-      "first": 3.784,
-      "median": 3.784,
-      "min": 3.784,
-      "max": 3.784,
-      "runs": 1
+      "first": 3.668,
+      "median": 3.668,
+      "min": 3.598,
+      "max": 3.697,
+      "runs": 3
     },
     "total": {
-      "first": 4.914,
-      "median": 4.914,
-      "min": 4.914,
-      "max": 4.914,
-      "runs": 1
+      "first": 4.718,
+      "median": 4.718,
+      "min": 4.649,
+      "max": 4.761,
+      "runs": 3
     }
   },
   "stage_breakdown": {
     "파일 읽기+정규화": {
-      "first": 0.276,
-      "median": 0.276,
-      "min": 0.276,
-      "max": 0.276
+      "first": 0.343,
+      "median": 0.343,
+      "min": 0.339,
+      "max": 0.348
     },
     "정규화": {
-      "first": 0.02,
-      "median": 0.02,
-      "min": 0.02,
+      "first": 0.019,
+      "median": 0.019,
+      "min": 0.019,
       "max": 0.02
     },
     "검증·문제 분류": {
-      "first": 0.315,
-      "median": 0.315,
-      "min": 0.315,
-      "max": 0.315
+      "first": 0.174,
+      "median": 0.173,
+      "min": 0.173,
+      "max": 0.174
     },
     "제외 대상 계산": {
       "first": 0.0,
@@ -82,38 +82,45 @@
       "max": 0.0
     },
     "참조 정리+usable data 생성(재검증 포함)": {
-      "first": 0.418,
-      "median": 0.418,
-      "min": 0.418,
-      "max": 0.418
+      "first": 0.471,
+      "median": 0.475,
+      "min": 0.471,
+      "max": 0.476
     },
     "제외 후 재검증": {
       "first": 0.016,
       "median": 0.016,
       "min": 0.016,
-      "max": 0.016
+      "max": 0.017
     },
     "적용 데이터 서명": {
-      "first": 0.011,
-      "median": 0.011,
-      "min": 0.011,
+      "first": 0.01,
+      "median": 0.01,
+      "min": 0.01,
       "max": 0.011
     },
     "pending 저장(전체 검사)": {
-      "first": 0.82,
-      "median": 0.82,
-      "min": 0.82,
-      "max": 0.82
+      "first": 0.672,
+      "median": 0.675,
+      "min": 0.672,
+      "max": 0.694
     }
   },
   "ui": {
     "rendered_markdown_chars": {
       "운영 현황": 53502,
-      "추천 실행": 32707,
+      "추천 실행": 32881,
       "경로 상세": 22829,
       "분석 및 검증": 32411,
       "데이터 관리": 21997
     }
+  },
+  "execution_history": {
+    "recorded_plans": 1,
+    "recorded_items": 56,
+    "confirmed_items": 3,
+    "actual_result_samples": 1,
+    "csv_rows": 56
   },
   "recommendation_summary": {
     "final_recommendations": 58,
@@ -169,8 +176,8 @@
       "total_cost": 812746.666666,
       "total_expected_saving": 6541465.333334,
       "total_net_benefit": 5728718.666666,
-      "optimization_seconds": 0.036138,
-      "validation_seconds": 0.048458
+      "optimization_seconds": 0.040794,
+      "validation_seconds": 0.048466
     },
     "plan_validation": {
       "valid": true,
@@ -183,7 +190,7 @@
       "duplicate_plan_violations": 0
     }
   },
-  "checks_total": 173,
+  "checks_total": 186,
   "checks_failed": 0,
   "failures": [],
   "checks": [
@@ -415,8 +422,8 @@
       "ok": true,
       "detail": {
         "actual": {
-          "inventory": 30,
           "routes": 82,
+          "inventory": 30,
           "recommendations": 6,
           "stores": 1
         },
@@ -1271,6 +1278,624 @@
       "detail": "안정"
     },
     {
+      "section": "실행 이력",
+      "check": "사용자 명시 동작으로 계획 기록",
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "code": "recorded",
+        "message": "실행계획을 기록했습니다.",
+        "plan_id": "PLAN-3D81F523ADCF",
+        "created": true
+      }
+    },
+    {
+      "section": "실행 이력",
+      "check": "동일 계획 중복 저장 방지",
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "code": "duplicate",
+        "message": "이미 기록된 실행계획입니다.",
+        "plan_id": "PLAN-3D81F523ADCF",
+        "created": false
+      }
+    },
+    {
+      "section": "실행 이력",
+      "check": "운영 계획에 기록할 이동 존재",
+      "ok": true,
+      "detail": 56
+    },
+    {
+      "section": "실행 이력",
+      "check": "실행·일부 실행·미실행 저장",
+      "ok": true,
+      "detail": [
+        {
+          "ok": true,
+          "code": "updated",
+          "message": "실행 기록을 저장했습니다.",
+          "warning": null
+        },
+        {
+          "ok": true,
+          "code": "updated",
+          "message": "실행 기록을 저장했습니다.",
+          "warning": null
+        },
+        {
+          "ok": true,
+          "code": "updated",
+          "message": "실행 기록을 저장했습니다.",
+          "warning": null
+        }
+      ]
+    },
+    {
+      "section": "실행 이력",
+      "check": "앱 재시작 가정 재조회",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "실행 이력",
+      "check": "세 가지 현장 상태 재조회",
+      "ok": true,
+      "detail": [
+        "executed",
+        "not_executed",
+        "partial",
+        "unconfirmed"
+      ]
+    },
+    {
+      "section": "실행 이력",
+      "check": "계획 알고리즘 버전 추적",
+      "ok": true,
+      "detail": {
+        "actual": "execution-plan-1.0",
+        "expected": "execution-plan-1.0"
+      }
+    },
+    {
+      "section": "실행 이력",
+      "check": "데이터 서명 추적",
+      "ok": true,
+      "detail": {
+        "actual": "c6ced9079047662da9d7c5ecd03707b5dbeada0b7b4568800f41f0672eedf20d",
+        "expected": "c6ced9079047662da9d7c5ecd03707b5dbeada0b7b4568800f41f0672eedf20d"
+      }
+    },
+    {
+      "section": "실행 이력",
+      "check": "현재 데이터 초기화 후 과거 이력 유지",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "실행 이력",
+      "check": "UTF-8 BOM CSV 내보내기",
+      "ok": true,
+      "detail": {
+        "code": "exported",
+        "rows": 56
+      }
+    },
+    {
+      "section": "실행 이력",
+      "check": "CSV에 로컬 DB 경로 미포함",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "section": "실행 이력",
+      "check": "실제 결과 표본 수와 준수율 계산",
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "code": "calculated",
+        "message": "실행 기록 요약을 계산했습니다.",
+        "total_items": 56,
+        "confirmed_items": 3,
+        "execution_rate": 66.67,
+        "partial_rate": 33.33,
+        "not_executed_rate": 33.33,
+        "quantity_adherence_rate": 66.11,
+        "quantity_sample_count": 3,
+        "cost_error": {
+          "sample_count": 1,
+          "mean_error": -7266.0,
+          "mean_absolute_error": 7266.0
+        },
+        "saving_error": {
+          "sample_count": 1,
+          "mean_error": -197502.0,
+          "mean_absolute_error": 197502.0
+        },
+        "net_benefit_error": {
+          "sample_count": 1,
+          "mean_error": -190236.0,
+          "mean_absolute_error": 190236.0
+        }
+      }
+    },
+    {
+      "section": "실행 이력",
+      "check": "이력 기록 전후 알고리즘 결과 동일",
+      "ok": true,
+      "detail": {
+        "actual": {
+          "candidate_count": 58,
+          "plan_count": 56,
+          "plan_qty": 2985,
+          "cost": 812746.666666,
+          "saving": 6541465.333334,
+          "net": 5728718.666666,
+          "items": [
+            [
+              "C-c6ced907-39d7e3b6",
+              60
+            ],
+            [
+              "C-c6ced907-b57b9228",
+              60
+            ],
+            [
+              "C-c6ced907-f95eb89b",
+              60
+            ],
+            [
+              "C-c6ced907-ca26819c",
+              56
+            ],
+            [
+              "C-c6ced907-c8ee34d4",
+              60
+            ],
+            [
+              "C-c6ced907-fcdfb252",
+              60
+            ],
+            [
+              "C-c6ced907-9a27543a",
+              60
+            ],
+            [
+              "C-c6ced907-20dd33f8",
+              60
+            ],
+            [
+              "C-c6ced907-8efae22d",
+              60
+            ],
+            [
+              "C-c6ced907-e164969e",
+              60
+            ],
+            [
+              "C-c6ced907-9dfff4eb",
+              2
+            ],
+            [
+              "C-c6ced907-45115f15",
+              60
+            ],
+            [
+              "C-c6ced907-deca7adf",
+              60
+            ],
+            [
+              "C-c6ced907-34539a08",
+              60
+            ],
+            [
+              "C-c6ced907-2269e4a6",
+              60
+            ],
+            [
+              "C-c6ced907-c80c57ec",
+              60
+            ],
+            [
+              "C-c6ced907-dd6d0f30",
+              60
+            ],
+            [
+              "C-c6ced907-ac9b6676",
+              60
+            ],
+            [
+              "C-c6ced907-8ac367e0",
+              60
+            ],
+            [
+              "C-c6ced907-3ae3b9f7",
+              60
+            ],
+            [
+              "C-c6ced907-c53a39b8",
+              60
+            ],
+            [
+              "C-c6ced907-589d0974",
+              60
+            ],
+            [
+              "C-c6ced907-1ddf7f67",
+              60
+            ],
+            [
+              "C-c6ced907-a4aea7e5",
+              60
+            ],
+            [
+              "C-c6ced907-234bce31",
+              60
+            ],
+            [
+              "C-c6ced907-fdc137be",
+              50
+            ],
+            [
+              "C-c6ced907-abb30bc2",
+              42
+            ],
+            [
+              "C-c6ced907-079d211c",
+              60
+            ],
+            [
+              "C-c6ced907-d11e1909",
+              60
+            ],
+            [
+              "C-c6ced907-b21a9ff9",
+              56
+            ],
+            [
+              "C-c6ced907-5a268137",
+              60
+            ],
+            [
+              "C-c6ced907-4e68379a",
+              60
+            ],
+            [
+              "C-c6ced907-2945da74",
+              50
+            ],
+            [
+              "C-c6ced907-403e283c",
+              60
+            ],
+            [
+              "C-c6ced907-8cc08543",
+              56
+            ],
+            [
+              "C-c6ced907-4e47af32",
+              36
+            ],
+            [
+              "C-c6ced907-652eb3bf",
+              28
+            ],
+            [
+              "C-c6ced907-9190de7a",
+              42
+            ],
+            [
+              "C-c6ced907-300f9811",
+              56
+            ],
+            [
+              "C-c6ced907-3727bf20",
+              60
+            ],
+            [
+              "C-c6ced907-a7337ee7",
+              60
+            ],
+            [
+              "C-c6ced907-93d7a010",
+              34
+            ],
+            [
+              "C-c6ced907-405f5ae6",
+              60
+            ],
+            [
+              "C-c6ced907-0ac9c9e2",
+              42
+            ],
+            [
+              "C-c6ced907-74dca9bd",
+              56
+            ],
+            [
+              "C-c6ced907-f466a69b",
+              60
+            ],
+            [
+              "C-c6ced907-3e79f391",
+              28
+            ],
+            [
+              "C-c6ced907-a5a551ae",
+              60
+            ],
+            [
+              "C-c6ced907-f6515059",
+              60
+            ],
+            [
+              "C-c6ced907-d3a21add",
+              47
+            ],
+            [
+              "C-c6ced907-6149b28b",
+              60
+            ],
+            [
+              "C-c6ced907-ec61599d",
+              60
+            ],
+            [
+              "C-c6ced907-b5456d19",
+              28
+            ],
+            [
+              "C-c6ced907-2e4adc37",
+              28
+            ],
+            [
+              "C-c6ced907-0fa7f578",
+              60
+            ],
+            [
+              "C-c6ced907-d31051c8",
+              28
+            ]
+          ]
+        },
+        "expected": {
+          "candidate_count": 58,
+          "plan_count": 56,
+          "plan_qty": 2985,
+          "cost": 812746.666666,
+          "saving": 6541465.333334,
+          "net": 5728718.666666,
+          "items": [
+            [
+              "C-c6ced907-39d7e3b6",
+              60
+            ],
+            [
+              "C-c6ced907-b57b9228",
+              60
+            ],
+            [
+              "C-c6ced907-f95eb89b",
+              60
+            ],
+            [
+              "C-c6ced907-ca26819c",
+              56
+            ],
+            [
+              "C-c6ced907-c8ee34d4",
+              60
+            ],
+            [
+              "C-c6ced907-fcdfb252",
+              60
+            ],
+            [
+              "C-c6ced907-9a27543a",
+              60
+            ],
+            [
+              "C-c6ced907-20dd33f8",
+              60
+            ],
+            [
+              "C-c6ced907-8efae22d",
+              60
+            ],
+            [
+              "C-c6ced907-e164969e",
+              60
+            ],
+            [
+              "C-c6ced907-9dfff4eb",
+              2
+            ],
+            [
+              "C-c6ced907-45115f15",
+              60
+            ],
+            [
+              "C-c6ced907-deca7adf",
+              60
+            ],
+            [
+              "C-c6ced907-34539a08",
+              60
+            ],
+            [
+              "C-c6ced907-2269e4a6",
+              60
+            ],
+            [
+              "C-c6ced907-c80c57ec",
+              60
+            ],
+            [
+              "C-c6ced907-dd6d0f30",
+              60
+            ],
+            [
+              "C-c6ced907-ac9b6676",
+              60
+            ],
+            [
+              "C-c6ced907-8ac367e0",
+              60
+            ],
+            [
+              "C-c6ced907-3ae3b9f7",
+              60
+            ],
+            [
+              "C-c6ced907-c53a39b8",
+              60
+            ],
+            [
+              "C-c6ced907-589d0974",
+              60
+            ],
+            [
+              "C-c6ced907-1ddf7f67",
+              60
+            ],
+            [
+              "C-c6ced907-a4aea7e5",
+              60
+            ],
+            [
+              "C-c6ced907-234bce31",
+              60
+            ],
+            [
+              "C-c6ced907-fdc137be",
+              50
+            ],
+            [
+              "C-c6ced907-abb30bc2",
+              42
+            ],
+            [
+              "C-c6ced907-079d211c",
+              60
+            ],
+            [
+              "C-c6ced907-d11e1909",
+              60
+            ],
+            [
+              "C-c6ced907-b21a9ff9",
+              56
+            ],
+            [
+              "C-c6ced907-5a268137",
+              60
+            ],
+            [
+              "C-c6ced907-4e68379a",
+              60
+            ],
+            [
+              "C-c6ced907-2945da74",
+              50
+            ],
+            [
+              "C-c6ced907-403e283c",
+              60
+            ],
+            [
+              "C-c6ced907-8cc08543",
+              56
+            ],
+            [
+              "C-c6ced907-4e47af32",
+              36
+            ],
+            [
+              "C-c6ced907-652eb3bf",
+              28
+            ],
+            [
+              "C-c6ced907-9190de7a",
+              42
+            ],
+            [
+              "C-c6ced907-300f9811",
+              56
+            ],
+            [
+              "C-c6ced907-3727bf20",
+              60
+            ],
+            [
+              "C-c6ced907-a7337ee7",
+              60
+            ],
+            [
+              "C-c6ced907-93d7a010",
+              34
+            ],
+            [
+              "C-c6ced907-405f5ae6",
+              60
+            ],
+            [
+              "C-c6ced907-0ac9c9e2",
+              42
+            ],
+            [
+              "C-c6ced907-74dca9bd",
+              56
+            ],
+            [
+              "C-c6ced907-f466a69b",
+              60
+            ],
+            [
+              "C-c6ced907-3e79f391",
+              28
+            ],
+            [
+              "C-c6ced907-a5a551ae",
+              60
+            ],
+            [
+              "C-c6ced907-f6515059",
+              60
+            ],
+            [
+              "C-c6ced907-d3a21add",
+              47
+            ],
+            [
+              "C-c6ced907-6149b28b",
+              60
+            ],
+            [
+              "C-c6ced907-ec61599d",
+              60
+            ],
+            [
+              "C-c6ced907-b5456d19",
+              28
+            ],
+            [
+              "C-c6ced907-2e4adc37",
+              28
+            ],
+            [
+              "C-c6ced907-0fa7f578",
+              60
+            ],
+            [
+              "C-c6ced907-d31051c8",
+              28
+            ]
+          ]
+        }
+      }
+    },
+    {
       "section": "메모리",
       "check": "적용 후 pending 대용량 객체 정리",
       "ok": true,
@@ -1509,11 +2134,11 @@
       "check": "전체 흐름이 합리적인 시간 안에 완료",
       "ok": true,
       "detail": {
-        "first": 4.914,
-        "median": 4.914,
-        "min": 4.914,
-        "max": 4.914,
-        "runs": 1
+        "first": 4.718,
+        "median": 4.718,
+        "min": 4.649,
+        "max": 4.761,
+        "runs": 3
       }
     }
   ]

@@ -9,3 +9,8 @@ __pycache__/
 *.pt
 *.pth
 *.ckpt
+runtime_data/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm

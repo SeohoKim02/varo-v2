@@ -49,6 +49,9 @@ TRANSIENT_VIEW_KEYS = (
     "rec_filter_grade",
     "rec_filter_transport",
     "recommendation_route_select",
+    # 실행 이력 자체는 SQLite에 남지만, 새 데이터에서는 과거 계획 선택을
+    # 현재 화면의 기본 선택으로 끌고 오지 않습니다.
+    "history_plan_select",
     # 경로 상세 페이지: 선택된 경로
     "route_detail_select",
     # 홈 시뮬레이션 컨트롤(shadow 키). 남아있으면 아래 simulation_speed /
