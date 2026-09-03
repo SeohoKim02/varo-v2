@@ -12,6 +12,7 @@ from components.tables import format_currency, format_number
 from services.execution_history import (
     REASON_LABELS,
     STATUS_LABELS,
+    execution_history_backend_info,
     execution_history_metrics,
     export_execution_history_csv,
     get_recorded_plan,
@@ -190,10 +191,12 @@ def render_execution_history_panel(current_plan: Mapping[str, Any] | None) -> No
     has_current_plan = bool(plan.get("plan_id") and plan.get("items") and (plan.get("validation") or {}).get("valid"))
     history = list_recorded_plans()
     stored_plans = list(history.get("plans") or []) if history.get("ok") else []
-    if not has_current_plan and not stored_plans:
+    if not has_current_plan and not stored_plans and history.get("ok"):
         return
 
     render_section_header(st, "실행 기록", "추천과 실제 실행 결과를 분리해 남깁니다.")
+    backend = execution_history_backend_info()
+    st.caption(f"실행 이력 저장: {backend.get('label') or '설정 확인 필요'}")
     if not history.get("ok"):
         st.warning(history.get("message") or "실행 기록을 불러오지 못했습니다.")
 

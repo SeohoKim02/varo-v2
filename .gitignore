@@ -5,7 +5,12 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+.env.*
+!.env.example
 .streamlit/secrets.toml
+*.pem
+*.pgdump
+*.dump
 *.pt
 *.pth
 *.ckpt

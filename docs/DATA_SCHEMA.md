@@ -170,13 +170,21 @@ DQN 학습 샘플 팩(`Varo_DQN_training_samples_10pack`)은 이 저장소에 �
 - 이동 수량 > 출발 점포 재고 → 이동 후 음수, 실행 불가능(제외).
 - 이동 후 출발 재고 < 적용 재고 하한 → 실행 불가능(제외). 정확히 하한과 같으면 허용.
 
-## 로컬 실행 이력 저장 구조
+## 실행 이력 지속 저장 구조
 
-실행 이력은 업로드 원본이나 추천 알고리즘 테이블과 분리된 SQLite DB에 저장합니다. 기본 위치는
-`runtime_data/varo_execution_history.sqlite3`이며 `VARO_HISTORY_DB_PATH` 환경변수로 서버별 저장 위치를
-바꿀 수 있습니다. `runtime_data/`, `*.sqlite`, `*.sqlite3`와 SQLite 보조 파일은 Git에서 제외됩니다.
+실행 이력은 업로드 원본·추천 알고리즘과 분리된 공통 service/store 계약으로 저장합니다. 설정이 없으면
+기존과 동일한 SQLite, `VARO_HISTORY_DATABASE_URL`이 있으면 PostgreSQL adapter를 선택합니다. 선택 우선순위는
+테스트·이관에서 넘긴 명시적 SQLite 경로 → PostgreSQL URL → `VARO_HISTORY_DB_PATH` → 기본 SQLite 경로입니다.
+PostgreSQL을 명시하고 연결에 실패한 경우 로컬 파일로 자동 전환하지 않습니다.
 
-schema version은 SQLite `user_version`으로 관리합니다. 현재 version 1의 테이블은 다음과 같습니다.
+- SQLite 기본 위치: `runtime_data/varo_execution_history.sqlite3`
+- SQLite schema version: `PRAGMA user_version=1`
+- PostgreSQL schema version: `execution_history_schema_meta`의 단일 version 행
+- 공통 저장 시각: timezone이 포함된 UTC ISO 8601 문자열
+- 금액/점수: 현재 Python 계산 의미를 유지하는 SQLite `REAL` / PostgreSQL `DOUBLE PRECISION`
+- 미입력 사후 결과: 두 backend 모두 `NULL`
+
+현재 version 1의 업무 테이블은 다음과 같습니다.
 
 - `execution_plans`: plan ID, 실행계획 알고리즘 버전, 후보 평가 알고리즘 버전, 데이터 signature,
   생성·기록·수정 시각, 상태, 계획 건수·수량, 예상 비용·절감·순효과.
@@ -189,5 +197,22 @@ schema version은 SQLite `user_version`으로 관리합니다. 현재 version 1�
 실제값이 없는 컬럼은 `NULL`이고 예상값을 복사하거나 0으로 대체하지 않습니다. 실제 순효과는 실제 운송비와
 실제 절감액이 모두 입력된 경우에만 계산합니다.
 
+두 backend 모두 `execution_plans.plan_id`와 `execution_items(plan_id, candidate_id)`를 primary key로 보호하고,
+항목→계획 및 감사→항목 foreign key를 둡니다. 계획+항목 저장, 실행결과+감사 저장, SQLite→PostgreSQL 이관은
+각각 같은 transaction에서 완료되거나 전부 rollback됩니다. PostgreSQL 항목 수정은 대상 행을 잠가 동시에
+수정하는 요청을 순서대로 처리합니다. 연결은 작업마다 열고 예외 여부와 무관하게 닫으며, 자체 대형 pool은
+구현하지 않습니다.
+
 CSV export는 plan/candidate 연결에 필요한 ID와 알고리즘 lineage, 계획 당시의 제한된 VHS feature snapshot,
 실제 실행·사후 결과만 포함합니다. 로컬 DB 경로와 자유 메모는 포함하지 않으며 UTF-8 BOM으로 생성합니다.
+backend별 SQL 필드나 연결정보는 포함하지 않습니다.
+
+### SQLite에서 PostgreSQL로 이관
+
+`tools/migrate_execution_history.py`는 기존 SQLite를 읽기 전용으로 열고 plan/item/audit 관계와 집계 건수를
+검증합니다. `--dry-run`은 대상 DB에 쓰지 않고 전체·중복·무효·신규 건수만 출력합니다. `--apply`는 이미 있는
+plan을 건너뛰고 신규 plan과 연결 항목·감사를 하나의 transaction으로 삽입한 뒤 행 수를 다시 확인합니다.
+원본 파일의 내용은 변경하지 않으며, 출력에는 DB URL·비밀번호·plan/candidate 상세를 표시하지 않습니다.
+
+향후 조직/사용자 소유권이 필요할 때는 schema version을 올려 `organization_id`/`workspace_id` 같은 실제 소유
+키를 추가합니다. 현재 알 수 없는 소유자를 가짜 ID로 생성하지 않습니다.

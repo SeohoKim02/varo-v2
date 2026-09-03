@@ -9,6 +9,7 @@ from unittest import mock
 from services.app_state import CANONICAL_DATA_KEYS
 from services.data_application import load_and_apply
 from services.execution_history import get_recorded_plan, list_recorded_plans
+from services.execution_history_store import HistoryStoreError, PostgreSQLExecutionHistoryStore
 from tests.fixtures import sample_workbook, workbook_excel_bytes
 
 try:
@@ -32,7 +33,10 @@ class ExecutionHistoryUiTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.db = Path(self.temp.name) / "history.sqlite3"
-        self.env = mock.patch.dict(os.environ, {"VARO_HISTORY_DB_PATH": str(self.db)})
+        self.env = mock.patch.dict(
+            os.environ,
+            {"VARO_HISTORY_DB_PATH": str(self.db), "VARO_HISTORY_DATABASE_URL": ""},
+        )
         self.env.start()
 
     def tearDown(self):
@@ -53,6 +57,15 @@ class ExecutionHistoryUiTests(unittest.TestCase):
     def markdown_blob(app) -> str:
         return " ".join(str(element.value) for element in app.markdown)
 
+    @staticmethod
+    def visible_blob(app) -> str:
+        groups = ("markdown", "caption", "warning", "error", "info", "success")
+        return " ".join(
+            str(element.value)
+            for group in groups
+            for element in getattr(app, group, ())
+        )
+
     def test_plan_is_saved_only_after_explicit_button(self):
         app = self.app()
         self.assertEqual(list_recorded_plans(self.db)["plans"], [])
@@ -60,6 +73,7 @@ class ExecutionHistoryUiTests(unittest.TestCase):
         button = next(item for item in app.button if item.key == "record_execution_plan")
         self.assertEqual(button.label, "이 계획 기록")
         self.assertFalse(button.disabled)
+        self.assertIn("실행 이력 저장: 로컬", self.visible_blob(app))
         button.click().run()
         self.assertFalse(app.exception)
         self.assertEqual(len(list_recorded_plans(self.db)["plans"]), 1)
@@ -90,9 +104,25 @@ class ExecutionHistoryUiTests(unittest.TestCase):
         self.assertEqual(item["actual_transport_cost"], 2500)
         self.assertEqual(item["actual_saving"], 9000)
 
-        blob = self.markdown_blob(app)
+        blob = self.visible_blob(app)
         for hidden in (plan["plan_id"], plan["data_signature"], first["candidate_id"], "Traceback", "sqlite"):
             self.assertNotIn(str(hidden), blob)
+
+    def test_server_backend_failure_is_short_and_never_falls_back_or_leaks_secret(self):
+        url = "postgresql://test-user:do-not-show@db.invalid/test-db-ui"
+        with mock.patch.dict(os.environ, {"VARO_HISTORY_DATABASE_URL": url}), mock.patch.object(
+            PostgreSQLExecutionHistoryStore,
+            "_open",
+            side_effect=HistoryStoreError("host db.invalid password do-not-show SELECT"),
+        ):
+            app = self.app()
+        self.assertFalse(app.exception)
+        self.assertFalse(self.db.exists())
+        blob = self.visible_blob(app)
+        self.assertIn("실행 이력 저장: 서버", blob)
+        self.assertIn("실행 기록을 불러오지 못했습니다.", blob)
+        for hidden in (url, "do-not-show", "db.invalid", "SELECT", "Traceback"):
+            self.assertNotIn(hidden, blob)
 
 
 if __name__ == "__main__":

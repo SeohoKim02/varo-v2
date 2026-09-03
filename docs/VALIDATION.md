@@ -248,7 +248,15 @@ python -m compileall -q app_v2.py router.py styles.py components services pages 
   중복 방지, rollback, 새 연결 재조회, 실행 상태와 정수 수량, 계획 초과 경고, 선택형 사유, 선택적 실제 결과,
   표본 수 기반 오차·준수율, 변경 이벤트, UTF-8 BOM CSV, 현재 데이터 초기화 후 과거 이력 보존을 검증합니다.
 - **실행 이력 UI** (`tests/test_execution_history_ui.py`): 명시적 계획 기록 버튼, 자동 기록 방지, 실제 상태·수량·
-  비용·절감액 입력, 내부 plan/candidate/signature·DB 경로·traceback 비노출을 검증합니다.
+  비용·절감액 입력, 로컬/서버 보관 표시, backend 장애 시 추천 화면 유지, 내부
+  plan/candidate/signature·DB URL·SQL·traceback 비노출을 검증합니다.
+- **저장 backend 계약** (`tests/test_execution_history_backends.py`): 환경 우선순위, 잘못된 설정 차단,
+  SQLite/PostgreSQL 선택, PostgreSQL schema/PK/FK/version, `%s` parameter binding, 중복 보호, 항목 row lock,
+  plan+items 및 result+audit rollback, NULL·UTC·금액 의미, 조회 pagination, 집계 SQL, CSV parity, 연결 종료,
+  PostgreSQL 장애 시 SQLite 비우회를 외부 서버 없이 검증합니다.
+- **SQLite→PostgreSQL 이관** (`tests/test_execution_history_migration.py`): 읽기 전용 source, dry-run 무쓰기,
+  plan/item/audit 건수와 관계 검증, 중복 감지, 원자 이관, 실패 rollback, source hash 보존, CLI 출력의
+  식별자·비밀정보 비노출을 검증합니다.
 
 ## DQN 품질 판정
 
@@ -291,7 +299,14 @@ python -m pytest tests/test_feasibility.py tests/test_decision_support.py \
 python -m pytest tests/test_page_render.py -q
 # 운영 형식 익명화 데이터 end-to-end
 python -m pytest tests/test_operational_validation.py tests/test_operational_ui_flow.py -q
+# 실행 이력 backend와 이관 (외부 PostgreSQL 불필요)
+python -m pytest tests/test_execution_history_backends.py tests/test_execution_history_migration.py -q
 ```
+
+일반 test suite는 `tests/conftest.py`에서 실행 이력 backend를 테스트별 임시 SQLite로 강제 격리하므로,
+호스트에 `VARO_HISTORY_DATABASE_URL`이 설정돼 있어도 실제 운영 DB를 읽거나 생성·초기화하지 않습니다.
+PostgreSQL adapter는 격리된 DB-API contract double로 schema, SQL parameterization, transaction과 결과 parity를
+검증합니다. 이번 검증 환경에는 별도 PostgreSQL test server가 없어 실제 네트워크 통합 검증은 수행하지 않습니다.
 
 ## 운영 형식 익명화 데이터 검증
 

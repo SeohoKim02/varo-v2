@@ -23,10 +23,10 @@ Greedy(단순 기준선)·Pareto(비지배 검증)·DQN(선택형 참고)은 비
 ## 설치
 
 - Python 3.11 권장
-- 의존성: `streamlit`, `pandas`, `altair`, `openpyxl` (엑셀), 그리고 **선택 사항**으로 `torch`(DQN 학습 시에만)
+- 기본 의존성에는 앱 실행 패키지와 실행 이력용 PostgreSQL 드라이버가 포함됩니다. `torch`는 DQN 학습 시에만 선택 사항입니다.
 
 ```bash
-python -m pip install streamlit pandas altair openpyxl
+python -m pip install -r requirements.txt
 # DQN 학습을 직접 실행할 때만 추가 (없어도 앱은 정상 동작):
 python -m pip install torch
 ```
@@ -38,6 +38,27 @@ python -m streamlit run app_v2.py --server.headless true --server.port 8501
 ```
 
 브라우저에서 `http://localhost:8501` 을 엽니다.
+
+## 실행 이력 저장 설정
+
+- 별도 설정이 없으면 `runtime_data/varo_execution_history.sqlite3`에 로컬 저장합니다.
+- 운영 환경에서 `VARO_HISTORY_DATABASE_URL`을 설정하면 PostgreSQL 서버 저장을 사용합니다.
+- 서버 DB를 명시한 뒤 연결이 실패하면 임시 SQLite로 우회하지 않고 실행 이력 기능만 저장 실패로 처리합니다.
+- 실제 URL·비밀번호는 코드나 Git에 넣지 말고 배포 환경의 비밀 설정에만 저장합니다.
+
+Streamlit Community Cloud에서는 앱 설정의 Secrets에 `VARO_HISTORY_DATABASE_URL`을 **최상위 키**로
+등록합니다. 최상위 secret은 환경변수로 전달되므로 저장 service가 Streamlit에 직접 의존하지 않습니다.
+이 작업은 코드 준비만 포함하며 실제 Cloud secret이나 운영 DB는 변경하지 않습니다.
+
+기존 SQLite 이력을 PostgreSQL로 옮길 때는 먼저 쓰기 없는 검사를 실행한 뒤 명시적으로 적용합니다.
+
+```bash
+python tools/migrate_execution_history.py --dry-run
+python tools/migrate_execution_history.py --apply
+```
+
+`--source`를 생략하면 기본 SQLite 위치를 사용합니다. 이관은 원본 SQLite를 읽기 전용으로 다루며,
+이미 서버에 있는 계획은 중복으로 집계하고 다시 생성하지 않습니다.
 
 ## 기본 사용 순서
 

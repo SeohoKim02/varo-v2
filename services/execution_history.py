@@ -12,16 +12,24 @@ import io
 import json
 import math
 import os
-import sqlite3
-from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from services.execution_history_config import (
+    DEFAULT_HISTORY_DB,
+    HISTORY_DB_PATH_ENV,
+    HistoryConfigurationError,
+    load_execution_history_config,
+)
+from services.execution_history_store import (
+    SCHEMA_VERSION,
+    DuplicatePlanError,
+    HistoryItemNotFoundError,
+    HistoryStoreError,
+    build_execution_history_store,
+)
 
-SCHEMA_VERSION = 1
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_HISTORY_DB = PROJECT_ROOT / "runtime_data" / "varo_execution_history.sqlite3"
 
 STATUS_LABELS = {
     "unconfirmed": "미확인",
@@ -67,8 +75,17 @@ def _utc_now() -> str:
 def history_db_path(db_path: str | Path | None = None) -> Path:
     if db_path is not None:
         return Path(db_path)
-    configured = str(os.environ.get("VARO_HISTORY_DB_PATH") or "").strip()
+    configured = str(os.environ.get(HISTORY_DB_PATH_ENV) or "").strip()
     return Path(configured) if configured else DEFAULT_HISTORY_DB
+
+
+def execution_history_backend_info(db_path: str | Path | None = None) -> dict[str, Any]:
+    """Return only a user-safe backend label; never connection details."""
+    try:
+        config = load_execution_history_config(db_path)
+        return _result(True, "configured", "실행 이력 저장소가 설정되었습니다.", backend=config.backend, label=config.user_label)
+    except HistoryConfigurationError:
+        return _result(False, "invalid_config", "실행 기록 저장 설정을 확인해주세요.", backend=None, label="설정 확인 필요")
 
 
 def _result(ok: bool, code: str, message: str, **extra: Any) -> dict[str, Any]:
@@ -115,106 +132,11 @@ def _optional_bool(value: Any) -> int | None:
     raise ValueError("품절 여부 값을 확인해주세요.")
 
 
-def _connect(path: Path) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(str(path), timeout=8.0)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
-
-
-def _ensure_schema(connection: sqlite3.Connection) -> None:
-    version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-    if version > SCHEMA_VERSION:
-        raise sqlite3.DatabaseError("unsupported execution-history schema")
-    connection.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS execution_plans (
-            plan_id TEXT PRIMARY KEY,
-            algorithm_version TEXT NOT NULL,
-            candidate_algorithm_version TEXT,
-            data_signature TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            recorded_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            plan_status TEXT NOT NULL,
-            total_actions INTEGER NOT NULL CHECK(total_actions >= 0),
-            total_planned_qty INTEGER NOT NULL CHECK(total_planned_qty >= 0),
-            expected_total_cost REAL,
-            expected_total_saving REAL,
-            expected_total_net_benefit REAL
-        );
-
-        CREATE TABLE IF NOT EXISTS execution_items (
-            plan_id TEXT NOT NULL,
-            candidate_id TEXT NOT NULL,
-            candidate_algorithm_version TEXT,
-            source_store_id TEXT NOT NULL,
-            source_store_name TEXT,
-            destination_store_id TEXT NOT NULL,
-            destination_store_name TEXT,
-            product_id TEXT NOT NULL,
-            product_name TEXT,
-            route_type TEXT NOT NULL,
-            dc_id TEXT,
-            planned_qty INTEGER NOT NULL CHECK(planned_qty > 0),
-            expected_cost REAL,
-            expected_saving REAL,
-            expected_net_benefit REAL,
-            vhs_score REAL,
-            stability TEXT,
-            confidence REAL,
-            feature_snapshot_json TEXT NOT NULL DEFAULT '{}',
-            execution_status TEXT NOT NULL DEFAULT 'unconfirmed',
-            actual_qty INTEGER,
-            nonexecution_reason TEXT,
-            operator_note TEXT,
-            post_source_stock REAL,
-            post_destination_stock REAL,
-            actual_sales_qty REAL,
-            actual_waste_qty REAL,
-            actual_stockout_occurred INTEGER CHECK(actual_stockout_occurred IN (0, 1)),
-            actual_stockout_qty REAL,
-            actual_transport_cost REAL,
-            actual_saving REAL,
-            actual_net_benefit REAL,
-            outcome_recorded_at TEXT,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(plan_id, candidate_id),
-            FOREIGN KEY(plan_id) REFERENCES execution_plans(plan_id) ON DELETE RESTRICT
-        );
-
-        CREATE TABLE IF NOT EXISTS execution_item_events (
-            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            plan_id TEXT NOT NULL,
-            candidate_id TEXT NOT NULL,
-            changed_at TEXT NOT NULL,
-            previous_status TEXT,
-            new_status TEXT NOT NULL,
-            previous_actual_qty INTEGER,
-            new_actual_qty INTEGER,
-            reason_code TEXT,
-            note_snapshot TEXT,
-            FOREIGN KEY(plan_id, candidate_id)
-                REFERENCES execution_items(plan_id, candidate_id) ON DELETE RESTRICT
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_execution_plans_recorded
-            ON execution_plans(recorded_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_execution_items_status
-            ON execution_items(execution_status);
-        """
-    )
-    connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-    connection.commit()
-
-
 def initialize_history_store(db_path: str | Path | None = None) -> dict[str, Any]:
     try:
-        with closing(_connect(history_db_path(db_path))) as connection:
-            _ensure_schema(connection)
+        build_execution_history_store(db_path).initialize()
         return _result(True, "ready", "실행 기록 저장소가 준비되었습니다.", schema_version=SCHEMA_VERSION)
-    except (OSError, sqlite3.Error):
+    except (HistoryConfigurationError, HistoryStoreError, OSError):
         return _result(False, "storage_error", "실행 기록 저장소를 준비하지 못했습니다.")
 
 
@@ -294,22 +216,6 @@ def _plan_snapshot(plan: Mapping[str, Any], recorded_at: str) -> tuple[dict[str,
     return snapshot, items
 
 
-def _insert_plan(connection: sqlite3.Connection, plan: Mapping[str, Any]) -> None:
-    columns = tuple(plan)
-    connection.execute(
-        f"INSERT INTO execution_plans ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
-        tuple(plan[column] for column in columns),
-    )
-
-
-def _insert_plan_items(connection: sqlite3.Connection, items: Sequence[Mapping[str, Any]]) -> None:
-    columns = tuple(items[0])
-    connection.executemany(
-        f"INSERT INTO execution_items ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
-        [tuple(item[column] for column in columns) for item in items],
-    )
-
-
 def record_execution_plan(
     plan: Mapping[str, Any], db_path: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -320,82 +226,42 @@ def record_execution_plan(
     except (ValueError, TypeError, AttributeError) as exc:
         return _result(False, "invalid_plan", str(exc))
 
-    connection: sqlite3.Connection | None = None
     try:
-        connection = _connect(history_db_path(db_path))
-        _ensure_schema(connection)
-        connection.execute("BEGIN IMMEDIATE")
-        _insert_plan(connection, snapshot)
-        _insert_plan_items(connection, items)
-        connection.commit()
+        build_execution_history_store(db_path).save_plan(snapshot, items)
         return _result(
             True, "recorded", "실행계획을 기록했습니다.",
             plan_id=snapshot["plan_id"], created=True,
         )
-    except sqlite3.IntegrityError:
-        if connection is not None:
-            connection.rollback()
-            existing = connection.execute(
-                "SELECT 1 FROM execution_plans WHERE plan_id = ?",
-                (snapshot["plan_id"],),
-            ).fetchone()
-            if existing is not None:
-                return _result(
-                    True, "duplicate", "이미 기록된 실행계획입니다.",
-                    plan_id=snapshot["plan_id"], created=False,
-                )
+    except DuplicatePlanError:
+        return _result(
+            True, "duplicate", "이미 기록된 실행계획입니다.",
+            plan_id=snapshot["plan_id"], created=False,
+        )
+    except (HistoryConfigurationError, HistoryStoreError, OSError):
         return _result(False, "storage_error", "실행 기록을 저장하지 못했습니다.")
-    except (OSError, sqlite3.Error):
-        if connection is not None:
-            connection.rollback()
-        return _result(False, "storage_error", "실행 기록을 저장하지 못했습니다.")
-    finally:
-        if connection is not None:
-            connection.close()
-
-
-def _row_dict(row: sqlite3.Row) -> dict[str, Any]:
-    return {key: row[key] for key in row.keys()}
 
 
 def list_recorded_plans(
-    db_path: str | Path | None = None, *, limit: int = 50,
+    db_path: str | Path | None = None, *, limit: int = 50, offset: int = 0,
 ) -> dict[str, Any]:
-    path = history_db_path(db_path)
-    if not path.exists():
-        return _result(True, "loaded", "기록된 실행계획이 없습니다.", plans=[])
     try:
         safe_limit = max(1, min(int(limit), 100_000))
-        with closing(_connect(path)) as connection:
-            _ensure_schema(connection)
-            rows = connection.execute(
-                "SELECT * FROM execution_plans ORDER BY recorded_at DESC, plan_id LIMIT ?",
-                (safe_limit,),
-            ).fetchall()
-        return _result(True, "loaded", "실행 기록을 불러왔습니다.", plans=[_row_dict(row) for row in rows])
-    except (OSError, sqlite3.Error, ValueError, TypeError):
+        safe_offset = max(0, int(offset))
+        rows = build_execution_history_store(db_path).list_plans(limit=safe_limit, offset=safe_offset)
+        message = "실행 기록을 불러왔습니다." if rows else "기록된 실행계획이 없습니다."
+        return _result(True, "loaded", message, plans=rows)
+    except (HistoryConfigurationError, HistoryStoreError, OSError, ValueError, TypeError):
         return _result(False, "storage_error", "실행 기록을 불러오지 못했습니다.", plans=[])
 
 
 def get_recorded_plan(plan_id: str, db_path: str | Path | None = None) -> dict[str, Any]:
-    path = history_db_path(db_path)
-    if not path.exists():
-        return _result(False, "not_found", "기록된 실행계획을 찾지 못했습니다.", plan=None, items=[])
     try:
-        with closing(_connect(path)) as connection:
-            _ensure_schema(connection)
-            plan_row = connection.execute(
-                "SELECT * FROM execution_plans WHERE plan_id = ?", (str(plan_id),),
-            ).fetchone()
-            if plan_row is None:
-                return _result(False, "not_found", "기록된 실행계획을 찾지 못했습니다.", plan=None, items=[])
-            item_rows = connection.execute(
-                "SELECT * FROM execution_items WHERE plan_id = ? ORDER BY source_store_name, destination_store_name, product_name, candidate_id",
-                (str(plan_id),),
-            ).fetchall()
-        items = [_item_with_comparison(_row_dict(row)) for row in item_rows]
-        return _result(True, "loaded", "실행계획을 불러왔습니다.", plan=_row_dict(plan_row), items=items)
-    except (OSError, sqlite3.Error):
+        plan, raw_items = build_execution_history_store(db_path).get_plan(str(plan_id))
+        if plan is None:
+            return _result(False, "not_found", "기록된 실행계획을 찾지 못했습니다.", plan=None, items=[])
+        items = [_item_with_comparison(item) for item in raw_items]
+        return _result(True, "loaded", "실행계획을 불러왔습니다.", plan=plan, items=items)
+    except (HistoryConfigurationError, HistoryStoreError, OSError):
         return _result(False, "storage_error", "실행 기록을 불러오지 못했습니다.", plan=None, items=[])
 
 
@@ -464,168 +330,101 @@ def update_execution_item(
         return _result(False, "invalid_value", str(exc))
 
     now = _utc_now()
-    connection: sqlite3.Connection | None = None
     try:
-        connection = _connect(history_db_path(db_path))
-        _ensure_schema(connection)
-        connection.execute("BEGIN IMMEDIATE")
-        current = connection.execute(
-            "SELECT * FROM execution_items WHERE plan_id = ? AND candidate_id = ?",
-            (str(plan_id), str(candidate_id)),
-        ).fetchone()
-        if current is None:
-            connection.rollback()
-            return _result(False, "not_found", "기록된 이동을 찾지 못했습니다.")
-        if not outcomes_provided:
-            clean_outcomes = {key: current[key] for key in _OUTCOME_FIELDS}
-            stockout_occurred = current["actual_stockout_occurred"]
-        actual_net = None
-        if clean_outcomes["actual_saving"] is not None and clean_outcomes["actual_transport_cost"] is not None:
-            actual_net = clean_outcomes["actual_saving"] - clean_outcomes["actual_transport_cost"]
-        outcome_recorded_at = (
-            now if stockout_occurred is not None or any(value is not None for value in clean_outcomes.values())
-            else current["outcome_recorded_at"]
+        planned_qty = build_execution_history_store(db_path).update_execution_result(
+            str(plan_id),
+            str(candidate_id),
+            status=status,
+            quantity=quantity,
+            reason=reason,
+            operator_note=_text(operator_note, 300),
+            outcomes=clean_outcomes,
+            outcomes_provided=outcomes_provided,
+            stockout_occurred=stockout_occurred,
+            now=now,
         )
         warning = None
-        if quantity is not None and quantity > int(current["planned_qty"]):
-            warning = f"계획보다 {quantity - int(current['planned_qty'])}개 많이 실행되었습니다."
-        connection.execute(
-            """
-            UPDATE execution_items SET
-                execution_status = ?, actual_qty = ?, nonexecution_reason = ?, operator_note = ?,
-                post_source_stock = ?, post_destination_stock = ?, actual_sales_qty = ?,
-                actual_waste_qty = ?, actual_stockout_occurred = ?, actual_stockout_qty = ?, actual_transport_cost = ?,
-                actual_saving = ?, actual_net_benefit = ?, outcome_recorded_at = ?, updated_at = ?
-            WHERE plan_id = ? AND candidate_id = ?
-            """,
-            (
-                status, quantity, reason, _text(operator_note, 300),
-                clean_outcomes["post_source_stock"], clean_outcomes["post_destination_stock"],
-                clean_outcomes["actual_sales_qty"], clean_outcomes["actual_waste_qty"],
-                stockout_occurred, clean_outcomes["actual_stockout_qty"], clean_outcomes["actual_transport_cost"],
-                clean_outcomes["actual_saving"], actual_net, outcome_recorded_at, now,
-                str(plan_id), str(candidate_id),
-            ),
-        )
-        connection.execute(
-            """
-            INSERT INTO execution_item_events (
-                plan_id, candidate_id, changed_at, previous_status, new_status,
-                previous_actual_qty, new_actual_qty, reason_code, note_snapshot
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                str(plan_id), str(candidate_id), now, current["execution_status"], status,
-                current["actual_qty"], quantity, reason, _text(operator_note, 300),
-            ),
-        )
-        connection.execute(
-            "UPDATE execution_plans SET updated_at = ? WHERE plan_id = ?", (now, str(plan_id)),
-        )
-        connection.commit()
+        if quantity is not None and quantity > planned_qty:
+            warning = f"계획보다 {quantity - planned_qty}개 많이 실행되었습니다."
         return _result(True, "updated", "실행 기록을 저장했습니다.", warning=warning)
-    except (OSError, sqlite3.Error):
-        if connection is not None:
-            connection.rollback()
+    except HistoryItemNotFoundError:
+        return _result(False, "not_found", "기록된 이동을 찾지 못했습니다.")
+    except (HistoryConfigurationError, HistoryStoreError, OSError):
         return _result(False, "storage_error", "실행 기록을 저장하지 못했습니다.")
-    finally:
-        if connection is not None:
-            connection.close()
 
 
 def execution_history_metrics(db_path: str | Path | None = None) -> dict[str, Any]:
-    path = history_db_path(db_path)
-    if not path.exists():
-        return _result(
-            True, "calculated", "실행 기록 요약을 계산했습니다.",
-            total_items=0, confirmed_items=0, execution_rate=None,
-            partial_rate=None, not_executed_rate=None,
-            quantity_adherence_rate=None, quantity_sample_count=0,
-            cost_error={"sample_count": 0, "mean_error": None, "mean_absolute_error": None},
-            saving_error={"sample_count": 0, "mean_error": None, "mean_absolute_error": None},
-            net_benefit_error={"sample_count": 0, "mean_error": None, "mean_absolute_error": None},
-        )
     try:
-        with closing(_connect(path)) as connection:
-            _ensure_schema(connection)
-            rows = [_row_dict(row) for row in connection.execute("SELECT * FROM execution_items").fetchall()]
-    except (OSError, sqlite3.Error):
+        summary = build_execution_history_store(db_path).metrics_summary()
+    except (HistoryConfigurationError, HistoryStoreError, OSError):
         return _result(False, "storage_error", "실행 기록 요약을 계산하지 못했습니다.")
-
-    confirmed = [row for row in rows if row["execution_status"] != "unconfirmed"]
-    executed = [row for row in confirmed if row["execution_status"] in {"executed", "partial"}]
-    quantity_rows = [row for row in confirmed if row["actual_qty"] is not None]
 
     def rate(numerator: int, denominator: int) -> float | None:
         return None if denominator == 0 else round(numerator / denominator * 100.0, 2)
 
-    def error_metrics(actual: str, expected: str) -> dict[str, Any]:
-        values = [
-            float(row[actual]) - float(row[expected])
-            for row in rows if row[actual] is not None and row[expected] is not None
-        ]
+    def normalized_error(name: str) -> dict[str, Any]:
+        raw = summary[name]
+        count = int(raw.get("sample_count") or 0)
         return {
-            "sample_count": len(values),
-            "mean_error": None if not values else round(sum(values) / len(values), 6),
-            "mean_absolute_error": None if not values else round(sum(abs(value) for value in values) / len(values), 6),
+            "sample_count": count,
+            "mean_error": None if not count else round(float(raw["mean_error"]), 6),
+            "mean_absolute_error": None if not count else round(float(raw["mean_absolute_error"]), 6),
         }
 
-    actual_total = sum(int(row["actual_qty"]) for row in quantity_rows)
-    planned_total = sum(int(row["planned_qty"]) for row in quantity_rows)
+    confirmed = int(summary.get("confirmed_items") or 0)
+    planned_total = int(summary.get("planned_qty_sample_total") or 0)
+    actual_total = int(summary.get("actual_qty_total") or 0)
     return _result(
         True, "calculated", "실행 기록 요약을 계산했습니다.",
-        total_items=len(rows), confirmed_items=len(confirmed),
-        execution_rate=rate(len(executed), len(confirmed)),
-        partial_rate=rate(sum(row["execution_status"] == "partial" for row in confirmed), len(confirmed)),
-        not_executed_rate=rate(sum(row["execution_status"] in {"not_executed", "cancelled"} for row in confirmed), len(confirmed)),
+        total_items=int(summary.get("total_items") or 0), confirmed_items=confirmed,
+        execution_rate=rate(int(summary.get("executed_items") or 0), confirmed),
+        partial_rate=rate(int(summary.get("partial_items") or 0), confirmed),
+        not_executed_rate=rate(int(summary.get("not_executed_items") or 0), confirmed),
         quantity_adherence_rate=None if not planned_total else round(actual_total / planned_total * 100.0, 2),
-        quantity_sample_count=len(quantity_rows),
-        cost_error=error_metrics("actual_transport_cost", "expected_cost"),
-        saving_error=error_metrics("actual_saving", "expected_saving"),
-        net_benefit_error=error_metrics("actual_net_benefit", "expected_net_benefit"),
+        quantity_sample_count=int(summary.get("quantity_sample_count") or 0),
+        cost_error=normalized_error("cost_error"),
+        saving_error=normalized_error("saving_error"),
+        net_benefit_error=normalized_error("net_benefit_error"),
     )
 
 
 def export_execution_history_csv(db_path: str | Path | None = None) -> dict[str, Any]:
     """Return a user-triggered UTF-8 BOM calibration export; never includes DB paths."""
-    plans_result = list_recorded_plans(db_path, limit=100_000)
-    if not plans_result["ok"]:
+    try:
+        stored_rows = build_execution_history_store(db_path).export_rows()
+    except (HistoryConfigurationError, HistoryStoreError, OSError):
         return _result(False, "storage_error", "실행 기록을 내보내지 못했습니다.", data=b"")
     rows: list[dict[str, Any]] = []
-    for plan in plans_result["plans"]:
-        loaded = get_recorded_plan(plan["plan_id"], db_path)
-        if not loaded["ok"]:
-            continue
-        for item in loaded["items"]:
-            try:
-                features = json.loads(item.get("feature_snapshot_json") or "{}")
-            except (TypeError, json.JSONDecodeError):
-                features = {}
-            rows.append({
-                "plan_id": plan["plan_id"], "candidate_id": item["candidate_id"],
-                "plan_algorithm_version": plan["algorithm_version"],
-                "candidate_algorithm_version": item.get("candidate_algorithm_version") or plan.get("candidate_algorithm_version"),
-                "data_signature": plan["data_signature"], "plan_created_at": plan["created_at"],
-                "recorded_at": plan["recorded_at"], "source_store": item.get("source_store_name") or item["source_store_id"],
-                "destination_store": item.get("destination_store_name") or item["destination_store_id"],
-                "product_id": item["product_id"], "product": item.get("product_name"),
-                "route_type": item["route_type"], "dc_id": item.get("dc_id"),
-                "planned_qty": item["planned_qty"], "actual_qty": item.get("actual_qty"),
-                "execution_status": item["execution_status_label"],
-                "nonexecution_reason": item["nonexecution_reason_label"],
-                "expected_cost": item.get("expected_cost"), "actual_transport_cost": item.get("actual_transport_cost"),
-                "expected_saving": item.get("expected_saving"), "actual_saving": item.get("actual_saving"),
-                "expected_net_benefit": item.get("expected_net_benefit"), "actual_net_benefit": item.get("actual_net_benefit"),
-                "post_source_stock": item.get("post_source_stock"), "post_destination_stock": item.get("post_destination_stock"),
-                "actual_sales_qty": item.get("actual_sales_qty"), "actual_waste_qty": item.get("actual_waste_qty"),
-                "actual_stockout_occurred": (
-                    "" if item.get("actual_stockout_occurred") is None
-                    else "있음" if item.get("actual_stockout_occurred") else "없음"
-                ),
-                "actual_stockout_qty": item.get("actual_stockout_qty"), "vhs_score": item.get("vhs_score"),
-                "stability": item.get("stability"), "confidence": item.get("confidence"),
-                **{key: features.get(key) for key in _FEATURE_FIELDS},
-            })
+    for item in stored_rows:
+        try:
+            features = json.loads(item.get("feature_snapshot_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            features = {}
+        rows.append({
+            "plan_id": item["plan_id"], "candidate_id": item["candidate_id"],
+            "plan_algorithm_version": item["plan_algorithm_version"],
+            "candidate_algorithm_version": item.get("candidate_algorithm_version") or item.get("plan_candidate_algorithm_version"),
+            "data_signature": item["data_signature"], "plan_created_at": item["plan_created_at"],
+            "recorded_at": item["recorded_at"], "source_store": item.get("source_store_name") or item["source_store_id"],
+            "destination_store": item.get("destination_store_name") or item["destination_store_id"],
+            "product_id": item["product_id"], "product": item.get("product_name"),
+            "route_type": item["route_type"], "dc_id": item.get("dc_id"),
+            "planned_qty": item["planned_qty"], "actual_qty": item.get("actual_qty"),
+            "execution_status": STATUS_LABELS.get(item.get("execution_status"), "확인 필요"),
+            "nonexecution_reason": REASON_LABELS.get(item.get("nonexecution_reason"), "-"),
+            "expected_cost": item.get("expected_cost"), "actual_transport_cost": item.get("actual_transport_cost"),
+            "expected_saving": item.get("expected_saving"), "actual_saving": item.get("actual_saving"),
+            "expected_net_benefit": item.get("expected_net_benefit"), "actual_net_benefit": item.get("actual_net_benefit"),
+            "post_source_stock": item.get("post_source_stock"), "post_destination_stock": item.get("post_destination_stock"),
+            "actual_sales_qty": item.get("actual_sales_qty"), "actual_waste_qty": item.get("actual_waste_qty"),
+            "actual_stockout_occurred": (
+                "" if item.get("actual_stockout_occurred") is None
+                else "있음" if item.get("actual_stockout_occurred") else "없음"
+            ),
+            "actual_stockout_qty": item.get("actual_stockout_qty"), "vhs_score": item.get("vhs_score"),
+            "stability": item.get("stability"), "confidence": item.get("confidence"),
+            **{key: features.get(key) for key in _FEATURE_FIELDS},
+        })
     if not rows:
         return _result(True, "empty", "내보낼 실행 기록이 없습니다.", data=b"", row_count=0)
     stream = io.StringIO(newline="")
@@ -642,16 +441,7 @@ def list_item_events(
     plan_id: str, candidate_id: str, db_path: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     """Small audit hook used by validation/tests; not exposed in the basic UI."""
-    path = history_db_path(db_path)
-    if not path.exists():
-        return []
     try:
-        with closing(_connect(path)) as connection:
-            _ensure_schema(connection)
-            rows = connection.execute(
-                "SELECT * FROM execution_item_events WHERE plan_id = ? AND candidate_id = ? ORDER BY event_id",
-                (str(plan_id), str(candidate_id)),
-            ).fetchall()
-        return [_row_dict(row) for row in rows]
-    except (OSError, sqlite3.Error):
+        return build_execution_history_store(db_path).list_events(str(plan_id), str(candidate_id))
+    except (HistoryConfigurationError, HistoryStoreError, OSError):
         return []

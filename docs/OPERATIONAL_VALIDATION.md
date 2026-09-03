@@ -573,7 +573,30 @@ python tools/run_execution_plan_benchmark.py
 점포 이력이나 로컬 운영 DB를 검증 산출물에 포함하지 않습니다. 실제 결과 표본이 없는 항목은 오차 0으로
 계산하지 않으며 표본 수 0과 `계산 불가`로 유지합니다.
 
-최종 실행에서는 전체 **186개 항목이 통과**했고 실패는 0건이었습니다. 계획 1건과 이동 56건을 기록한 뒤
+최종 실행에서는 저장 backend 확인을 포함해 전체 **187개 항목이 통과**했고 실패는 0건이었습니다. 계획 1건과 이동 56건을 기록한 뒤
 3건의 상태를 확인했으며, 실제 비용·절감·순효과 비교 표본은 입력한 1건만 집계했습니다. CSV는 계획의
 56개 이동을 UTF-8 BOM으로 내보냈습니다. 이력 기록 전후에도 후보 58건, 실행계획 56건·2,985개,
 비용 812,746.67원, 예상 절감 6,541,465.33원, 순효과 5,728,718.67원이 동일했습니다.
+
+## 17. SQLite/PostgreSQL 저장 계층 검증
+
+기본 운영 검증은 외부 DB 설정 없이 명시적인 임시 SQLite를 사용합니다. 저장 backend가 `sqlite`인지
+추가 확인하고, 실행계획을 계산하는 동안에는 DB 쓰기를 하지 않으며 사용자가 기록할 때만 plan과 items를
+저장합니다. PostgreSQL adapter 추가 뒤에도 운영 fixture의 후보·계획·수량·비용·절감·순효과 기대값은
+변경하지 않았습니다.
+
+3회 측정 중앙값은 읽기 0.276초, 검사 준비 0.844초, 적용 0.028초, 추천 분석 3.732초, 전체 4.883초였습니다.
+저장소 조회·기록은 추천 후보 계산 루프에 들어가지 않으며, 계획 기록은 사용자 버튼을 누른 뒤에만 실행됩니다.
+
+실제 PostgreSQL 서버는 이 검증 환경에 없어 네트워크 연결 성공을 주장하지 않습니다. 대신 격리된
+DB-API contract 검증으로 다음을 확인합니다.
+
+- PostgreSQL용 `CREATE TABLE IF NOT EXISTS`, schema version, PK/FK와 인덱스
+- 값의 `%s` parameter binding, 같은 plan 중복 차단, 항목 수정 시 row lock
+- plan+items와 result+audit의 commit/rollback, 연결 종료, NULL·UTC 문자열·float 의미
+- SQLite/PostgreSQL 조회 결과와 calibration CSV 컬럼·값의 parity
+- PostgreSQL 설정 후 연결/조회/쓰기 실패 시 로컬 SQLite를 만들지 않는 정책
+- SQLite source hash를 보존하는 dry-run·중복 감지·원자 이관·건수 재검증
+
+실제 서버 통합 검증은 배포 전 별도의 비운영 test database를 제공받은 경우에만 수행해야 합니다. 운영 URL을
+pytest에 전달하거나 기존 운영 schema를 초기화하는 방식은 사용하지 않습니다.

@@ -18,6 +18,7 @@ from services.execution_history import (
     record_execution_plan,
     update_execution_item,
 )
+from services.execution_history_store import SQLiteExecutionHistoryStore
 
 
 def plan_fixture(plan_id: str = "PLAN-ANON-001") -> dict:
@@ -112,7 +113,14 @@ class ExecutionHistoryPersistenceTests(unittest.TestCase):
         self.assertFalse(self.db.exists())
 
     def test_plan_and_items_rollback_together(self):
-        with mock.patch("services.execution_history._insert_plan_items", side_effect=sqlite3.OperationalError("test")):
+        original = SQLiteExecutionHistoryStore._insert_mappings
+
+        def fail_items(store, connection, table, columns, values):
+            if table == "execution_items":
+                raise sqlite3.OperationalError("test")
+            return original(store, connection, table, columns, values)
+
+        with mock.patch.object(SQLiteExecutionHistoryStore, "_insert_mappings", new=fail_items):
             result = record_execution_plan(plan_fixture(), self.db)
         self.assertFalse(result["ok"])
         self.assertEqual(list_recorded_plans(self.db)["plans"], [])

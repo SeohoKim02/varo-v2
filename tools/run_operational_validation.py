@@ -38,7 +38,7 @@ from services.data_management_view import build_data_management_view  # noqa: E4
 from services.file_reader import read_uploaded_data  # noqa: E402
 from services.execution_plan import planned_recommendations  # noqa: E402
 from services.execution_history import (  # noqa: E402
-    execution_history_metrics, export_execution_history_csv, get_recorded_plan,
+    execution_history_backend_info, execution_history_metrics, export_execution_history_csv, get_recorded_plan,
     list_recorded_plans, record_execution_plan, update_execution_item,
 )
 from services.home_state import build_home_state  # noqa: E402
@@ -716,6 +716,8 @@ def check_memory_behaviour(checks: Checks, workbook: Path) -> None:
 def check_execution_history(checks: Checks, state: dict[str, Any], temp_dir: Path) -> dict[str, Any]:
     """Exercise the real shadow-operation persistence flow without real company data."""
     db_path = temp_dir / "operational_execution_history.sqlite3"
+    backend = execution_history_backend_info(db_path)
+    checks.equal("실행 이력", "기본 운영 검증 저장 backend", backend.get("backend"), "sqlite")
     pipeline = state.get("varo_pipeline_result") or {}
     plan = pipeline.get("execution_plan") or {}
     before = {
@@ -804,7 +806,7 @@ def check_execution_history(checks: Checks, state: dict[str, Any], temp_dir: Pat
     checks.equal("실행 이력", "이력 기록 전후 알고리즘 결과 동일", after, before)
     plans = list_recorded_plans(db_path)["plans"]
     return {
-        "recorded_plans": len(plans), "recorded_items": len(items),
+        "backend": backend.get("backend"), "recorded_plans": len(plans), "recorded_items": len(items),
         "confirmed_items": metrics.get("confirmed_items"),
         "actual_result_samples": (metrics.get("net_benefit_error") or {}).get("sample_count"),
         "csv_rows": exported.get("row_count"),
