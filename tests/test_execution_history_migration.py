@@ -14,7 +14,10 @@ from unittest import mock
 from services.execution_history import record_execution_plan, update_execution_item
 from services.execution_history_migration import migrate_sqlite_history, validate_history_snapshot
 from services.execution_history_config import load_execution_history_config
-from services.execution_history_store import PostgreSQLExecutionHistoryStore
+from services.execution_history_store import (
+    PostgreSQLExecutionHistoryStore,
+    SQLiteExecutionHistoryStore,
+)
 from test_execution_history_backends import CompatConnector, plan_fixture
 from tools import migrate_execution_history as migration_cli
 
@@ -76,6 +79,31 @@ class ExecutionHistoryMigrationTests(unittest.TestCase):
         self.assertEqual(copied["items"][0]["actual_qty"], 3)
         self.assertEqual(copied["items"][0]["actual_net_benefit"], 33.0)
         self.assertEqual(len(copied["events"]), 1)
+
+    def test_migrated_rows_match_the_source_field_by_field(self):
+        self.assertTrue(record_execution_plan(plan_fixture("PLAN-SECOND"), self.source)["ok"])
+        source_snapshot = SQLiteExecutionHistoryStore(self.source).read_snapshot()
+
+        self.assertTrue(migrate_sqlite_history(self.source, self.destination, dry_run=False)["ok"])
+
+        copied = self.destination.read_snapshot()
+        for table in ("plans", "items", "events"):
+            self.assertEqual(len(copied[table]), len(source_snapshot[table]), table)
+        for original, migrated in zip(source_snapshot["plans"], copied["plans"]):
+            self.assertEqual(dict(original), dict(migrated))
+        for original, migrated in zip(source_snapshot["items"], copied["items"]):
+            self.assertEqual(dict(original), dict(migrated))
+        for original, migrated in zip(source_snapshot["events"], copied["events"]):
+            self.assertEqual(
+                {key: value for key, value in dict(original).items() if key != "event_id"},
+                {key: value for key, value in dict(migrated).items() if key != "event_id"},
+            )
+        # Nothing became NULL, and the algorithm lineage travelled with the rows.
+        migrated_item = copied["items"][0]
+        self.assertIsNotNone(migrated_item["actual_qty"])
+        self.assertEqual(migrated_item["candidate_algorithm_version"], "vhs-2.2")
+        self.assertEqual(copied["plans"][0]["algorithm_version"], "execution-plan-1.0")
+        self.assertEqual(copied["plans"][0]["data_signature"], "signature-anonymous")
 
     def test_existing_destination_plan_is_detected_and_skipped(self):
         first = migrate_sqlite_history(self.source, self.destination, dry_run=False)

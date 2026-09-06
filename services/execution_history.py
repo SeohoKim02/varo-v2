@@ -66,6 +66,8 @@ _FEATURE_FIELDS = (
     "pareto_status", "robustness_status", "confidence_score",
 )
 _MAX_ACTUAL_QTY = 1_000_000_000
+# The panel loads only the most recent page and asks before reading further back.
+RECENT_PLAN_PAGE_SIZE = 20
 
 
 def _utc_now() -> str:
@@ -138,6 +140,48 @@ def initialize_history_store(db_path: str | Path | None = None) -> dict[str, Any
         return _result(True, "ready", "실행 기록 저장소가 준비되었습니다.", schema_version=SCHEMA_VERSION)
     except (HistoryConfigurationError, HistoryStoreError, OSError):
         return _result(False, "storage_error", "실행 기록 저장소를 준비하지 못했습니다.")
+
+
+def execution_history_health(db_path: str | Path | None = None) -> dict[str, Any]:
+    """Operator/diagnostic probe.  Independent of recommendation health.
+
+    A failure here means execution history cannot be persisted; it never blocks
+    candidate generation, VHS scoring, or execution planning.
+    """
+    try:
+        report = build_execution_history_store(db_path).health_check()
+    except (HistoryConfigurationError, HistoryStoreError, OSError):
+        return _result(
+            False, "storage_error", "실행 기록 저장소 상태를 확인하지 못했습니다.",
+            backend=None, connection_ok=False, schema_version=None,
+            expected_schema_version=SCHEMA_VERSION, latency_ms=None,
+        )
+    return _result(
+        bool(report.get("ok")), "healthy" if report.get("ok") else "unhealthy",
+        str(report.get("message") or ""),
+        backend=report.get("backend"), connection_ok=bool(report.get("connection_ok")),
+        schema_version=report.get("schema_version"),
+        expected_schema_version=report.get("expected_schema_version", SCHEMA_VERSION),
+        latency_ms=report.get("latency_ms"),
+    )
+
+
+def inspect_execution_history_schema(db_path: str | Path | None = None) -> dict[str, Any]:
+    """Structural schema report for the operator CLI; contains no connection data."""
+    try:
+        report = build_execution_history_store(db_path).inspect_schema()
+    except (HistoryConfigurationError, HistoryStoreError, OSError):
+        return _result(
+            False, "storage_error", "실행 기록 스키마를 확인하지 못했습니다.",
+            backend=None, schema_version=None, expected_schema_version=SCHEMA_VERSION,
+            tables={}, indexes={}, issues=["저장소에 연결하지 못했습니다."],
+        )
+    ok = bool(report.get("ok"))
+    return _result(
+        ok, "schema_ok" if ok else "schema_mismatch",
+        "실행 기록 스키마가 기대 구조와 일치합니다." if ok else "실행 기록 스키마를 확인해주세요.",
+        **{key: value for key, value in report.items() if key != "ok"},
+    )
 
 
 def _plan_snapshot(plan: Mapping[str, Any], recorded_at: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -244,14 +288,26 @@ def record_execution_plan(
 def list_recorded_plans(
     db_path: str | Path | None = None, *, limit: int = 50, offset: int = 0,
 ) -> dict[str, Any]:
+    """Return one page of plans, newest first, plus whether older ones remain."""
     try:
         safe_limit = max(1, min(int(limit), 100_000))
         safe_offset = max(0, int(offset))
-        rows = build_execution_history_store(db_path).list_plans(limit=safe_limit, offset=safe_offset)
-        message = "실행 기록을 불러왔습니다." if rows else "기록된 실행계획이 없습니다."
-        return _result(True, "loaded", message, plans=rows)
+        # One extra row answers "is there another page?" without a COUNT scan.
+        rows = build_execution_history_store(db_path).list_plans(
+            limit=safe_limit + 1, offset=safe_offset,
+        )
+        has_more = len(rows) > safe_limit
+        page = rows[:safe_limit]
+        message = "실행 기록을 불러왔습니다." if page else "기록된 실행계획이 없습니다."
+        return _result(
+            True, "loaded", message,
+            plans=page, has_more=has_more, limit=safe_limit, offset=safe_offset,
+        )
     except (HistoryConfigurationError, HistoryStoreError, OSError, ValueError, TypeError):
-        return _result(False, "storage_error", "실행 기록을 불러오지 못했습니다.", plans=[])
+        return _result(
+            False, "storage_error", "실행 기록을 불러오지 못했습니다.",
+            plans=[], has_more=False, limit=0, offset=0,
+        )
 
 
 def get_recorded_plan(plan_id: str, db_path: str | Path | None = None) -> dict[str, Any]:

@@ -15,65 +15,65 @@
     "total_source_rows": 2742
   },
   "single_run_seconds": {
-    "prepare_seconds": 0.711,
-    "commit_seconds": 0.028,
-    "analysis_seconds": 4.547
+    "prepare_seconds": 0.752,
+    "commit_seconds": 0.029,
+    "analysis_seconds": 4.557
   },
   "performance": {
     "read": {
-      "first": 0.407,
-      "median": 0.276,
-      "min": 0.274,
-      "max": 0.407,
+      "first": 0.431,
+      "median": 0.304,
+      "min": 0.296,
+      "max": 0.431,
       "runs": 3
     },
     "prepare": {
-      "first": 0.713,
-      "median": 0.844,
-      "min": 0.713,
-      "max": 0.851,
+      "first": 0.723,
+      "median": 0.897,
+      "min": 0.723,
+      "max": 0.903,
       "runs": 3
     },
     "commit": {
-      "first": 0.028,
-      "median": 0.028,
-      "min": 0.028,
-      "max": 0.028,
+      "first": 0.029,
+      "median": 0.03,
+      "min": 0.029,
+      "max": 0.035,
       "runs": 3
     },
     "analysis": {
-      "first": 3.762,
-      "median": 3.732,
-      "min": 3.61,
-      "max": 3.762,
+      "first": 3.93,
+      "median": 3.996,
+      "min": 3.93,
+      "max": 4.184,
       "runs": 3
     },
     "total": {
-      "first": 4.91,
-      "median": 4.883,
-      "min": 4.766,
-      "max": 4.91,
+      "first": 5.112,
+      "median": 5.236,
+      "min": 5.112,
+      "max": 5.416,
       "runs": 3
     }
   },
   "stage_breakdown": {
     "파일 읽기+정규화": {
-      "first": 0.274,
-      "median": 0.427,
-      "min": 0.274,
-      "max": 0.431
+      "first": 0.275,
+      "median": 0.421,
+      "min": 0.275,
+      "max": 0.422
     },
     "정규화": {
-      "first": 0.021,
-      "median": 0.021,
-      "min": 0.021,
-      "max": 0.022
+      "first": 0.019,
+      "median": 0.02,
+      "min": 0.019,
+      "max": 0.025
     },
     "검증·문제 분류": {
-      "first": 0.326,
-      "median": 0.183,
-      "min": 0.182,
-      "max": 0.326
+      "first": 0.318,
+      "median": 0.192,
+      "min": 0.186,
+      "max": 0.318
     },
     "제외 대상 계산": {
       "first": 0.0,
@@ -82,16 +82,16 @@
       "max": 0.0
     },
     "참조 정리+usable data 생성(재검증 포함)": {
-      "first": 0.413,
-      "median": 0.419,
-      "min": 0.413,
-      "max": 0.568
+      "first": 0.431,
+      "median": 0.438,
+      "min": 0.431,
+      "max": 0.565
     },
     "제외 후 재검증": {
       "first": 0.016,
       "median": 0.017,
       "min": 0.016,
-      "max": 0.017
+      "max": 0.018
     },
     "적용 데이터 서명": {
       "first": 0.011,
@@ -100,10 +100,10 @@
       "max": 0.011
     },
     "pending 저장(전체 검사)": {
-      "first": 0.837,
-      "median": 0.837,
-      "min": 0.694,
-      "max": 0.841
+      "first": 0.88,
+      "median": 0.873,
+      "min": 0.706,
+      "max": 0.88
     }
   },
   "ui": {
@@ -177,8 +177,8 @@
       "total_cost": 812746.666666,
       "total_expected_saving": 6541465.333334,
       "total_net_benefit": 5728718.666666,
-      "optimization_seconds": 0.035944,
-      "validation_seconds": 0.048466
+      "optimization_seconds": 0.046211,
+      "validation_seconds": 0.057856
     },
     "plan_validation": {
       "valid": true,
@@ -425,8 +425,8 @@
         "actual": {
           "routes": 82,
           "inventory": 30,
-          "stores": 1,
-          "recommendations": 6
+          "recommendations": 6,
+          "stores": 1
         },
         "expected": {
           "inventory": 30,
@@ -2144,10 +2144,10 @@
       "check": "전체 흐름이 합리적인 시간 안에 완료",
       "ok": true,
       "detail": {
-        "first": 4.91,
-        "median": 4.883,
-        "min": 4.766,
-        "max": 4.91,
+        "first": 5.112,
+        "median": 5.236,
+        "min": 5.112,
+        "max": 5.416,
         "runs": 3
       }
     }

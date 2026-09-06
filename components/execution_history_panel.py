@@ -11,6 +11,7 @@ from components.cards import render_section_header
 from components.tables import format_currency, format_number
 from services.execution_history import (
     REASON_LABELS,
+    RECENT_PLAN_PAGE_SIZE,
     STATUS_LABELS,
     execution_history_backend_info,
     execution_history_metrics,
@@ -189,7 +190,9 @@ def render_execution_history_panel(current_plan: Mapping[str, Any] | None) -> No
     """Render the record action and compact history editor on the recommendation page."""
     plan = dict(current_plan or {})
     has_current_plan = bool(plan.get("plan_id") and plan.get("items") and (plan.get("validation") or {}).get("valid"))
-    history = list_recorded_plans()
+    # Only the most recent page is loaded; older records are read on request.
+    page_size = RECENT_PLAN_PAGE_SIZE * 10 if st.session_state.get("history_show_older") else RECENT_PLAN_PAGE_SIZE
+    history = list_recorded_plans(limit=page_size)
     stored_plans = list(history.get("plans") or []) if history.get("ok") else []
     if not has_current_plan and not stored_plans and history.get("ok"):
         return
@@ -211,7 +214,7 @@ def render_execution_history_panel(current_plan: Mapping[str, Any] | None) -> No
             result = record_execution_plan(plan)
             if result.get("ok"):
                 st.success(result["message"])
-                history = list_recorded_plans()
+                history = list_recorded_plans(limit=page_size)
                 stored_plans = list(history.get("plans") or []) if history.get("ok") else []
             else:
                 st.error(result["message"])
@@ -224,6 +227,11 @@ def render_execution_history_panel(current_plan: Mapping[str, Any] | None) -> No
         return
     _render_metrics()
     with st.expander("기록된 이동의 실행 결과", expanded=False):
+        if history.get("has_more") or st.session_state.get("history_show_older"):
+            st.checkbox(
+                "과거 기록 더 보기", key="history_show_older",
+                help=f"기본은 최근 {RECENT_PLAN_PAGE_SIZE}건입니다.",
+            )
         by_plan = {str(item["plan_id"]): item for item in stored_plans}
         current_id = str(plan.get("plan_id") or "")
         options = list(by_plan)

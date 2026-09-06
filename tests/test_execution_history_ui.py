@@ -108,6 +108,39 @@ class ExecutionHistoryUiTests(unittest.TestCase):
         for hidden in (plan["plan_id"], plan["data_signature"], first["candidate_id"], "Traceback", "sqlite"):
             self.assertNotIn(str(hidden), blob)
 
+    def test_history_list_shows_recent_records_and_offers_older_on_request(self):
+        from services.execution_history import RECENT_PLAN_PAGE_SIZE, record_execution_plan
+        from test_execution_history_backends import plan_fixture
+
+        for index in range(RECENT_PLAN_PAGE_SIZE + 3):
+            self.assertTrue(record_execution_plan(plan_fixture(f"PLAN-PAGE-{index:03d}"), self.db)["ok"])
+
+        app = self.app()
+        self.assertFalse(app.exception)
+        selectbox = next(item for item in app.selectbox if item.key == "history_plan_select")
+        self.assertEqual(len(selectbox.options), RECENT_PLAN_PAGE_SIZE)
+        more = next(item for item in app.checkbox if item.key == "history_show_older")
+        self.assertEqual(more.label, "과거 기록 더 보기")
+        self.assertFalse(more.value)
+
+        more.check().run()
+
+        self.assertFalse(app.exception)
+        selectbox = next(item for item in app.selectbox if item.key == "history_plan_select")
+        self.assertEqual(len(selectbox.options), RECENT_PLAN_PAGE_SIZE + 3)
+
+    def test_backend_internals_are_never_shown_to_the_operator(self):
+        url = "postgresql://ui-user:ui-password@db.invalid:5432/varo_ui?sslmode=verify-full"
+        with mock.patch.dict(os.environ, {"VARO_HISTORY_DATABASE_URL": url}):
+            app = self.app()
+        blob = self.visible_blob(app)
+        self.assertIn("실행 이력 저장: 서버", blob)
+        for hidden in (
+            "postgresql", "ui-password", "db.invalid", "5432", "sslmode",
+            "schema", "PRAGMA", "psycopg", "execution_plans",
+        ):
+            self.assertNotIn(hidden, blob)
+
     def test_server_backend_failure_is_short_and_never_falls_back_or_leaks_secret(self):
         url = "postgresql://test-user:do-not-show@db.invalid/test-db-ui"
         with mock.patch.dict(os.environ, {"VARO_HISTORY_DATABASE_URL": url}), mock.patch.object(

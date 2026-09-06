@@ -199,9 +199,25 @@ PostgreSQL을 명시하고 연결에 실패한 경우 로컬 파일로 자동 �
 
 두 backend 모두 `execution_plans.plan_id`와 `execution_items(plan_id, candidate_id)`를 primary key로 보호하고,
 항목→계획 및 감사→항목 foreign key를 둡니다. 계획+항목 저장, 실행결과+감사 저장, SQLite→PostgreSQL 이관은
-각각 같은 transaction에서 완료되거나 전부 rollback됩니다. PostgreSQL 항목 수정은 대상 행을 잠가 동시에
-수정하는 요청을 순서대로 처리합니다. 연결은 작업마다 열고 예외 여부와 무관하게 닫으며, 자체 대형 pool은
-구현하지 않습니다.
+각각 같은 transaction에서 완료되거나 전부 rollback됩니다. PostgreSQL 항목 수정은 대상 행을 잠가(`FOR UPDATE`)
+동시에 수정하는 요청을 순서대로 처리하고, SQLite는 `BEGIN IMMEDIATE`로 같은 순서를 보장합니다. 두 경우 모두
+나중 수정이 앞선 결과를 읽은 뒤에 적용되므로 조용한 덮어쓰기(lost update)가 생기지 않습니다. 연결은 작업마다
+열고 예외 여부와 무관하게 닫으며, 자체 대형 pool은 구현하지 않습니다.
+
+인덱스는 실제 쿼리가 쓰는 컬럼에만 둡니다.
+
+| 인덱스 | 대상 | 사용하는 조회 |
+| --- | --- | --- |
+| (primary key) | `execution_items(plan_id, candidate_id)` | 계획별 항목 조회, 항목 단건 수정 |
+| `idx_execution_plans_recorded` | `execution_plans(recorded_at DESC)` | 최근 이력 목록 정렬 |
+| `idx_execution_items_status` | `execution_items(execution_status)` | 실행률·준수율 집계 |
+| `idx_execution_item_events_item` | `execution_item_events(plan_id, candidate_id)` | 항목별 감사 기록 조회 |
+
+인덱스 추가는 `CREATE INDEX IF NOT EXISTS`로 적용되어 기존 데이터에 영향을 주지 않으므로 schema version은
+1을 유지합니다.
+
+스키마 상태는 `python tools/check_execution_history_db.py`로 확인합니다. backend, 연결, TLS 설정, schema
+version, 필수 테이블·컬럼·PK·FK·인덱스를 비교해 보고하며 연결 URL·호스트·비밀번호는 출력하지 않습니다.
 
 CSV export는 plan/candidate 연결에 필요한 ID와 알고리즘 lineage, 계획 당시의 제한된 VHS feature snapshot,
 실제 실행·사후 결과만 포함합니다. 로컬 DB 경로와 자유 메모는 포함하지 않으며 UTF-8 BOM으로 생성합니다.
@@ -214,5 +230,9 @@ backend별 SQL 필드나 연결정보는 포함하지 않습니다.
 plan을 건너뛰고 신규 plan과 연결 항목·감사를 하나의 transaction으로 삽입한 뒤 행 수를 다시 확인합니다.
 원본 파일의 내용은 변경하지 않으며, 출력에는 DB URL·비밀번호·plan/candidate 상세를 표시하지 않습니다.
 
+이관 검증·백업·복원·staging 통합 검증 절차는 [`DEPLOYMENT.md`](DEPLOYMENT.md)에 있습니다.
+
 향후 조직/사용자 소유권이 필요할 때는 schema version을 올려 `organization_id`/`workspace_id` 같은 실제 소유
-키를 추가합니다. 현재 알 수 없는 소유자를 가짜 ID로 생성하지 않습니다.
+키를 추가합니다. 현재 알 수 없는 소유자를 가짜 ID로 생성하지 않습니다. 현재 구조가 그 확장을 막지는 않습니다.
+`execution_plans`에 소유 키 컬럼을 추가하고 하위 테이블에 전파한 뒤 조회 조건에 더하면 되며, 그때는 schema
+version을 올리고 기존 행에 대한 이관 정책을 함께 정해야 합니다.

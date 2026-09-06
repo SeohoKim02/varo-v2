@@ -60,6 +60,23 @@ python tools/migrate_execution_history.py --apply
 `--source`를 생략하면 기본 SQLite 위치를 사용합니다. 이관은 원본 SQLite를 읽기 전용으로 다루며,
 이미 서버에 있는 계획은 중복으로 집계하고 다시 생성하지 않습니다.
 
+배포 전에는 저장소 상태를 먼저 점검합니다. 연결 URL이나 비밀번호는 출력하지 않습니다.
+
+```bash
+python tools/check_execution_history_db.py       # backend / 연결 / TLS / 스키마 버전·구조
+```
+
+실제 PostgreSQL 서버에 대한 통합 검증은 **비운영 staging DB**를 지정했을 때만 수행합니다.
+`VARO_HISTORY_TEST_DATABASE_URL`이 없으면 `PostgreSQL staging URL not configured.`를 출력하고
+미검증 상태로 종료합니다.
+
+```bash
+python tools/validate_postgresql_history.py      # 연결·스키마·쓰기·동시성·rollback·재연결·내보내기
+```
+
+환경변수, TLS, 백업/복원, health check, 장애 시 행동, 성능·규모 한계는
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)에 정리되어 있습니다.
+
 ## 기본 사용 순서
 
 1. **데이터 관리** 페이지에서 기본 샘플을 불러오거나, 상단 데이터 바에서 엑셀 파일을 업로드합니다.

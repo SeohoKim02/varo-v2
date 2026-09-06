@@ -257,6 +257,18 @@ python -m compileall -q app_v2.py router.py styles.py components services pages 
 - **SQLite→PostgreSQL 이관** (`tests/test_execution_history_migration.py`): 읽기 전용 source, dry-run 무쓰기,
   plan/item/audit 건수와 관계 검증, 중복 감지, 원자 이관, 실패 rollback, source hash 보존, CLI 출력의
   식별자·비밀정보 비노출을 검증합니다.
+- **운영 배포 준비** (`tests/test_execution_history_operations.py`): staging URL과 운영 URL의 분리,
+  운영 URL이 pytest에서 자동 사용되지 않는 격리, 잘못된 URL 차단, URL redaction, 연결 타임아웃·재시도
+  기본값과 상한, 실패한 write의 비재시도, TLS 옵션 보존과 약한 `sslmode` 경고, 스키마 구조 보고
+  (테이블·컬럼·PK·FK·인덱스·버전), 재초기화 idempotency, health check, 최근 N건 pagination,
+  검증용 기록 정리, 백업·복원 도구의 대상 확인·중복 미덮어쓰기·비밀정보 비노출을 외부 서버 없이 검증합니다.
+- **동시성·장애 격리** (`tests/test_execution_history_resilience.py`): 같은 계획의 동시 저장이 1건만 생성,
+  동시 항목 수정의 직렬화와 lost update 부재(감사 기록 연쇄), 쓰기 중 조회의 부분 계획 미노출,
+  연결 끊김 후 재연결, 시작하지 못한 write를 저장 성공으로 표시하지 않음, transaction 중 실패의 무흔적
+  rollback, 재실행 반복 시 연결 누수 없음, **DB가 죽어도 추천 결과 수치가 완전히 동일**함을 검증합니다.
+- **실제 PostgreSQL 통합** (`tests/integration/`): `VARO_HISTORY_TEST_DATABASE_URL`이 있을 때만 수집되어
+  실제 서버에 대해 연결·스키마·쓰기·재조회·수정·감사·중복·rollback·동시성·pagination·재연결·내보내기를
+  검증합니다. 변수가 없으면 **수집 자체가 되지 않아 기본 suite의 통과/skip 수를 바꾸지 않습니다.**
 
 ## DQN 품질 판정
 
@@ -300,13 +312,24 @@ python -m pytest tests/test_page_render.py -q
 # 운영 형식 익명화 데이터 end-to-end
 python -m pytest tests/test_operational_validation.py tests/test_operational_ui_flow.py -q
 # 실행 이력 backend와 이관 (외부 PostgreSQL 불필요)
-python -m pytest tests/test_execution_history_backends.py tests/test_execution_history_migration.py -q
+python -m pytest tests/test_execution_history_backends.py tests/test_execution_history_migration.py \
+  tests/test_execution_history_operations.py tests/test_execution_history_resilience.py -q
+# 저장소 성능만 측정 (추천 성능과 분리)
+python tools/run_history_storage_benchmark.py
+# 실제 staging PostgreSQL 통합 검증 (VARO_HISTORY_TEST_DATABASE_URL 필요)
+python tools/validate_postgresql_history.py
+python -m pytest -q tests/integration
 ```
 
 일반 test suite는 `tests/conftest.py`에서 실행 이력 backend를 테스트별 임시 SQLite로 강제 격리하므로,
 호스트에 `VARO_HISTORY_DATABASE_URL`이 설정돼 있어도 실제 운영 DB를 읽거나 생성·초기화하지 않습니다.
 PostgreSQL adapter는 격리된 DB-API contract double로 schema, SQL parameterization, transaction과 결과 parity를
-검증합니다. 이번 검증 환경에는 별도 PostgreSQL test server가 없어 실제 네트워크 통합 검증은 수행하지 않습니다.
+검증합니다.
+
+실제 서버 통합 검증은 **`VARO_HISTORY_TEST_DATABASE_URL`에 비운영 staging DB를 지정했을 때만** 수행합니다.
+이 변수는 운영 변수와 별개이며 두 값이 같으면 거부합니다. 변수가 없으면 `tests/integration/`은 수집되지
+않고 도구는 `PostgreSQL staging URL not configured.`를 출력하며 **미검증으로 종료**합니다. 검증하지 못한
+항목을 통과로 표시하지 않습니다. 절차는 [`DEPLOYMENT.md`](DEPLOYMENT.md) 11장에 있습니다.
 
 ## 운영 형식 익명화 데이터 검증
 
