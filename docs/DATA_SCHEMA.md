@@ -160,6 +160,13 @@ DQN 학습 샘플 팩(`Varo_DQN_training_samples_10pack`)은 이 저장소에 �
 `python tools/generate_anonymized_operational_workbook.py`로 고정 seed에서 언제든 다시 만들 수
 있으며, 앱의 기본 샘플을 대체하지 않습니다. 검증 내용은 `docs/OPERATIONAL_VALIDATION.md` 참고.
 
+## 실데이터(공공데이터) 스키마
+
+실제 공공데이터는 위 업로드 워크북 스키마와 **다른 형태**이며 이 저장소 밖에 있습니다.
+원본 컬럼, 결합 키, 정규화 규칙, provenance, 산출물 스키마는
+[`REAL_DATA.md`](REAL_DATA.md)에 있습니다. 원본(`raw/`)은 읽기 전용이고 파생값은
+`processed/`에만 만듭니다. 실데이터 결합본은 아직 앱 업로드 경로에 연결되어 있지 않습니다.
+
 ## 잘못된 데이터 예시
 
 - `node_type`에 "물류센터" 같은 자유 텍스트 → 오류(DC/STORE만 허용).

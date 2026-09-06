@@ -319,6 +319,9 @@ python tools/run_history_storage_benchmark.py
 # 실제 staging PostgreSQL 통합 검증 (VARO_HISTORY_TEST_DATABASE_URL 필요)
 python tools/validate_postgresql_history.py
 python -m pytest -q tests/integration
+# 실데이터 결합 (수협 조합창고 재고+입출고). 원본이 없으면 실데이터 테스트만 skip
+python -m pytest tests/test_suhyup_warehouse_dataset.py -q
+python tools/validate_suhyup_warehouse_join.py
 ```
 
 일반 test suite는 `tests/conftest.py`에서 실행 이력 backend를 테스트별 임시 SQLite로 강제 격리하므로,
@@ -345,3 +348,20 @@ python tools/run_algorithm_benchmark.py                    # 명시 재고 하�
 ```
 
 기대값은 앱 코드나 화면이 아니라 `validation_data/*_manifest.json`으로만 관리합니다.
+
+## 실데이터 결합 검증
+
+실제 공공데이터(수협 조합창고 재고·입출고 등)의 원본 위치, 결합 키가 안전한지 검증한 근거,
+정규화 규칙, 중복·모호성 처리, provenance, 데이터 한계는
+[`docs/REAL_DATA.md`](REAL_DATA.md)에 있습니다. 핵심만 옮기면:
+
+- 두 원본의 상품코드는 **입도가 다르므로 직접 join하지 않습니다**(전체 일치 0건).
+  flow `표준코드` 앞 6자리 == stock `표준어종코드`라는 계층을 **원본 상품명으로 검증한 뒤**
+  (472/472 일치) 어종 단위로 결합합니다. 검증에 실패하면 결합 자체를 실행하지 않습니다.
+- 상품명은 결합 키가 아닙니다. 서로 다른 어종코드가 같은 이름을 갖는 경우가 실제로 있어
+  이름 키는 모호해집니다.
+- 결합되지 않은 행·모호한 행은 삭제하지 않고 `match_status`로 보존합니다. 결합률을 높이려고
+  행을 버리지 않습니다.
+- 거점간 실제 이동 이력·거리·운송비·차량용량은 이 원본에 **없으며** `not_available`로
+  유지합니다. 값을 만들어내지 않습니다.
+- 이 결합본은 아직 추천 파이프라인에 연결되어 있지 않고, 기존 알고리즘 결과를 바꾸지 않습니다.
