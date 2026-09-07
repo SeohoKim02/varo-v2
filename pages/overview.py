@@ -15,6 +15,7 @@ from services.analysis_pipeline import calculate_overview_kpis, sort_recommendat
 from services.app_state import resolve_selected_route_id
 from services.execution_plan import planned_recommendations
 from services.home_state import READY, build_home_state
+from services.workspace_view import store_inventory_states
 from simulation.dynamic_network import (
     build_network_nodes,
     build_route_segments,
@@ -63,36 +64,12 @@ _STATE_STYLES: dict[str, tuple[str, str]] = {
 
 
 def _store_inventory_states(data: Mapping[str, object], recommendations: list[dict]) -> dict[str, str]:
-    """Per-store status (과잉/부족/정상) with recommendation sources marked 이동 대상."""
-    states: dict[str, str] = {}
-    inventory = (data or {}).get("inventory")
-    if isinstance(inventory, pd.DataFrame) and not inventory.empty and "store_id" in inventory.columns:
-        stock = pd.to_numeric(inventory.get("stock_qty"), errors="coerce")
-        demand = pd.to_numeric(inventory.get("demand_qty"), errors="coerce")
-        if demand is None or demand.isna().all():
-            demand = pd.to_numeric(inventory.get("sales_30d"), errors="coerce")
-        dead = pd.to_numeric(inventory.get("dead_stock_qty"), errors="coerce")
-        frame = pd.DataFrame({
-            "store_id": inventory["store_id"].astype(str),
-            "stock": stock, "demand": demand, "dead": dead,
-        })
-        grouped = frame.groupby("store_id").sum(min_count=1)
-        for store_id, row in grouped.iterrows():
-            total_stock = float(row.get("stock") or 0.0)
-            total_demand = float(row.get("demand") or 0.0)
-            total_dead = float(row.get("dead") or 0.0)
-            ratio = total_stock / total_demand if total_demand > 0 else (2.0 if total_stock > 0 else 1.0)
-            if (total_stock > 0 and total_dead / total_stock >= 0.30) or ratio >= 1.5:
-                states[str(store_id)] = "과잉"
-            elif ratio <= 0.7:
-                states[str(store_id)] = "부족"
-            else:
-                states[str(store_id)] = "정상"
-    for route in top_recommendations(list(recommendations or []), limit=3):
-        source_id = str(route.get("source_id") or "")
-        if source_id:
-            states[source_id] = "이동 대상"
-    return states
+    """Per-store status (과잉/부족/정상) with recommendation sources marked 이동 대상.
+
+    The rule itself lives in ``services.workspace_view`` so the workspace network
+    and this simulation view can never disagree about a store's status.
+    """
+    return store_inventory_states(data, top_recommendations(list(recommendations or []), limit=3))
 
 
 def _nodes_from_data(recommendations: list[dict], states: dict[str, str] | None = None) -> list[dict]:

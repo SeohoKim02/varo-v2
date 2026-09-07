@@ -50,12 +50,18 @@ class WiredFeatureTests(unittest.TestCase):
         for label in ("이동 경로 방식", "Greedy 전략", "최종 처리 전략", "추천 등급"):
             self.assertIn(label, source)
 
-    def test_pages_expose_all_five_menu_renderers(self):
+    def test_pages_expose_every_menu_renderer(self):
+        # The workspace is the landing route; none of the five original pages was
+        # dropped when it was added.
         import router
+        from components.navigation import MENU_ITEMS, WORKSPACE_MENU
+
         self.assertEqual(
             set(router._PAGE_RENDERERS),
-            {"운영 현황", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"},
+            {WORKSPACE_MENU, "운영 현황", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"},
         )
+        self.assertEqual(set(router._PAGE_RENDERERS), set(MENU_ITEMS))
+        self.assertEqual(MENU_ITEMS[0], WORKSPACE_MENU)
 
 
 if __name__ == "__main__":

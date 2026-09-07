@@ -572,6 +572,158 @@ def apply_global_styles() -> None:
             padding-right: 0.6rem;
             white-space: normal;
         }}
+        /* ------------------------------------------------------------------ */
+        /* 재고 운영 Workspace — one screen: 작업 · 네트워크 · 실행 결정          */
+        /* Heights are content-driven everywhere so Korean text never clips.    */
+        /* ------------------------------------------------------------------ */
+        .ws-header {{
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.6rem;
+            margin: 0.4rem 0 0.7rem;
+            padding: 0.7rem 0.95rem;
+            border: 1px solid var(--varo-line);
+            background: var(--varo-panel);
+            border-radius: var(--varo-radius-card);
+        }}
+        .ws-header-title {{ font-size: 1.24rem; font-weight: 780; color: var(--varo-text); }}
+        .ws-header-meta {{ display: flex; flex-wrap: wrap; gap: 0.4rem; }}
+        .ws-chip {{
+            border: 1px solid var(--varo-line);
+            background: var(--varo-panel-soft);
+            border-radius: 999px;
+            padding: 0.22rem 0.66rem;
+            font-size: 0.84rem;
+            color: var(--varo-text);
+        }}
+        .ws-chip b {{ color: var(--varo-muted); font-weight: 700; margin-right: 0.28rem; }}
+        .ws-panel-title {{
+            font-size: 0.98rem;
+            font-weight: 760;
+            color: var(--varo-text);
+            margin: 0.72rem 0 0.34rem;
+        }}
+        .ws-block-title {{
+            font-size: 0.92rem;
+            font-weight: 740;
+            color: var(--varo-text);
+            margin: 0.8rem 0 0.3rem;
+        }}
+        .ws-side-card {{ padding: 0.72rem 0.8rem; }}
+        .ws-side-value {{
+            font-size: 1.06rem;
+            font-weight: 780;
+            line-height: 1.35;
+            color: var(--varo-text);
+            margin-bottom: 0.22rem;
+            word-break: keep-all;
+            overflow-wrap: anywhere;
+        }}
+        .ws-kpi {{ padding: 0.85rem 0.95rem; min-height: 0; }}
+        .ws-kpi-title {{ color: var(--varo-muted); font-size: 0.88rem; font-weight: 700; }}
+        .ws-kpi-value {{
+            font-size: 1.72rem;
+            font-weight: 820;
+            line-height: 1.2;
+            color: var(--varo-text);
+            margin-top: 0.18rem;
+            word-break: keep-all;
+            overflow-wrap: anywhere;
+        }}
+        .ws-kpi-caption {{ color: var(--varo-muted); font-size: 0.79rem; line-height: 1.35; margin-top: 0.3rem; }}
+        .ws-network-shell {{
+            width: 100%;
+            border: 1px solid var(--varo-line);
+            border-radius: var(--varo-radius-card);
+            background: #fbfcfd;
+            overflow: hidden;
+        }}
+        /* The SVG scales to the column width, so these sizes are chosen to still
+           render at ~12px on a 1366px desktop (roughly a 0.7x downscale). */
+        .ws-network-svg {{
+            display: block;
+            width: 100%;
+            height: auto;
+            aspect-ratio: 940 / 620;
+        }}
+        .ws-network-svg text {{ font-family: inherit; fill: var(--varo-text); }}
+        .ws-network-svg .ws-node-name {{ font-size: 17px; font-weight: 760; }}
+        .ws-network-svg .ws-node-sub {{ font-size: 13px; fill: var(--varo-muted); }}
+        .ws-network-svg .ws-node-role {{ font-size: 13.5px; font-weight: 800; fill: {DESIGN_TOKENS['accent']}; }}
+        .ws-network-svg .ws-edge-label {{ font-size: 14.5px; font-weight: 800; }}
+        .ws-network-svg .ws-node {{ filter: drop-shadow(0 1px 2px rgba(30, 41, 59, 0.06)); }}
+        .ws-network-legend {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            align-items: center;
+            padding: 0.5rem 0.7rem 0.1rem;
+            color: var(--varo-muted);
+            font-size: 0.78rem;
+        }}
+        .ws-legend-item {{ display: inline-flex; align-items: center; gap: 0.26rem; }}
+        .ws-legend-line {{ width: 26px; height: 0; border-top: 2px solid #8fa3b5; display: inline-block; }}
+        .ws-legend-line-selected {{ border-top: 3px solid #1d6fa3; }}
+        .ws-legend-line-dashed {{ border-top-style: dashed; }}
+        .ws-legend-dot {{ width: 9px; height: 9px; border-radius: 50%; border: 1px solid; display: inline-block; }}
+        .ws-network-placeholder {{
+            min-height: 220px;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            padding: 1.4rem 1rem;
+            color: var(--varo-muted);
+            border: 1px dashed var(--varo-line);
+            border-radius: var(--varo-radius-card);
+            background: #fbfcfd;
+            margin-top: 0.5rem;
+        }}
+        .ws-action-card {{ padding: 1rem 1.05rem; }}
+        .ws-action-route {{
+            font-size: 1.1rem;
+            font-weight: 800;
+            line-height: 1.35;
+            color: var(--varo-text);
+            word-break: keep-all;
+            overflow-wrap: anywhere;
+        }}
+        .ws-action-product {{ color: var(--varo-muted); font-size: 0.88rem; margin-top: 0.18rem; }}
+        .ws-action-qty {{
+            font-size: 2.05rem;
+            font-weight: 840;
+            line-height: 1.15;
+            color: {DESIGN_TOKENS['accent']};
+            margin: 0.45rem 0 0.15rem;
+        }}
+        .ws-action-grid {{
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.55rem 0.7rem;
+            margin-top: 0.6rem;
+            padding-top: 0.6rem;
+            border-top: 1px solid var(--varo-line);
+        }}
+        .ws-action-grid span {{ display: block; color: var(--varo-muted); font-size: 0.78rem; }}
+        .ws-action-grid strong {{
+            display: block;
+            margin-top: 0.14rem;
+            font-size: 0.95rem;
+            color: var(--varo-text);
+            line-height: 1.35;
+            word-break: keep-all;
+            overflow-wrap: anywhere;
+        }}
+        @media (max-width: 1400px) {{
+            .ws-action-qty {{ font-size: 1.8rem; }}
+            .ws-kpi-value {{ font-size: 1.5rem; }}
+            .ws-header-title {{ font-size: 1.14rem; }}
+        }}
+        @media (max-width: 1150px) {{
+            .ws-action-grid {{ grid-template-columns: 1fr; }}
+            .ws-kpi-value {{ font-size: 1.34rem; }}
+        }}
         @media (max-width: 1100px) {{
             .v2-kpi-card:not(.v2-kpi-card-compact) {{ min-height: 104px; }}
             .v2-kpi-value {{ font-size: 1.28rem; }}

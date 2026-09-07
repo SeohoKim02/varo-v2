@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import streamlit as st
 
-from components.navigation import MENU_ITEMS, get_current_menu
+from components.navigation import MENU_ITEMS, WORKSPACE_MENU, get_current_menu
 from pages.data_management import render_data_management_page
 from pages.overview import render_overview_page
 from pages.recommendations import render_recommendations_page
 from pages.route_detail import render_route_detail_page
 from pages.validation import render_validation_page
+from pages.workspace import render_workspace_page
 
 _PAGE_RENDERERS = {
+    WORKSPACE_MENU: render_workspace_page,
     "운영 현황": render_overview_page,
     "추천 실행": render_recommendations_page,
     "경로 상세": render_route_detail_page,

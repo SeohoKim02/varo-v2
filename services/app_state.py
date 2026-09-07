@@ -41,6 +41,14 @@ CANONICAL_DATA_KEYS = (
 # filter/selection or (for the home shadow controls) silently re-apply the old
 # value over the canonical reset performed in apply_state_payload.
 TRANSIENT_VIEW_KEYS = (
+    # 재고 운영 Workspace: 필터 · 네트워크 표시 범위(services.workspace_view.WORKSPACE_VIEW_KEYS
+    # 와 같은 목록이며 test_workspace_view가 두 목록이 어긋나지 않는지 확인한다).
+    "ws_filter_product",
+    "ws_filter_source",
+    "ws_filter_target",
+    "ws_filter_route_type",
+    "ws_only_actionable",
+    "ws_network_scope",
     # 추천 실행 페이지: 필터 / 경로 선택
     "rec_filter_product",
     "rec_filter_source",

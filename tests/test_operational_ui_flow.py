@@ -31,7 +31,7 @@ from services.data_application import prepare_pending_data
 from tools.generate_anonymized_operational_workbook import MANIFEST_NAME, WORKBOOK_NAME, generate
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "app_v2.py")
-PAGES = ["운영 현황", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"]
+PAGES = ["재고 운영", "운영 현황", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"]
 LEAKED_TOKENS = ("candidate_id", "usable_signature", "pending_usable_data", "Traceback")
 
 

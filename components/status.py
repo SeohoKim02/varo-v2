@@ -51,21 +51,13 @@ def data_quality_badge(label: str = "데이터 없음", variant: str = "neutral"
     return badge_html(label, variant)
 
 
-def _map_key_present() -> bool:
-    try:
-        import streamlit as st  # local import keeps this module dependency-light
-        from services.kakao_service import get_kakao_key_from_sources
-        return bool(get_kakao_key_from_sources(st.secrets))
-    except Exception:
-        return False
-
-
 def app_status_badges(state) -> list[tuple[str, str]]:
-    """The four canonical status chips shown once in the top header.
+    """The two canonical status chips shown once in the top header.
 
-    데이터(적용 완료/확인 필요) · 추천 계산(계산 완료/확인 필요) ·
-    DQN(학습 전/비교 가능/검토 필요) · 지도(연결됨/미연결). Colours: 완료/정상=success,
-    확인 필요/검토 필요=warning, 학습 전/미연결=neutral.
+    데이터(적용 완료/확인 필요) · 분석(완료/실행 필요). Nothing else belongs in the
+    header: a user only needs to know whether the data is ready and whether the
+    analysis can be run. Learning-model and map-connection state are working
+    detail and live on their own detail screens.
     """
     from services.app_state import has_app_data, has_applied_data
 
@@ -73,18 +65,9 @@ def app_status_badges(state) -> list[tuple[str, str]]:
     result_ok = has_app_data(state.get("varo_data"), state.get("varo_recommendations"))
     pipeline = state.get("analysis_result") or state.get("varo_pipeline_result") or {}
     calc_ok = result_ok and bool(pipeline.get("connected_algorithms") or pipeline.get("v2_summary_functions"))
-    dqn = state.get("dqn_training_result") or {}
-    if not dqn:
-        dqn_badge = ("DQN 학습 전", "neutral")
-    elif str(dqn.get("status")) == "정상":
-        dqn_badge = ("DQN 비교 가능", "success")
-    else:
-        dqn_badge = ("DQN 검토 필요", "warning")
     return [
         ("데이터 적용 완료", "success") if data_ok else ("데이터 확인 필요", "warning"),
-        ("추천 계산 완료", "success") if calc_ok else ("추천 확인 필요", "warning"),
-        dqn_badge,
-        ("지도 연결됨", "success") if _map_key_present() else ("지도 미연결", "neutral"),
+        ("분석 완료", "success") if calc_ok else ("분석 실행 필요", "warning"),
     ]
 
 

@@ -2,7 +2,7 @@
 
 비교 대상
 - **V1(완성형 Varo)**: `C:\Projects\Varo\varo_v1\bad_inventory_simulator\` (app.py 1,850줄 + dashboard_pages.py 8,770줄). 읽기 전용 분석만 수행했으며 원본은 수정하지 않았습니다.
-- **V2**: `C:\Projects\Varo\varo_v2\` (5개 페이지 · router · services · simulation · components).
+- **V2**: `C:\Projects\Varo\varo_v2\` (재고 운영 Workspace + 상세 5개 페이지 · router · services · simulation · components).
 
 분류 기준: **완료**(V2 구현·동작) · **개선됨**(V2가 더 쉬움) · **보완함**(이번 작업에서 추가) · **통합**(V1 중복 기능을 한 곳으로) · **의도적 이동/제외**(사유 명시).
 

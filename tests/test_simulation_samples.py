@@ -225,7 +225,8 @@ class SimulationSamplePageTests(unittest.TestCase):
         button.click().run()
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state["uploaded_filename"], "Varo_V2_sample_dual_dc_10stores_2dc.xlsx")
-        self.assertEqual(app.session_state["current_menu"], "운영 현황")
+        # Loading a sample lands on the workspace, the app's main screen.
+        self.assertEqual(app.session_state["current_menu"], "재고 운영")
         self.assertEqual(app.session_state["varo_validation"].summary["dc_count"], 2)
 
 

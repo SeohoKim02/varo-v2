@@ -19,6 +19,7 @@ import pandas as pd
 import streamlit as st
 
 from components.cards import render_empty_state, render_error_card, render_page_header, render_section_header
+from components.navigation import WORKSPACE_MENU
 from components.state_banner import render_state_summary_card
 from components.status import badge_html
 from services import export_service
@@ -256,7 +257,7 @@ def _render_sample_selector() -> None:
             st.session_state["pending_load_error"] = f"샘플 파일이 없습니다: {selected.filename}"
             st.rerun()
         if load_and_apply(st.session_state, path, selected.filename, "샘플 추천 데이터"):
-            st.session_state["current_menu"] = "운영 현황"
+            st.session_state["current_menu"] = WORKSPACE_MENU
         st.rerun()
 
 
@@ -299,7 +300,7 @@ def _render_dqn_sample_selector() -> None:
             st.session_state["pending_load_error"] = f"샘플 파일이 없습니다: {selected.file_name}"
             st.rerun()
         if load_and_apply(st.session_state, path, selected.file_name, "DQN 학습 샘플"):
-            st.session_state["current_menu"] = "운영 현황"
+            st.session_state["current_menu"] = WORKSPACE_MENU
         st.rerun()
 
 

@@ -28,7 +28,8 @@ from services.data_loader import SAMPLE_FILENAME, get_default_sample_path, load_
 from services.data_validator import validate_workbook_data
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "app_v2.py")
-MENUS = ["운영 현황", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"]
+# 재고 운영 is the Workspace landing page; the other five stay as detail routes.
+MENUS = ["재고 운영", "데이터 관리", "분석 및 검증", "추천 실행", "경로 상세", "운영 현황"]
 
 
 @unittest.skipUnless(_APPTEST_AVAILABLE, "streamlit AppTest unavailable")
