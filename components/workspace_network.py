@@ -62,6 +62,19 @@ ROLE_DC = "경유 DC"
 _MAX_BACKGROUND_EDGES = 24
 _MAX_LABELLED_EDGES = 8
 
+# On-screen legibility budget. The SVG is scaled to the width of the centre
+# column, so every size below is multiplied by (column width / CANVAS_WIDTH)
+# before anyone reads it. Measured in a real browser: at 1366×768 the centre
+# column is ~630px, a 0.67x downscale, so 19.5 user units land at ~13px and the
+# 15-unit floor still reads at ~10px. Nothing here may go below that floor —
+# a name is shortened rather than shrunk once the floor is reached.
+NAME_FONT = 19.5
+NAME_FONT_MIN = 15.0
+DC_NAME_FONT = 18.5
+DC_NAME_FONT_MIN = 15.0
+EDGE_FONT = 17.0
+EDGE_CHIP_HEIGHT = 23.0
+
 
 def _safe(value: Any) -> str:
     return html.escape(str(value)) if value is not None else "-"
@@ -71,9 +84,53 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _short(value: Any, limit: int) -> str:
+def _glyph_width(text: str, font: float) -> float:
+    """Approximate rendered width: CJK glyphs are full-width, latin about 0.56em."""
+    return sum(font * (1.0 if ord(char) > 0x2E80 else 0.56) for char in text)
+
+
+def _fit_label(value: Any, box_width: float, font: float, min_font: float) -> tuple[str, float]:
+    """Largest readable size that keeps a node name inside its own box.
+
+    The size is reduced to ``min_font`` first and only then is the text
+    shortened, so a long store or DC name is never painted outside its box —
+    which is what used to make 물류센터 names run over the edge labels beside them.
+    """
     text = _text(value) or "-"
-    return text if len(text) <= limit else text[: max(1, limit - 1)] + "…"
+    inner = max(24.0, box_width - 12.0)
+    size = font
+    while size > min_font and _glyph_width(text, size) > inner:
+        size = round(size - 0.5, 2)
+    if _glyph_width(text, size) > inner:
+        while len(text) > 1 and _glyph_width(text + "…", size) > inner:
+            text = text[:-1]
+        text += "…"
+    return text, size
+
+
+def _split_two(text: str) -> tuple[str, str]:
+    """Split a name at the space nearest its middle (midpoint if it has none)."""
+    spaces = [index for index, char in enumerate(text) if char == " "]
+    if spaces:
+        cut = min(spaces, key=lambda index: abs(index - len(text) / 2))
+        return text[:cut].strip(), text[cut + 1:].strip()
+    half = len(text) // 2
+    return text[:half], text[half:]
+
+
+def _fit_dc_label(name: str, box_width: float) -> tuple[list[str], float]:
+    """A 물류센터 name on one line, or on two when one line would have to be cut."""
+    single, font = _fit_label(name, box_width, DC_NAME_FONT, DC_NAME_FONT_MIN)
+    if not single.endswith("…"):
+        return [single], font
+    first, second = _split_two(_text(name))
+    if not first or not second:
+        return [single], font
+    top, top_font = _fit_label(first, box_width, DC_NAME_FONT, DC_NAME_FONT_MIN)
+    bottom, bottom_font = _fit_label(second, box_width, DC_NAME_FONT, DC_NAME_FONT_MIN)
+    if top.endswith("…") or bottom.endswith("…"):
+        return [single], font
+    return [top, bottom], min(top_font, bottom_font)
 
 
 def _qty_label(item: Mapping[str, Any]) -> str:
@@ -86,6 +143,14 @@ def _qty_label(item: Mapping[str, Any]) -> str:
         if number == number:
             return f"{int(round(number)):,}개"
     return ""
+
+
+def _dc_size(store_size: tuple[float, float]) -> tuple[float, float]:
+    """DC box size. Kept at the size the shared radial layout is tuned for — a
+    wider box pushed the DCs into the neighbouring stores on a two-DC network, so
+    a long 물류센터 name is wrapped onto two lines instead (see ``_fit_dc_label``)."""
+    store_w, store_h = store_size
+    return max(150.0, store_w * 1.15), max(72.0, store_h * 1.2)
 
 
 def _dimensions(count: int) -> tuple[float, float]:
@@ -139,7 +204,7 @@ def ring_capacity(store_size: tuple[float, float], dc_count: int) -> int:
 def _ring_plan(store_size: tuple[float, float], dc_count: int) -> list[tuple[float, float, int]]:
     """Ring radii (outermost first) and how many stores each one can carry."""
     store_w, store_h = store_size
-    dc_w, dc_h = max(150.0, store_w * 1.15), max(72.0, store_h * 1.2)
+    dc_w, dc_h = _dc_size((store_w, store_h))
     _positions, half_w, half_h = _dc_grid(
         [{"node_id": f"_{index}"} for index in range(dc_count)], (dc_w, dc_h),
     )
@@ -180,7 +245,7 @@ def _ring_positions(
     circumference allows.
     """
     store_w, store_h = store_size
-    dc_w, dc_h = max(150.0, store_w * 1.15), max(72.0, store_h * 1.2)
+    dc_w, dc_h = _dc_size((store_w, store_h))
     cx, cy = CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2
 
     positions, _half_w, _half_h = _dc_grid(dcs, (dc_w, dc_h))
@@ -290,6 +355,9 @@ def _dc_svg(node: Mapping[str, Any], role: str) -> str:
     x, y = float(node["x"]), float(node["y"])
     width, height = float(node["width"]), float(node["height"])
     name = _text(node.get("node_name")) or _text(node.get("node_id"))
+    lines, font = _fit_dc_label(name, width)
+    # 이름이 이미 물류센터를 말하고 있으면 아래에 같은 말을 한 번 더 적지 않는다.
+    show_kind = not any(token in name for token in ("물류센터", "센터", "DC"))
     highlighted = role == ROLE_DC
     stroke = COLOR_SELECTED if highlighted else "#a98a3d"
     left, top = -width / 2, -height / 2
@@ -305,16 +373,35 @@ def _dc_svg(node: Mapping[str, Any], role: str) -> str:
         f'fill="#fdf7e6" stroke="{stroke}" stroke-width="{2.6 if highlighted else 1.6}" />'
         f'<path d="M {left - 4:.2f} {top + 13:.2f} L 0 {top - 3:.2f} L {-left + 4:.2f} {top + 13:.2f} Z" '
         f'fill="#f3e4b8" stroke="{stroke}" stroke-width="1.6" />'
-        f'<text class="ws-node-name" x="0" y="{-height * 0.02:.2f}" text-anchor="middle">{_safe(_short(name, 14))}</text>'
-        f'<text class="ws-node-sub" x="0" y="{height / 2 - 9:.2f}" text-anchor="middle">물류센터</text>'
-        "</g>"
+        + _dc_name_svg(lines, font, height)
+        + (
+            f'<text class="ws-node-sub" x="0" y="{height / 2 - 9:.2f}" text-anchor="middle">물류센터</text>'
+            if show_kind else ""
+        )
+        + "</g>"
     )
 
 
-def _store_svg(node: Mapping[str, Any], role: str, limit: int) -> str:
+def _dc_name_svg(lines: Sequence[str], font: float, height: float) -> str:
+    baseline = -height * 0.02
+    if len(lines) == 1:
+        return (
+            f'<text class="ws-node-name" x="0" y="{baseline:.2f}" text-anchor="middle" '
+            f'font-size="{font:.1f}">{_safe(lines[0])}</text>'
+        )
+    step = font * 1.16
+    return "".join(
+        f'<text class="ws-node-name" x="0" y="{baseline - step / 2 + index * step:.2f}" '
+        f'text-anchor="middle" font-size="{font:.1f}">{_safe(line)}</text>'
+        for index, line in enumerate(lines)
+    )
+
+
+def _store_svg(node: Mapping[str, Any], role: str) -> str:
     x, y = float(node["x"]), float(node["y"])
     width, height = float(node["width"]), float(node["height"])
     name = _text(node.get("node_name")) or _text(node.get("node_id"))
+    label, font = _fit_label(name, width, NAME_FONT, NAME_FONT_MIN)
     state = _text(node.get("inventory_state")) or "정상"
     text_color, fill_tint = STATE_STYLES.get(state, STATE_STYLES["정상"])
     highlighted = role in (ROLE_SOURCE, ROLE_TARGET)
@@ -324,46 +411,93 @@ def _store_svg(node: Mapping[str, Any], role: str, limit: int) -> str:
         f'<text class="ws-node-role" x="0" y="{top - 8:.2f}" text-anchor="middle">{_safe(role)}</text>'
         if highlighted else ""
     )
-    pill_w = 56.0
+    # The state pill scales with the node so its text stays readable instead of
+    # sitting at a fixed 9px that vanished once the SVG was scaled to a column.
+    pill_h = max(13.0, min(19.0, height * 0.35))
+    pill_font = round(min(15.0, pill_h * 0.84), 1)
+    pill_w = max(46.0, min(width - 8.0, _glyph_width(state, pill_font) + 16.0))
+    pill_top = height / 2 - pill_h - 3.0
     return (
         f'<g class="ws-node ws-node-store" transform="translate({x:.2f} {y:.2f})">'
         f"<title>{_safe(name)} · 점포 · 재고 {_safe(state)}</title>"
         f"{role_svg}"
         f'<rect x="{left:.2f}" y="{top:.2f}" width="{width:.2f}" height="{height:.2f}" rx="8" '
         f'fill="#ffffff" stroke="{stroke}" stroke-width="{2.6 if highlighted else 1.2}" />'
-        f'<text class="ws-node-name" x="0" y="{-height * 0.06:.2f}" text-anchor="middle">{_safe(_short(name, limit))}</text>'
-        f'<rect x="{-pill_w / 2:.2f}" y="{height / 2 - 20:.2f}" width="{pill_w:.2f}" height="15" rx="7.5" '
-        f'fill="{fill_tint}" stroke="{text_color}" stroke-width="0.9" />'
-        f'<text x="0" y="{height / 2 - 8.6:.2f}" text-anchor="middle" fill="{text_color}" '
-        f'font-size="9.4" font-weight="700">{_safe(state)}</text>'
+        f'<text class="ws-node-name" x="0" y="{-height * 0.08:.2f}" text-anchor="middle" '
+        f'font-size="{font:.1f}">{_safe(label)}</text>'
+        f'<rect x="{-pill_w / 2:.2f}" y="{pill_top:.2f}" width="{pill_w:.2f}" height="{pill_h:.2f}" '
+        f'rx="{pill_h / 2:.2f}" fill="{fill_tint}" stroke="{text_color}" stroke-width="0.9" />'
+        f'<text x="0" y="{pill_top + pill_h * 0.74:.2f}" text-anchor="middle" fill="{text_color}" '
+        f'font-size="{pill_font}" font-weight="700">{_safe(state)}</text>'
         "</g>"
     )
 
 
-def _edge_svg(
-    start: tuple[float, float], end: tuple[float, float], *,
-    selected: bool, via_dc: bool, label: str,
+def _edge_line_svg(
+    start: tuple[float, float], end: tuple[float, float], *, selected: bool, via_dc: bool,
 ) -> str:
     (x1, y1), (x2, y2) = start, end
     color = COLOR_SELECTED if selected else COLOR_PLANNED
     width = 3.4 if selected else 1.9
     dash = ' stroke-dasharray="10 7"' if via_dc else ""
     marker = "ws-arrow-selected" if selected else "ws-arrow-planned"
-    line = (
+    return (
         f'<line x1="{x1:.2f}" y1="{y1:.2f}" x2="{x2:.2f}" y2="{y2:.2f}" stroke="{color}" '
         f'stroke-width="{width}" stroke-linecap="round" stroke-opacity="{0.95 if selected else 0.6}"'
         f'{dash} marker-end="url(#{marker})" />'
     )
-    if not label:
-        return line
-    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
-    half = max(20.0, len(label) * 4.4)
+
+
+Box = tuple[float, float, float, float]  # centre x, centre y, half width, half height
+
+
+def _chip_box(
+    start: tuple[float, float], end: tuple[float, float], label: str, position: float,
+) -> Box:
+    """Chip centre and half-extents at ``position`` along the segment."""
+    (x1, y1), (x2, y2) = start, end
+    half = max(22.0, _glyph_width(label, EDGE_FONT) / 2 + 9.0)
     return (
-        line
-        + f'<rect class="ws-edge-chip" x="{mx - half:.2f}" y="{my - 11:.2f}" width="{half * 2:.2f}" height="19" '
-        f'rx="9.5" fill="#ffffff" stroke="{color}" stroke-width="1" />'
-        + f'<text class="ws-edge-label" x="{mx:.2f}" y="{my + 3.4:.2f}" text-anchor="middle" '
-        f'fill="{color}">{_safe(label)}</text>'
+        x1 + (x2 - x1) * position, y1 + (y2 - y1) * position, half, EDGE_CHIP_HEIGHT / 2,
+    )
+
+
+def _overlaps(box: Box, placed: Sequence[Box]) -> bool:
+    x, y, half_w, half_h = box
+    for other_x, other_y, other_half_w, other_half_h in placed:
+        if abs(x - other_x) < half_w + other_half_w + 4 and abs(y - other_y) < half_h + other_half_h + 3:
+            return True
+    return False
+
+
+def _edge_label_svg(
+    start: tuple[float, float], end: tuple[float, float], label: str, *,
+    selected: bool, placed: list[Box],
+) -> str:
+    """Place one ``planned_qty`` chip, sliding it along the edge to clear the node
+    boxes and the chips already on screen. A non-selected chip that finds no free
+    spot is dropped rather than printed on top of another number; the selected
+    move always keeps its own number.
+    """
+    color = COLOR_SELECTED if selected else COLOR_PLANNED
+    box = None
+    for position in (0.5, 0.38, 0.62, 0.3, 0.7, 0.24, 0.76):
+        candidate = _chip_box(start, end, label, position)
+        if not _overlaps(candidate, placed):
+            box = candidate
+            break
+    if box is None:
+        if not selected:
+            return ""
+        box = _chip_box(start, end, label, 0.5)
+    placed.append(box)
+    x, y, half, _half_h = box
+    return (
+        f'<rect class="ws-edge-chip" x="{x - half:.2f}" y="{y - EDGE_CHIP_HEIGHT / 2:.2f}" '
+        f'width="{half * 2:.2f}" height="{EDGE_CHIP_HEIGHT:.2f}" rx="{EDGE_CHIP_HEIGHT / 2:.2f}" '
+        f'fill="#ffffff" stroke="{color}" stroke-width="1" />'
+        f'<text class="ws-edge-label" x="{x:.2f}" y="{y + EDGE_CHIP_HEIGHT * 0.19:.2f}" '
+        f'text-anchor="middle" fill="{color}">{_safe(label)}</text>'
     )
 
 
@@ -429,7 +563,7 @@ def build_workspace_network(
         return {"ok": False, "html": "", "message": "표시할 점포 정보가 없습니다."}
 
     store_w, store_h = _dimensions(len(stores))
-    dc_w, dc_h = max(150.0, store_w * 1.15), max(72.0, store_h * 1.2)
+    dc_w, dc_h = _dc_size((store_w, store_h))
     # A picture that cannot fit every store legibly shows the ones involved in the
     # plan and says how many it left out — it never draws them on top of each other.
     capacity = ring_capacity((store_w, store_h), len(dcs))
@@ -478,6 +612,7 @@ def build_workspace_network(
                 )
 
     edges: list[str] = []
+    pending_labels: list[tuple[tuple[float, float], tuple[float, float], str, bool]] = []
     has_via_dc = False
     label_all = len(drawn) <= _MAX_LABELLED_EDGES
     for item in drawn:
@@ -494,11 +629,28 @@ def build_workspace_network(
             end = coordinates.get(_text(segment["to_node_id"]))
             if not start or not end:
                 continue
-            edges.append(_edge_svg(
-                start, end, selected=is_selected, via_dc=via_dc,
-                # 두 구간짜리 DC 경유는 두 번째 구간에만 수량을 적어 화면이 겹치지 않게 한다.
-                label=label if index == len(segments) - 1 else "",
-            ))
+            edges.append(_edge_line_svg(start, end, selected=is_selected, via_dc=via_dc))
+            # 두 구간짜리 DC 경유는 두 번째 구간에만 수량을 적어 화면이 겹치지 않게 한다.
+            if label and index == len(segments) - 1:
+                pending_labels.append((start, end, label, is_selected))
+
+    # Chips are placed after every line so a number is never drawn under a node
+    # box or another edge's number; the selected move always keeps its own chip.
+    placed: list[Box] = []
+    for group, (box_w, box_h) in ((dcs, (dc_w, dc_h)), (stores, (store_w, store_h))):
+        for node in group:
+            position = coordinates.get(_text(node.get("node_id")))
+            if position:
+                placed.append((position[0], position[1], box_w / 2 + 3.0, box_h / 2 + 3.0))
+    labels = [
+        _edge_label_svg(start, end, label, selected=True, placed=placed)
+        for start, end, label, is_selected in pending_labels if is_selected
+    ]
+    labels += [
+        _edge_label_svg(start, end, label, selected=False, placed=placed)
+        for start, end, label, is_selected in pending_labels if not is_selected
+    ]
+    edges.extend(part for part in labels if part)
 
     if not edges and drawn:
         message = "선택한 조건에서 표시할 이동 경로가 없습니다."
@@ -507,7 +659,8 @@ def build_workspace_network(
     else:
         message = ""
 
-    label_limit = 11 if len(stores) <= 12 else 8
+    # Node names are fitted to their own box by _fit_label, so no character
+    # budget is guessed here any more.
     shapes = [
         _dc_svg(
             {**node, "x": coordinates[_text(node["node_id"])][0], "y": coordinates[_text(node["node_id"])][1],
@@ -521,7 +674,6 @@ def build_workspace_network(
             {**node, "x": coordinates[_text(node["node_id"])][0], "y": coordinates[_text(node["node_id"])][1],
              "width": store_w, "height": store_h},
             roles.get(_text(node.get("node_id")), ""),
-            label_limit,
         )
         for node in stores if _text(node.get("node_id")) in coordinates
     ]

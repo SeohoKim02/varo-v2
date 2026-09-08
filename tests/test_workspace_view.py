@@ -484,10 +484,9 @@ class WorkspaceNetworkGeometryTests(unittest.TestCase):
         return positions, store_size, shown
 
     def _box(self, node_id: str, store_size: tuple[float, float]) -> tuple[float, float]:
-        store_w, store_h = store_size
         if node_id.startswith("DC"):
-            return max(150.0, store_w * 1.15), max(72.0, store_h * 1.2)
-        return store_w, store_h
+            return wsn._dc_size(store_size)
+        return store_size
 
     def test_every_node_stays_inside_the_canvas(self):
         for store_count in (1, 2, 4, 8, 12, 16, 17, 24, 30, 40, 60):
@@ -560,6 +559,116 @@ class WorkspaceStoreStateTests(unittest.TestCase):
             overview._store_inventory_states(workbook, []),
             store_inventory_states(workbook, []),
         )
+
+
+class WorkspaceNetworkLegibilityTests(unittest.TestCase):
+    """I · what a person actually reads on screen stays readable.
+
+    The SVG is scaled to the width of the centre column, so a user-unit font size
+    is multiplied by (column width / CANVAS_WIDTH) before anyone sees it. Measured
+    in a real browser, the narrowest supported desktop (1366px) gives the centre
+    column ~625px, i.e. the scale asserted here. These checks fail if a change
+    would push node names, edge numbers, or state pills back under ~10px, or draw
+    a name outside its own box.
+    """
+
+    #: Centre-column width at 1366×768, measured in Chrome against the live app.
+    NARROWEST_COLUMN = 625.0
+    MIN_SCREEN_PX = 9.9
+
+    def _scale(self) -> float:
+        return self.NARROWEST_COLUMN / wsn.CANVAS_WIDTH
+
+    def test_node_name_floor_still_reads_on_the_narrowest_desktop(self):
+        for font in (wsn.NAME_FONT_MIN, wsn.DC_NAME_FONT_MIN, wsn.EDGE_FONT):
+            with self.subTest(font=font):
+                self.assertGreaterEqual(font * self._scale(), self.MIN_SCREEN_PX)
+
+    def test_a_long_name_is_shortened_only_after_the_font_floor_is_reached(self):
+        label, font = wsn._fit_label("연신내점", 120.0, wsn.NAME_FONT, wsn.NAME_FONT_MIN)
+        self.assertEqual(label, "연신내점")
+        self.assertEqual(font, wsn.NAME_FONT)
+        long_label, long_font = wsn._fit_label(
+            "아주아주긴이름을가진점포입니다", 120.0, wsn.NAME_FONT, wsn.NAME_FONT_MIN,
+        )
+        self.assertEqual(long_font, wsn.NAME_FONT_MIN)
+        self.assertTrue(long_label.endswith("…"))
+        self.assertLessEqual(wsn._glyph_width(long_label, long_font), 120.0 - 12.0)
+
+    def test_every_fitted_name_stays_inside_its_box(self):
+        names = ("연신내점", "서울 서북권 물류센터", "A", "가나다라마바사아자차카타파하")
+        for count in (4, 10, 16, 26, 40):
+            width, _height = wsn._dimensions(count)
+            dc_width, _dc_height = wsn._dc_size(wsn._dimensions(count))
+            for name in names:
+                with self.subTest(count=count, name=name):
+                    label, font = wsn._fit_label(name, width, wsn.NAME_FONT, wsn.NAME_FONT_MIN)
+                    self.assertLessEqual(wsn._glyph_width(label, font), width - 12.0 + 0.01)
+                    lines, dc_font = wsn._fit_dc_label(name, dc_width)
+                    self.assertLessEqual(len(lines), 2)
+                    for line in lines:
+                        self.assertLessEqual(
+                            wsn._glyph_width(line, dc_font), dc_width - 12.0 + 0.01,
+                        )
+
+    def test_a_long_dc_name_wraps_instead_of_being_cut(self):
+        dc_width, _ = wsn._dc_size(wsn._dimensions(10))
+        lines, font = wsn._fit_dc_label("서울 서북권 물류센터", dc_width)
+        self.assertEqual(lines, ["서울 서북권", "물류센터"])
+        self.assertGreaterEqual(font * self._scale(), self.MIN_SCREEN_PX)
+
+    def test_edge_quantity_chips_never_overlap_a_node_or_each_other(self):
+        state = _applied_state()
+        view = build_workspace_view(state)
+        items = list(view["plan_items"])
+        self.assertGreater(len(items), 1)
+        network = build_workspace_network(
+            state["varo_data"], items, view["selected_route_id"], scope=SCOPE_PLAN,
+        )
+        self.assertTrue(network["ok"])
+        boxes = _svg_boxes(network["html"])
+        for first in range(len(boxes)):
+            for second in range(first + 1, len(boxes)):
+                (ax, ay, aw, ah), (bx, by, bw, bh) = boxes[first], boxes[second]
+                with self.subTest(pair=(first, second)):
+                    self.assertFalse(
+                        ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah,
+                        "an edge quantity chip is drawn on top of a node box",
+                    )
+
+    def test_the_selected_move_always_keeps_its_quantity_chip(self):
+        state = _applied_state()
+        view = build_workspace_view(state)
+        items = list(view["plan_items"])
+        selected = next(
+            item for item in items
+            if str(item["route_id"]) == str(view["selected_route_id"])
+        )
+        network = build_workspace_network(
+            state["varo_data"], items, view["selected_route_id"], scope=SCOPE_PLAN,
+        )
+        self.assertIn(f">{qty_text(action_qty(selected))}</text>", network["html"])
+
+
+def _svg_boxes(html: str) -> list[tuple[float, float, float, float]]:
+    """Edge chips plus the node rects they must clear, as (x, y, w, h)."""
+    import re
+
+    boxes: list[tuple[float, float, float, float]] = []
+    for match in re.finditer(
+        r'<rect class="ws-edge-chip" x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"',
+        html,
+    ):
+        boxes.append(tuple(float(value) for value in match.groups()))  # type: ignore[arg-type]
+    for match in re.finditer(
+        r'<g class="ws-node[^"]*" transform="translate\(([-\d.]+) ([-\d.]+)\)">(.*?)</g>', html,
+    ):
+        x, y, body = float(match.group(1)), float(match.group(2)), match.group(3)
+        rect = re.search(r'<rect x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)" height="([\d.]+)"', body)
+        if rect:
+            left, top, width, height = (float(value) for value in rect.groups())
+            boxes.append((x + left, y + top, width, height))
+    return boxes
 
 
 if __name__ == "__main__":

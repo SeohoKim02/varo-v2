@@ -98,13 +98,16 @@ def render_quick_data_bar() -> None:
         _render_feedback()
         return
 
-    _, replace_col = st.columns([6.2, 1], gap="small")
-    replace_col.button(
-        "데이터 교체",
-        key="quick_replace_toggle",
-        on_click=_toggle_replace_controls,
-        width="stretch",
-    )
+    # A secondary control gets a compact row of its own (see .st-key-quick_replace_bar
+    # in styles): on a 1366×768 desktop every pixel above the result matters.
+    with st.container(key="quick_replace_bar"):
+        _, replace_col = st.columns([6.2, 1], gap="small")
+        replace_col.button(
+            "데이터 교체",
+            key="quick_replace_toggle",
+            on_click=_toggle_replace_controls,
+            width="stretch",
+        )
     if st.session_state.get("quick_replace_open", False):
         _render_load_controls("quick_loaded")
     _render_feedback()

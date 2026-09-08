@@ -24,6 +24,7 @@ from services.analysis_pipeline import run_analysis_pipeline
 from services.app_state import CANONICAL_DATA_KEYS, build_applied_state_payload
 from services.data_loader import SAMPLE_FILENAME, get_default_sample_path, load_excel_data
 from services.data_validator import validate_workbook_data
+from pages.workspace import FILTER_EMPTY_MESSAGE
 from services.workspace_view import action_qty, money_text, qty_text
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -346,6 +347,73 @@ class WorkspaceRenderTests(unittest.TestCase):
         self.assertIn("VARO V2", blob)
         for banned in ("DQN 학습 전", "지도 미연결", "지도 연결됨", "execution-plan"):
             self.assertNotIn(banned, blob)
+
+    def test_data_and_analysis_status_are_stated_once_above_the_result(self):
+        """The top bar carries 데이터 · 분석 상태; the workspace strip must not repeat
+        them. The duplicate chip also read '분석 분석 완료' on screen."""
+        app = self._ready_app()
+        blob = self._blob(app)
+        self.assertIn('class="ws-header-title">재고 운영 Workspace<', blob)
+        self.assertNotIn('class="ws-header-meta"', blob)
+        self.assertNotIn("분석 분석", blob)
+        self.assertEqual(blob.count("데이터 적용 완료"), 1)
+        # The chip styles that produced the duplicate row are gone, not just unused.
+        styles = (ROOT / "styles.py").read_text(encoding="utf-8")
+        self.assertNotIn(".ws-chip", styles)
+
+    # ------------------------------------------------- filtered down to nothing
+    def _impossible_filter(self, app):
+        """Same store as 출발 and 도착 — never a real move, so 0 rows survive."""
+        sources = next(item for item in app.selectbox if item.key == "ws_filter_source")
+        targets = next(item for item in app.selectbox if item.key == "ws_filter_target")
+        shared = next(
+            value for value in sources.options[1:] if value in targets.options[1:]
+        )
+        sources.select(shared).run()
+        next(item for item in app.selectbox if item.key == "ws_filter_target").select(shared).run()
+        return app
+
+    def test_filtering_everything_out_explains_itself_instead_of_drawing_an_empty_network(self):
+        app = self._impossible_filter(self._ready_app())
+        self.assertFalse(app.exception)
+        blob = self._blob(app)
+        self.assertIn(FILTER_EMPTY_MESSAGE, blob)
+        # No node-only picture, and no move that contradicts the filter on the right.
+        self.assertNotIn('class="ws-network-svg"', blob)
+        self.assertNotIn('class="ws-action-qty"', blob)
+        self.assertIn("ws_reset_filters", {button.key for button in app.button})
+
+    def test_resetting_the_filters_brings_every_move_back(self):
+        app = self._impossible_filter(self._ready_app())
+        next(button for button in app.button if button.key == "ws_reset_filters").click().run()
+        self.assertFalse(app.exception)
+        blob = self._blob(app)
+        self.assertIn('class="ws-network-svg"', blob)
+        self.assertIn('class="ws-action-qty"', blob)
+        for key in ("ws_filter_source", "ws_filter_target", "ws_filter_product"):
+            self.assertEqual(app.session_state[key], "전체")
+
+    def test_validation_leads_with_a_verdict_and_keeps_the_numbers_folded_away(self):
+        app = self._ready_app()
+        blob = self._blob(app)
+        for headline in ("계획 제약", "안전재고", "도착 필요 수량", "추천 안정성"):
+            self.assertIn(f'class="ws-kpi-title">{headline}<', blob)
+        self.assertIn('class="ws-check-value">', blob)
+        self.assertIn("검증 상세 보기", [item.label for item in app.expander])
+
+    def test_alternatives_table_hides_internal_columns(self):
+        app = self._ready_app()
+        columns: set[str] = set()
+        for element in app.dataframe:
+            try:
+                columns |= set(element.value.columns)
+            except Exception:
+                continue
+        self.assertIn("구분", columns)
+        for shown in ("경로", "수량", "예상 비용", "예상 순효과", "안정성"):
+            self.assertIn(shown, columns)
+        for hidden in ("route_id", "선택", "예상 효과"):
+            self.assertNotIn(hidden, columns)
 
     # ------------------------------------------------------------ layout guard
     def test_workspace_cards_are_content_driven_not_fixed_height(self):

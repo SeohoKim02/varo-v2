@@ -39,6 +39,7 @@ from components.workspace_network import (
 from services.data_application import run_applied_analysis
 from services.execution_history import execution_history_metrics
 from services.workspace_view import (
+    ALL,
     CHECK_NEEDED,
     NO_DATA,
     action_qty,
@@ -103,13 +104,12 @@ def _run_analysis() -> None:
 
 
 def _render_header(view: Mapping[str, Any]) -> None:
+    # 데이터 상태와 분석 상태는 상단 바가 이미 보여준다. 여기서 한 번 더 배지를 그리면
+    # 첫 화면에서 네트워크가 그만큼 아래로 밀려나므로 제목 줄만 남긴다.
     st.markdown(
         '<div class="v2-wrap ws-header">'
         '<div class="ws-header-title">재고 운영 Workspace</div>'
-        '<div class="ws-header-meta">'
-        f'<span class="ws-chip"><b>데이터</b> {_safe(view.get("data_status"))}</span>'
-        f'<span class="ws-chip"><b>분석</b> {_safe(view.get("analysis_status"))}</span>'
-        "</div></div>",
+        "</div>",
         unsafe_allow_html=True,
     )
     if st.session_state.pop("analysis_completed_notice", None):
@@ -164,13 +164,23 @@ def _render_left_panel(view: Mapping[str, Any], items: Sequence[Mapping[str, Any
 
     st.markdown('<div class="ws-panel-title">필터</div>', unsafe_allow_html=True)
     options = filter_options(items)
+    # 상품과 "순효과가 있는 이동만"은 매일 쓰는 필터라 그대로 두고, 점포·경로 유형은
+    # 가끔 쓰는 조건이라 펼침 안으로 넣는다. 기능은 그대로 유지한다.
     filters = {
         "product": st.selectbox("상품", options["product"], key="ws_filter_product"),
-        "source": st.selectbox("출발 점포", options["source"], key="ws_filter_source"),
-        "target": st.selectbox("도착 점포", options["target"], key="ws_filter_target"),
-        "route_type": st.selectbox("경로 유형", options["route_type"], key="ws_filter_route_type"),
         "only_actionable": st.checkbox("순효과가 있는 이동만", key="ws_only_actionable"),
     }
+    narrowed = sum(
+        1 for key in ("ws_filter_source", "ws_filter_target", "ws_filter_route_type")
+        if str(st.session_state.get(key) or "전체") != "전체"
+    )
+    label = "점포 · 경로로 좁히기" + (f" ({narrowed}개 적용 중)" if narrowed else "")
+    with st.expander(label, expanded=bool(narrowed)):
+        filters["source"] = st.selectbox("출발 점포", options["source"], key="ws_filter_source")
+        filters["target"] = st.selectbox("도착 점포", options["target"], key="ws_filter_target")
+        filters["route_type"] = st.selectbox(
+            "경로 유형", options["route_type"], key="ws_filter_route_type",
+        )
     return filters
 
 
@@ -210,6 +220,30 @@ def _render_network(view: Mapping[str, Any], drawn: Sequence[Mapping[str, Any]])
     if network.get("message"):
         st.caption(network["message"])
     _render_network_picker(drawn, view.get("selected_route_id"))
+
+
+FILTER_EMPTY_MESSAGE = "현재 필터 조건에 맞는 이동이 없습니다. 필터를 넓히면 네트워크가 다시 표시됩니다."
+
+
+def _reset_filters() -> None:
+    for key, value in (
+        ("ws_filter_product", ALL),
+        ("ws_filter_source", ALL),
+        ("ws_filter_target", ALL),
+        ("ws_filter_route_type", ALL),
+        ("ws_only_actionable", False),
+    ):
+        st.session_state[key] = value
+
+
+def _render_filtered_out_network() -> None:
+    """이동이 하나도 남지 않았을 때는 선 없는 네트워크 대신 안내와 다음 행동을 보여준다."""
+    st.markdown('<div class="ws-panel-title">재고 이동 네트워크</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="v2-wrap ws-network-placeholder">{_safe(FILTER_EMPTY_MESSAGE)}</div>',
+        unsafe_allow_html=True,
+    )
+    st.button("필터 초기화", key="ws_reset_filters", on_click=_reset_filters)
 
 
 def _render_network_picker(items: Sequence[Mapping[str, Any]], selected_id: Any) -> None:
@@ -333,7 +367,13 @@ def _render_alternatives_tab(view: Mapping[str, Any]) -> None:
         "같은 도착 점포를 채우는 다른 이동과, 같은 출발 재고를 보낼 수 있는 다른 이동을 함께 봅니다."
     )
     if rows:
-        display = [{key: value for key, value in row.items() if key != "route_id"} for row in rows]
+        # 기본 사용자가 실제로 비교하는 열만 남긴다. 내부 식별자와 중간 계산값
+        # (route_id · 예상 효과)은 표에서 감춘다.
+        display = [
+            {key: value for key, value in row.items()
+             if key not in ("route_id", "선택", "예상 효과")}
+            for row in rows
+        ]
         st.dataframe(pd.DataFrame(display), hide_index=True, width="stretch")
     else:
         st.caption("현재 데이터에는 비교할 다른 이동이 없습니다.")
@@ -341,13 +381,30 @@ def _render_alternatives_tab(view: Mapping[str, Any]) -> None:
     st.dataframe(pd.DataFrame(whatif_rows(view.get("pipeline"), selected)), hide_index=True, width="stretch")
 
 
+_VALIDATION_HEADLINES = ("계획 제약", "안전재고", "도착 필요 수량", "추천 안정성")
+
+
 def _render_validation_tab(view: Mapping[str, Any]) -> None:
-    st.dataframe(pd.DataFrame(validation_rows(view.get("pipeline"))), hide_index=True, width="stretch")
+    rows = validation_rows(view.get("pipeline"))
+    by_item = {str(row.get("검증 항목")): row for row in rows}
+    # 검증 결과는 먼저 한 줄로 읽히고, 항목별 설명과 숫자는 펼쳐서 본다.
+    headline = [by_item[name] for name in _VALIDATION_HEADLINES if name in by_item]
+    if headline:
+        columns = st.columns(len(headline), gap="medium")
+        for column, row in zip(columns, headline):
+            column.markdown(
+                '<div class="v2-wrap v2-card ws-kpi">'
+                f'<div class="ws-kpi-title">{_safe(row.get("검증 항목"))}</div>'
+                f'<div class="ws-check-value">{_safe(row.get("결과"))}</div>'
+                "</div>",
+                unsafe_allow_html=True,
+            )
     plan = view.get("plan") or {}
     issues = (plan.get("validation") or {}).get("issues") or []
     if issues:
         st.warning(" · ".join(str(issue) for issue in issues[:3]))
     with st.expander("검증 상세 보기", expanded=False):
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         comparison = (view.get("pipeline") or {}).get("plan_comparison") or {}
         labels = {
             "independent_candidates": "후보를 따로 더한 값",
@@ -506,17 +563,25 @@ def render_workspace_page() -> None:
 
     items = list(view.get("plan_items") or [])
     _render_kpis(view)
+    view = dict(view)
 
-    left, centre, right = st.columns([1.05, 2.55, 1.6], gap="medium")
+    # Measured on real 1366 / 1600 / 1920 screens: the centre needs ~54% of the row
+    # for the network text to stay above 12px once the SVG is scaled to the column.
+    left, centre, right = st.columns([0.95, 2.85, 1.5], gap="medium")
     with left:
         filters = _render_left_panel(view, items)
     visible = apply_filters(items, filters)
-    if visible and str(view.get("selected_route_id") or "") not in {
-        str(item.get("route_id")) for item in visible
-    }:
-        view = dict(view)
-        view["selected_route_id"] = str(visible[0].get("route_id"))
-        view["selected"] = dict(visible[0])
+    if visible:
+        if str(view.get("selected_route_id") or "") not in {
+            str(item.get("route_id")) for item in visible
+        }:
+            view["selected_route_id"] = str(visible[0].get("route_id"))
+            view["selected"] = dict(visible[0])
+    else:
+        # 필터가 모든 이동을 걸러냈다면 오늘 권장할 이동도 없다. 이전 선택을 그대로
+        # 두면 필터와 어긋나는 이동이 오른쪽에 남으므로 화면에서만 비운다
+        # (session의 선택 id는 유지해 필터를 넓히면 그대로 돌아온다).
+        view["selected"] = None
     # One selection for the whole app: the network, the right panel, the bottom
     # tabs and the detail pages all read this single id.
     resolved = str(view.get("selected_route_id") or "")
@@ -524,11 +589,14 @@ def render_workspace_page() -> None:
         st.session_state["selected_route_id"] = resolved
 
     with centre:
-        _render_network(view, visible)
+        if visible:
+            _render_network(view, visible)
+        else:
+            _render_filtered_out_network()
     with right:
         _render_execution_panel(view, visible)
 
     _render_detail_tabs(view)
 
 
-__all__ = ["render_workspace_page", "STALE_MESSAGE"]
+__all__ = ["render_workspace_page", "STALE_MESSAGE", "FILTER_EMPTY_MESSAGE"]
