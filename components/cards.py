@@ -120,7 +120,7 @@ def render_recommendation_summary(st, recommendation: Optional[Mapping[str, obje
         ("실행 수량" if planned is not None else "추천 수량",
          format_number(planned if planned is not None else recommendation.get("recommended_qty"), "개")),
         ("예상 순효과", format_currency(recommendation.get("net_benefit"))),
-        ("추천 안정성", recommendation.get("robustness_status") or "-"),
+        ("안정성", recommendation.get("robustness_status") or "-"),
     ]
     grid = "".join(
         f'<div class="v2-info-item"><span class="v2-card-caption">{_safe(label)}</span><strong>{_safe(value)}</strong></div>'

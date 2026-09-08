@@ -16,6 +16,7 @@ from components.tables import render_capped_table, render_html_table
 from components.status import badge_html
 from services.vhs_score_engine import COMPONENT_LABELS
 from services.home_state import NO_CANDIDATES, READY, build_home_state
+from services.workspace_view import validation_rows as workspace_validation_rows
 from services import export_service, v2_summaries
 from services.dqn_service import (
     apply_dqn_result_to_recommendations,
@@ -446,7 +447,7 @@ def _render_sensitivity_view(pipeline: dict) -> None:
     stability_status = stability.get("status") or "계산 불가"
 
     cols = st.columns(4, gap="small")
-    cols[0].metric("추천 안정성", stability_status)
+    cols[0].metric("안정성", stability_status)
     if top1 is None:
         cols[1].metric("상위 추천 유지율", "-")
     elif top1 >= 0.999:
@@ -942,9 +943,39 @@ def _render_report_summary(pipeline: dict) -> None:
     )
 
 
+_HEADLINE_CHECKS = ("계획 제약", "안전재고", "도착 필요 수량", "안정성")
+
+
+def _render_conclusion(pipeline: dict) -> None:
+    """The verdict first, the research metrics below it.
+
+    The rows come from ``workspace_view.validation_rows`` — the very same function
+    the 재고 운영 검증 탭 reads — so the summary a user acts on and the detail a
+    reviewer reads can never disagree about whether the plan is executable.
+    """
+    rows = {str(row.get("검증 항목")): row for row in workspace_validation_rows(pipeline)}
+    plan_ok = str((rows.get("계획 제약") or {}).get("결과")) == "이상 없음"
+    safety_ok = str((rows.get("안전재고") or {}).get("결과")) == "이상 없음"
+    if plan_ok and safety_ok:
+        verdict = "현재 계획은 실행 가능하며 안전재고 침범이 없습니다."
+    elif plan_ok:
+        verdict = "현재 계획은 실행 가능하지만 안전재고 항목을 확인해야 합니다."
+    else:
+        verdict = "현재 계획은 실행 조건을 다시 확인해야 합니다."
+
+    render_section_header(st, "결론", "")
+    _conclusion_card(verdict)
+    headline = [rows[name] for name in _HEADLINE_CHECKS if name in rows]
+    if headline:
+        columns = st.columns(len(headline), gap="medium")
+        for column, row in zip(columns, headline):
+            column.metric(str(row.get("검증 항목")), str(row.get("결과")))
+    st.caption("아래 탭은 연구·검증용 상세 지표입니다. 실행 판단은 재고 운영 화면에서 합니다.")
+
+
 def render_validation_page() -> None:
     pipeline = _pipeline()
-    render_page_header(st, "분석 및 검증", "추천 결과의 점수, 비교 결과, 학습 상태를 확인합니다.")
+    render_page_header(st, "분석 및 검증", "실행 판단 결론을 먼저 보고, 아래에서 연구용 상세 지표를 확인합니다.")
 
     # Same workspace status as the home screen: only a real result set shows the
     # six algorithm tabs. Every non-result state shows one status card (+ the
@@ -958,6 +989,7 @@ def render_validation_page() -> None:
             _render_execution_plan_status(pipeline)
         return
 
+    _render_conclusion(pipeline)
     tabs = st.tabs(TABS)
     renderers = (
         lambda: _render_scores(pipeline),

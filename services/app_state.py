@@ -48,7 +48,9 @@ TRANSIENT_VIEW_KEYS = (
     "ws_filter_target",
     "ws_filter_route_type",
     "ws_only_actionable",
+    "ws_only_attention",
     "ws_network_scope",
+    "ws_plan_pick",
     # 추천 실행 페이지: 필터 / 경로 선택
     "rec_filter_product",
     "rec_filter_source",

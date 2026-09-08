@@ -152,7 +152,7 @@ def _render_best_recommendation(recommendation: dict) -> None:
     planned_qty = recommendation.get("planned_qty")
     cols[0].metric("실행 수량", format_number(planned_qty if planned_qty is not None else recommendation.get("recommended_qty"), "개"))
     cols[1].metric("예상 순효과", format_currency(recommendation.get("net_benefit")))
-    cols[2].metric("추천 안정성", str(recommendation.get("robustness_status") or "-"))
+    cols[2].metric("안정성", str(recommendation.get("robustness_status") or "-"))
     cols[3].metric("추천 신뢰도", str(recommendation.get("confidence_level") or "-"))
     route_label = "DC 경유" if recommendation.get("route_type") == "VIA_DC" else "직접 이동"
     info_items = (

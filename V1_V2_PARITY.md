@@ -2,7 +2,7 @@
 
 비교 대상
 - **V1(완성형 Varo)**: `C:\Projects\Varo\varo_v1\bad_inventory_simulator\` (app.py 1,850줄 + dashboard_pages.py 8,770줄). 읽기 전용 분석만 수행했으며 원본은 수정하지 않았습니다.
-- **V2**: `C:\Projects\Varo\varo_v2\` (재고 운영 Workspace + 상세 5개 페이지 · router · services · simulation · components).
+- **V2**: `C:\Projects\Varo\varo_v2\` (재고 운영 Workspace 1개 + 사용자 메뉴 3개(데이터 관리·분석 및 검증·운영 시뮬레이션) + 예전 화면 2개(추천 실행·경로 상세, route 유지) · router · services · simulation · components).
 
 분류 기준: **완료**(V2 구현·동작) · **개선됨**(V2가 더 쉬움) · **보완함**(이번 작업에서 추가) · **통합**(V1 중복 기능을 한 곳으로) · **의도적 이동/제외**(사유 명시).
 
@@ -15,8 +15,8 @@
 | 5 | Varo Hybrid Score | varo_hybrid_score | `services/vhs_score_engine.py` · 추천 점수 탭 | 완료 |
 | 6 | 자동 가중치 | varo_weight_optimizer | `apply_auto_vhs` · 점수 구성 탭(그룹 요약) | 개선됨 |
 | 7 | 추천 생성 | recommender / decision_analyzer | `candidate_generator` (rule-based, 시트 없으면 자동 생성) | 완료 |
-| 8 | 추천 후보 필터 | 상품/등급 필터 | 추천 실행 필터 6종(상품·출발·도착·경로·등급·이동수단) | 완료 |
-| 9 | 최종 추천 | 최종 추천 탭 | VHS 1위 = Varo 최종, 추천 실행 1순위 카드 | 개선됨 |
+| 8 | 추천 후보 필터 | 상품/등급 필터 | **재고 운영 필터 5종**(상품·순효과 + 접힘: 출발·도착·경로 유형·주의). 등급·이동수단 필터는 예전 추천 실행 화면에 유지 | 통합 |
+| 9 | 최종 추천 | 최종 추천 탭 | **재고 운영 "오늘 권장 이동"**. 재고 운영·예전 추천 실행·운영 시뮬레이션이 같은 `execution_plan.items`와 같은 `selected_route_id`를 읽어 1위가 어긋날 수 없음 | 개선됨 |
 | 10 | Greedy 비교 | 추천 방식 비교 탭 | 비교 분석 탭(Varo/Greedy/DQN/Pareto 8열) | 완료 |
 | 11 | DQN 학습 | torch_dqn_agent / train_rl_agent | `services/dqn_service.py` 실제 PyTorch 학습(버튼 실행) | 완료 |
 | 12 | DQN 결과 저장·불러오기 | rl_data_logger / github_dqn_uploader | `save_dqn_result` / `load_latest_dqn_result` · 저장 결과 불러오기 버튼 | 완료 |
@@ -26,21 +26,21 @@
 | 16 | 민감도 분석 | varo_sensitivity | `weight_sensitivity` · 민감도 탭(3 KPI + 막대) | 완료 |
 | 17 | 추천 신뢰도 | vhs_confidence | `confidence` · 검증 결과 탭 | 완료 |
 | 18 | 최적성 검증 | varo_optimality_gap | `optimality_gap` → "최적해 차이" · 검증 결과 탭 | 개선됨 |
-| 19 | 비용 비교 | min_cost_network / calculator | 경로 상세 핵심 수치 + 이동 방식 비교 | 완료 |
+| 19 | 비용 비교 | min_cost_network / calculator | **재고 운영 "세부 정보" 탭**(예상 비용·절감·순효과) + 예전 경로 상세 "이동 방식 비교" | 통합 |
 | 20 | 직접 이동 ↔ DC 경유 비교 | route_analyzer | 경로 상세 "이동 방식 비교"(판단 열·추천 행 강조) | 개선됨 |
 | 21 | 지도 | kakao_map_viewer | 경로 상세 지도 영역 | 완료 |
 | 22 | Kakao 지도 | 사이드바 JS key 입력 | `kakao_service` (st.secrets/환경변수, 경로 상세에서만 로딩) | 개선됨 |
-| 23 | 이동 경로 | transfer_path_analyzer | 경로 상세 "이동 단계"(직접/DC 경유 카드) | 완료 |
-| 24 | 시뮬레이션 | network_path_analyzer | 홈 DC 중심 방사형 네트워크 + SMIL 차량 애니메이션 | 개선됨 |
-| 25 | 운영 KPI | varo_dashboard_kpi | 홈 5개 KPI(분석 재고·추천 경로·절감액·평균 점수·판단) | 완료 |
-| 26 | 추천 Top5 | dashboard TOP5 | 홈 추천 Top5(7열) | 완료 |
-| 27 | 현재 실행 경로 | candidate rail | 홈 "현재 이동 중" Top3 | 완료 |
+| 23 | 이동 경로 | transfer_path_analyzer | **재고 운영 네트워크**(선택 경로 강조·출발/도착/경유 DC 라벨) + 예전 경로 상세 "이동 단계" | 통합 |
+| 24 | 시뮬레이션 | network_path_analyzer | **운영 시뮬레이션** 화면의 DC 중심 방사형 네트워크 + SMIL 차량 애니메이션(재고 운영과 역할 분리: 정지 판단 화면 vs 이동 흐름) | 개선됨 |
+| 25 | 운영 KPI | varo_dashboard_kpi | **재고 운영 KPI 4개**(오늘 실행 이동·총 이동 수량·예상 순효과·주의 필요). 운영 시뮬레이션의 중복 KPI 행은 제거 | 통합 |
+| 26 | 추천 Top5 | dashboard TOP5 | 운영 시뮬레이션 추천 Top5(7열) — 무엇이 움직이는지의 맥락 | 완료 |
+| 27 | 현재 실행 경로 | candidate rail | 운영 시뮬레이션 "현재 이동 중" Top3 + **재고 운영 "실행 계획" 목록(전체 건수, 1클릭 선택)** | 개선됨 |
 | 28 | 검증 리포트 | 검증 요약 탭 | 검증 결과 탭 + "검증 결과 다운로드" | 완료 |
 | 29 | Excel 다운로드 | 다수 download_button | 추천 CSV/Excel · 분석결과 Excel · 검증리포트 | 완료 |
 | 30 | 분석 결과 다운로드 | filtered_result Excel | "분석 결과 전체 Excel" | 완료 |
 | 31 | 학습 결과 다운로드 | rl_data_logger 로그 | **DQN 학습 탭 "학습 결과 다운로드"(JSON)** | 보완함 |
 | 32 | 원본 데이터 확인 | 사이드바 미리보기 | 데이터 관리 "원본 데이터 보기" expander | 완료 |
-| 33 | 페이지 이동 | icon nav / _go | 사이드바 5페이지 내비 + 현재 페이지 강조 | 개선됨 |
+| 33 | 페이지 이동 | icon nav / _go | 사이드바 **4개 메뉴** + "예전 화면"(접힘) 2개, 현재 페이지 강조. 첫 진입은 재고 운영 | 개선됨 |
 | 34 | 상태 초기화 | 세션 리셋 | `apply_state_payload` (새 데이터 적용 시에만) | 완료 |
 | 35 | 새 데이터 적용 | 업로드 시 재계산 | `load_and_apply` (검증 통과 시 전체 페이지 반영) | 완료 |
 | 36 | 오류·경고 표시 | show_friendly_error | 검증 메시지 · 조건부 warning(필수 컬럼/최소 정보 부족 등) | 완료 |
@@ -61,3 +61,24 @@
 ## 이번 작업에서 보완한 항목
 - **DQN 학습 결과 다운로드**(#31): V1의 학습 로그 다운로드에 대응하는 JSON 다운로드를 DQN 학습 탭에 추가.
 - **추천 전략 표기 명확화**: 1순위 추천 카드에서 "이동 경로 방식 / Greedy 전략 / 최종 처리 전략 / 추천 등급"을 분리해, 경로 방식(직접 이동)과 최종 처리(보류)가 충돌해 보이지 않도록 정리(보류 시 사유 한 줄 표시).
+
+## 2차 Workspace 통합에서 바뀐 것 (화면 통합, 계산 무변경)
+
+`재고 운영` 한 화면에서 재고 재배치 판단이 끝나도록 중복을 걷어낸 작업입니다. **알고리즘·계산·데이터
+처리는 전혀 바뀌지 않았습니다**(동일 워크북 재계산 시 `execution_plan` 값이 항목 단위로 동일함을
+`tests/test_workspace_integration.py`가 검증합니다).
+
+| 흡수 대상 | 어디로 갔나 | 예전 화면에 남은 것 |
+| --- | --- | --- |
+| 추천 실행 — 전체 실행계획 목록·우선순위·선택 | 재고 운영 왼쪽 **"실행 계획"** 목록(0/1/8/20/50건 검증) | 등급·이동수단 필터, CSV/Excel 다운로드, VHS/Greedy/DQN/Pareto 상세 비교 |
+| 경로 상세 — 재고·비용 숫자 | 재고 운영 하단 **"세부 정보"** 탭 | 이동 단계 카드, 이동 방식 비교, 카카오 지도 |
+| 홈(운영 현황) — 결과 KPI·최우선 추천 카드·4단계 흐름 | 재고 운영 KPI·오늘 권장 이동 | 이동 애니메이션·컨트롤·현재 이동 중·추천 Top5 |
+| 분석 및 검증 — 실행 가능 여부 판단 | 재고 운영 하단 **"검증"** 탭 요약 | 연구용 상세 지표 전체(결론 섹션이 맨 위에 추가됨) |
+
+- 사용자 메뉴: **재고 운영 · 데이터 관리 · 분석 및 검증 · 운영 시뮬레이션**. `추천 실행`·`경로 상세`는
+  route를 유지한 채 "예전 화면"(접힘)으로 격하했고 redirect는 두지 않았습니다(loop 위험 없음).
+- 선택 상태는 앱 전체에서 `selected_route_id` 하나입니다. 실행 계획 목록이 유일한 선택 위젯이고,
+  네트워크·오른쪽 패널·하단 4개 탭·예전 화면이 모두 그 값을 읽습니다.
+- 미확보 물류값(실제 도로 거리·이동 시간·차량 용량·운송비)은 `미확보`로만 표시하며,
+  워크북의 참고 입력값이 실제값 칸을 대신 채우지 않습니다. 연결 지점은
+  `services/workspace_view.LOGISTICS_FIELDS`입니다.

@@ -56,10 +56,15 @@ WORKSPACE_VIEW_KEYS = (
     "ws_filter_target",
     "ws_filter_route_type",
     "ws_only_actionable",
+    "ws_only_attention",
     "ws_network_scope",
+    "ws_plan_pick",
 )
 
 ALL = "전체"
+
+# The single wording for a move that needs a second look before it is executed.
+ATTENTION = "주의"
 
 
 # --------------------------------------------------------------------------- #
@@ -130,6 +135,189 @@ def action_qty(item: Mapping[str, Any] | None) -> float | None:
         return None
     planned = _num(item.get("planned_qty"))
     return planned if planned is not None else _num(item.get("recommended_qty"))
+
+
+def needs_attention(item: Mapping[str, Any] | None) -> bool:
+    """True when this move should not be executed without a second look.
+
+    Same three conditions the right panel and the plan list already describe in
+    words — collected here so 주의 means exactly one thing on every surface.
+    """
+    if not item:
+        return False
+    if item.get("quantity_adjusted"):
+        return True
+    status = _text(item.get("feasibility_status"))
+    if status and status != "추천 가능":
+        return True
+    stability = _text(item.get("robustness_status"))
+    return bool(stability) and stability not in ("안정", "높음")
+
+
+def plan_list_rows(
+    items: Sequence[Mapping[str, Any]], selected_route_id: Any = None,
+) -> list[dict[str, Any]]:
+    """The compact 실행 계획 list: one short line per move, plan order preserved.
+
+    Deliberately narrow — 출발 → 도착 · 상품 as the line a user scans, and one
+    caption with 실행 수량 · 경로 (+ 주의). The product is part of the *label*, not
+    the caption, because a leg on its own is not a move: the same 출발 → 도착 can
+    carry two different products and the two rows must not read alike. Candidate
+    scores, ids and cost breakdowns stay out of the list; they belong to the right
+    panel and the 세부 정보 tab.
+    """
+    selected = _text(selected_route_id)
+    rows: list[dict[str, Any]] = []
+    for item in items or []:
+        route_id = _text(item.get("route_id"))
+        if not route_id:
+            continue
+        attention = needs_attention(item)
+        product = _text(item.get("product_name")) or _text(item.get("product_id")) or "-"
+        caption = f"{qty_text(action_qty(item))} · {route_label(item)}"
+        rows.append({
+            "route_id": route_id,
+            "label": f"{move_title(item)} · {product}",
+            "caption": caption + (f" · {ATTENTION}" if attention else ""),
+            "product": product,
+            "qty_text": qty_text(action_qty(item)),
+            "route": route_label(item),
+            "attention": attention,
+            "selected": route_id == selected,
+        })
+    return rows
+
+
+# --------------------------------------------------------------------------- #
+# Selected move — the values the (now folded-away) 경로 상세 screen used to own
+# --------------------------------------------------------------------------- #
+def _row(label: str, value: str) -> dict[str, str]:
+    return {"항목": label, "값": value}
+
+
+def move_detail_rows(
+    item: Mapping[str, Any] | None,
+    quantity_basis: Mapping[str, Any] | None = None,
+) -> list[dict[str, str]]:
+    """Every decision number for the selected move, or 데이터 없음.
+
+    The stock figures come from what the analysis already computed — the
+    candidate's own decision metrics, and, where the plan item does not carry
+    them, the candidate ledger's ``quantity_basis`` (the very dict the 이동 수량
+    근거 line below this table prints). Reading both means the table and that
+    line cannot state a different 출발 현재 재고. Nothing is recomputed here.
+
+    The one derived value is 이동 후 재고, taken from the *action* quantity
+    (planned_qty) rather than the candidate's recommended quantity, so it can
+    never contradict the 실행 수량 shown right above it.
+    """
+    if not item:
+        return []
+    basis = quantity_basis or {}
+
+    def value(*keys: str) -> float | None:
+        for key in keys:
+            found = _num(item.get(key))
+            if found is None:
+                found = _num(basis.get(key))
+            if found is not None:
+                return found
+        return None
+
+    quantity = action_qty(item)
+    stock = value("source_stock")
+    safety = value("source_safety_floor", "source_safety", "inventory_floor_value")
+    movable = value("source_movable", "available_to_move")
+    shortfall = value("target_shortfall", "target_demand")
+    remaining = None if stock is None or quantity is None else stock - quantity
+    target_stock = _num(item.get("target_stock"))
+    post_target = None if target_stock is None or quantity is None else target_stock + quantity
+
+    dc = _text(item.get("dc_name")) or _text(item.get("dc_id"))
+    net = item.get("planned_net_benefit")
+    if net is None:
+        net = item.get("net_benefit")
+    return [
+        _row("출발 점포", _text(item.get("source_name")) or _text(item.get("source_id")) or NO_DATA),
+        _row("도착 점포", _text(item.get("target_name")) or _text(item.get("target_id")) or NO_DATA),
+        _row("경유 DC", dc or "경유 없음"),
+        _row("경로 유형", route_label(item)),
+        _row("실행 수량", qty_text(quantity)),
+        _row("출발 현재재고", qty_text(stock)),
+        _row("유지해야 할 재고", qty_text(safety)),
+        _row("이동 가능 수량", qty_text(movable)),
+        _row("이동 후 출발 재고", qty_text(remaining)),
+        _row("도착 점포 필요량", qty_text(shortfall)),
+        _row("이동 후 도착 재고", qty_text(post_target)),
+        _row("예상 비용", money_text(item.get("planned_cost") if item.get("planned_cost") is not None else item.get("estimated_cost"))),
+        _row("예상 절감", money_text(
+            item.get("planned_expected_saving")
+            if item.get("planned_expected_saving") is not None else item.get("expected_saving")
+        )),
+        _row("예상 순효과", money_text(net)),
+        _row("안정성", _text(item.get("robustness_status")) or CHECK_NEEDED),
+        _row("실행 상태", _text(item.get("feasibility_status")) or "추천 가능"),
+    ]
+
+
+# The logistics facts still being collected, and the exact optional fields a
+# future real-data connection will fill in.
+#
+#   (표시 이름, 실제값 필드, 참고로만 쓰는 입력값 필드, 단위)
+#
+# ``actual`` fields are measured facts — a real road distance, a driven time, an
+# invoiced transport cost. ``reference`` fields are numbers that came in with the
+# workbook: the model reads them, but they are *not* the measured fact and must
+# never be shown under the 실제 label. Until an actual field carries a value the
+# row reads 미확보; it is never rendered as 0, and never borrows the workbook
+# number to look complete.
+LOGISTICS_FIELDS: tuple[tuple[str, tuple[str, ...], tuple[str, ...], str], ...] = (
+    ("실제 도로 거리", ("actual_distance_km", "road_distance_km"), ("distance_km",), "km"),
+    ("실제 이동 시간", ("actual_travel_time_min",), ("travel_time_min", "expected_time_min"), "분"),
+    ("차량 용량", ("actual_vehicle_capacity",), ("vehicle_capacity", "capacity", "max_load"), "개"),
+    ("실제 운송비", ("actual_transport_cost",), ("transport_cost", "estimated_cost", "move_cost"), "원"),
+)
+
+
+def _first_number(item: Mapping[str, Any] | None, keys: Sequence[str]) -> float | None:
+    for key in keys:
+        value = _num((item or {}).get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _measure_text(value: float, suffix: str) -> str:
+    if suffix == "원":
+        return money_text(value)
+    if suffix == "개":
+        return qty_text(value)
+    text = f"{value:,.1f}".rstrip("0").rstrip(".")
+    return f"{text}{suffix}"
+
+
+def logistics_rows(item: Mapping[str, Any] | None) -> list[dict[str, str]]:
+    """실제 물류 값 — 확보된 것만 숫자로, 나머지는 미확보.
+
+    See :data:`LOGISTICS_FIELDS`. A workbook value never fills an 실제 row: when
+    one exists it is named in 설명 as an input the model used, so a reader can
+    tell "we have a 4.7km number in the file" from "we measured 4.7km of road".
+    """
+    missing = PROVENANCE_LABELS["not_available"]
+    rows: list[dict[str, str]] = []
+    for label, actual_keys, reference_keys, suffix in LOGISTICS_FIELDS:
+        actual = _first_number(item, actual_keys)
+        if actual is not None:
+            rows.append({
+                "항목": label, "값": _measure_text(actual, suffix), "설명": "실제 측정값",
+            })
+            continue
+        reference = _first_number(item, reference_keys)
+        note = "수집 중"
+        if reference is not None:
+            note = f"수집 중 (입력값 {_measure_text(reference, suffix)} 사용)"
+        rows.append({"항목": label, "값": missing, "설명": note})
+    return rows
 
 
 # --------------------------------------------------------------------------- #
@@ -309,6 +497,8 @@ def apply_filters(
         result = [i for i in result if _text(i.get("route_type")).upper() == code]
     if filters.get("only_actionable"):
         result = [i for i in result if (_num(i.get("planned_net_benefit")) or 0) > 0]
+    if filters.get("only_attention"):
+        result = [i for i in result if needs_attention(i)]
     return result
 
 
@@ -442,9 +632,16 @@ def alternatives_for(
 ) -> list[dict[str, str]]:
     """Real alternatives for the selected move, on the same product.
 
-    Two comparisons a user actually faces: 같은 도착 점포를 어디서·어떤 경로로 채울까,
-    그리고 같은 출발 재고를 어디로 보낼까. Only values that exist in the data are
-    shown; the rest read 데이터 없음.
+    Three comparisons a user actually faces, in the order they matter:
+
+    * 같은 구간 · 다른 경로 — the same 출발 → 도착 by 직접 이동 vs DC 경유, or via a
+      different DC. This is the choice the plan itself had to make.
+    * 같은 도착 점포 — a different source that could fill the same shortage.
+    * 같은 출발 재고 — a different destination the same stock could go to.
+
+    Only candidates that really exist in the current data appear; nothing is
+    synthesised, and product substitution is deliberately not attempted. Values
+    the data cannot supply read 데이터 없음.
     """
     if not item:
         return []
@@ -462,7 +659,9 @@ def alternatives_for(
         candidate_source = _text(candidate.get("source_id")) or _text(candidate.get("source_name"))
         if candidate_product != product:
             continue
-        if candidate_target == target:
+        if candidate_source == source and candidate_target == target:
+            kind = "같은 구간 · 다른 경로"
+        elif candidate_target == target:
             kind = "같은 도착 점포"
         elif candidate_source == source:
             kind = "같은 출발 재고"
@@ -501,12 +700,13 @@ def alternatives_for(
             "안정성": _text(candidate.get("robustness_status")) or NO_DATA,
             "계획 반영": status,
         })
+    order = {"현재 이동": 0, "같은 구간 · 다른 경로": 1, "같은 도착 점포": 2, "같은 출발 재고": 3}
     rows.sort(key=lambda row: (
-        row["선택"] != "●",
-        row["구분"] != "같은 도착 점포",
+        order.get(row["구분"], 4),
         row["계획 반영"] != "계획에 포함",
         row["출발 점포"],
         row["도착 점포"],
+        row["경로"],
     ))
     return rows
 
@@ -576,7 +776,7 @@ def validation_rows(pipeline: Mapping[str, Any] | None) -> list[dict[str, str]]:
          "설명": "출발 점포에 남겨야 할 재고를 침범하지 않았는지 확인합니다."},
         {"검증 항목": "도착 필요 수량", "결과": ok(int(_num(validation.get("destination_overfill_violations")) or 0) == 0),
          "설명": "도착 점포가 필요한 양보다 많이 받지 않는지 확인합니다."},
-        {"검증 항목": "추천 안정성", "결과": _text(stability.get("status")) or NOT_COMPUTABLE,
+        {"검증 항목": "안정성", "결과": _text(stability.get("status")) or NOT_COMPUTABLE,
          "설명": "판단 기준이 달라져도 추천이 유지되는 정도입니다."},
         {"검증 항목": "추천 신뢰도", "결과": _text(confidence.get("status")) or NOT_COMPUTABLE,
          "설명": "입력 완성도와 실행 가능성을 함께 본 결과입니다."},
@@ -697,7 +897,9 @@ def _build_workspace(state: Mapping[str, Any], history_confirmed: int = 0) -> di
 
 __all__ = [
     "ALL",
+    "ATTENTION",
     "CHECK_NEEDED",
+    "LOGISTICS_FIELDS",
     "NOT_COMPUTABLE",
     "NO_DATA",
     "PROVENANCE_LABELS",
@@ -709,11 +911,15 @@ __all__ = [
     "build_workspace_view",
     "data_readiness",
     "filter_options",
+    "logistics_rows",
     "money_text",
+    "move_detail_rows",
     "move_reasons",
     "move_risks",
     "move_title",
+    "needs_attention",
     "plan_kpis",
+    "plan_list_rows",
     "qty_text",
     "readiness_summary",
     "resolve_selection",

@@ -91,35 +91,38 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("지도 키가 설정되면 실제 지도에서 경로를 확인할 수 있습니다", blob)
         self.assertNotIn("지도 SDK는 이번 단계에서 연결하지 않았습니다", blob)
 
-    def test_home_is_result_dashboard(self):
+    def test_simulation_page_is_the_moving_picture_not_a_second_dashboard(self):
         app = self._new_app()
         app.session_state["current_menu"] = "운영 현황"
         app.run()
         self.assertFalse(app.exception)
         blob = self._markdown_blob(app)
-        # required result-dashboard elements
+        # what this screen is for: the animation, its controls, and what is moving
         for required in (
-            "Varo 운영 결과",
-            "재고 이동 추천과 예상 절감 효과를 확인합니다.",
-            # result-only KPIs (no 평균 VHS on home): 추천 후보·권장 이동 수량·예상 순효과·신뢰도·데이터 상태
-            "추천 후보", "권장 이동 수량", "예상 순효과", "추천 신뢰도", "데이터 상태",
-            "엑셀 업로드", "재고 분석", "이동 추천", "결과 확인",
-            "추천 경로 이동 현황", "추천 Top 5",
-            "최우선 추천",
+            "운영 시뮬레이션",
+            "오늘 권장 이동이 실제로 어떻게 움직이는지 확인합니다.",
+            "추천 경로 이동 현황", "추천 Top 5", "현재 이동 중",
         ):
-            self.assertIn(required, blob, f"home must contain: {required}")
-        # page navigation lives in the collapsed sidebar, not a horizontal/bottom menu
+            self.assertIn(required, blob, f"simulation page must contain: {required}")
+        # …and what moved to 재고 운영 instead of being shown twice
+        for removed in (
+            "Varo 운영 결과", "추천 후보", "권장 이동 수량", "예상 순효과",
+            "추천 신뢰도", "최우선 추천", "엑셀 업로드", "결과 확인",
+        ):
+            self.assertNotIn(removed, blob, f"simulation page must not repeat: {removed}")
+        # navigation: four everyday screens, the two absorbed ones folded away
         sidebar_nav = {b.label: b.key for b in app.sidebar.button}
-        self.assertEqual(set(sidebar_nav), set(MENUS))
+        self.assertEqual(
+            list(sidebar_nav)[:4], ["재고 운영", "데이터 관리", "분석 및 검증", "운영 시뮬레이션"],
+        )
         for menu in MENUS:
-            self.assertEqual(sidebar_nav[menu], f"nav_{menu}")
+            self.assertIn(f"nav_{menu}", set(sidebar_nav.values()))
+        self.assertIn("예전 화면", {item.label for item in app.sidebar.expander})
         button_labels = {b.label for b in app.button}
-        # the old bottom page-nav buttons are gone from the home body
-        for removed_btn in ("추천 실행 보기", "경로 상세 보기"):
-            self.assertNotIn(removed_btn, button_labels, f"home should not have button: {removed_btn}")
-        # the top toolbar keeps only the data-replace toggle (no duplicate 데이터 관리 button)
+        for removed_btn in ("추천 실행 보기", "경로 상세 보기", "추천 상세 보기"):
+            self.assertNotIn(removed_btn, button_labels)
+        # the top toolbar keeps only the data-replace toggle
         self.assertIn("데이터 교체", button_labels)
-        # forbidden elements / developer copy
         for banned in (
             "실제 V2 내부 알고리즘 재계산 결과 기준",
             "DQN 과거 학습 결과는 제외",
@@ -134,14 +137,13 @@ class PageRenderTests(unittest.TestCase):
             "운영 로그",
             "선택 후보 요약",
         ):
-            self.assertNotIn(banned, blob, f"home should not contain: {banned}")
-        # no download buttons on home
+            self.assertNotIn(banned, blob, f"simulation page should not contain: {banned}")
         self.assertNotIn("검증 리포트 Excel", button_labels)
         self.assertNotIn("추천 결과 CSV", button_labels)
-        # home Top table is result-only: exactly the 7 operator columns
+        # the Top table is result-only: exactly the 7 operator columns
         columns = self._dataframe_columns(app)
         for required_col in ("순위", "상품", "출발", "도착", "경로", "수량", "예상 순효과"):
-            self.assertIn(required_col, columns, f"home Top5 must have column: {required_col}")
+            self.assertIn(required_col, columns, f"Top5 must have column: {required_col}")
         for hidden in ("VHS", "VHS(재계산)", "DQN 상태", "Greedy", "신뢰도", "route_id", "상태"):
             self.assertNotIn(hidden, columns)
         self.assertIn('class="network-node dc-node"', blob)
@@ -149,6 +151,14 @@ class PageRenderTests(unittest.TestCase):
         self.assertEqual(blob.count('class="v2-vehicle"'), 3)
         # 전체 경로 보기 defaults OFF (only Top 3 routes shown)
         self.assertFalse(app.session_state["show_all_routes"])
+
+    def test_simulation_page_links_back_to_the_workspace(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "운영 현황"
+        app.run()
+        next(b for b in app.button if b.key == "home_go_workspace").click().run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.session_state["current_menu"], "재고 운영")
 
     def _all_blocked_state(self):
         from services.data_application import load_and_apply
@@ -161,7 +171,7 @@ class PageRenderTests(unittest.TestCase):
         load_and_apply(state, workbook_excel_bytes(workbook), "blocked.xlsx", "업로드된 추천 결과")
         return state
 
-    def test_home_no_data_state_shows_single_action(self):
+    def test_simulation_no_data_state_shows_single_action(self):
         app = AppTest.from_file(APP_PATH, default_timeout=90)
         app.run()
         app.session_state["current_menu"] = "운영 현황"
@@ -177,7 +187,7 @@ class PageRenderTests(unittest.TestCase):
         button.click().run()
         self.assertEqual(app.session_state["current_menu"], "데이터 관리")
 
-    def test_home_pending_intake_keeps_applied_result(self):
+    def test_simulation_pending_intake_keeps_the_applied_result(self):
         # Two-phase: a bad *new* upload (pending) must not hide the applied result.
         app = self._new_app()  # applied good data present
         app.session_state["pending_load_error"] = "파일 형식을 확인해주세요."
@@ -185,13 +195,13 @@ class PageRenderTests(unittest.TestCase):
         app.run()
         self.assertFalse(app.exception)
         blob = self._markdown_blob(app)
-        self.assertIn("최우선 추천", blob)          # applied result stays
-        self.assertIn("예상 순효과", blob)
+        self.assertIn("추천 경로 이동 현황", blob)   # applied result stays animated
+        self.assertIn("추천 Top 5", blob)
         self.assertNotIn("데이터를 수정해야 합니다", blob)  # no app-wide 사용 불가 takeover
         infos = " ".join(el.value for el in app.info)
         self.assertIn("검사 완료된 새 데이터가 있습니다", infos)  # short intake notice
 
-    def test_home_no_candidates_state_shows_cause_and_action(self):
+    def test_simulation_no_candidates_state_shows_cause_and_action(self):
         state = self._all_blocked_state()
         self.assertEqual(state["varo_recommendations"], [])
         app = AppTest.from_file(APP_PATH, default_timeout=120)
@@ -209,25 +219,13 @@ class PageRenderTests(unittest.TestCase):
         button = next(b for b in app.button if b.key == "home_primary_action")
         self.assertEqual(button.label, "제외 이유 확인")
         button.click().run()
-        self.assertEqual(app.session_state["current_menu"], "추천 실행")
+        self.assertEqual(app.session_state["current_menu"], "재고 운영")
         # the action lands on real content: the excluded-candidate list, not "데이터 없음"
         self.assertFalse(app.exception)
-        rec_blob = self._markdown_blob(app)
-        self.assertNotIn("분석 결과가 없습니다", rec_blob)
+        workspace_blob = self._markdown_blob(app)
+        self.assertNotIn("분석 결과가 없습니다", workspace_blob)
         labels = {item.label for item in app.expander}
         self.assertTrue(any("추천에서 제외된 후보" in label for label in labels))
-
-    def test_home_ready_detail_button_navigates_to_route_detail(self):
-        app = self._new_app()
-        app.session_state["current_menu"] = "운영 현황"
-        app.run()
-        self.assertFalse(app.exception)
-        button = next(b for b in app.button if b.key == "home_detail_action")
-        button.click().run()
-        self.assertEqual(app.session_state["current_menu"], "경로 상세")
-        # the selected candidate is the shared top recommendation (valid id)
-        valid_ids = {str(r["route_id"]) for r in app.session_state["varo_recommendations"]}
-        self.assertIn(str(app.session_state["selected_route_id"]), valid_ids)
 
     def test_validation_no_data_shows_state_card_not_empty_tabs(self):
         app = AppTest.from_file(APP_PATH, default_timeout=90)
@@ -647,9 +645,9 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("clear_applied_data", keys)
         self.assertIn("data_next_action", keys)
         button = next(b for b in app.button if b.key == "data_next_action")
-        self.assertEqual(button.label, "추천 실행")
+        self.assertEqual(button.label, "재고 운영으로 이동")
         button.click().run()
-        self.assertEqual(app.session_state["current_menu"], "추천 실행")
+        self.assertEqual(app.session_state["current_menu"], "재고 운영")
 
     def test_data_management_clear_button_resets_workspace(self):
         app = self._new_app()

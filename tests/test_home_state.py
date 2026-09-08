@@ -17,6 +17,7 @@ from services.home_state import (
     PAGE_DATA,
     PAGE_RECOMMENDATIONS,
     PAGE_ROUTE_DETAIL,
+    PAGE_WORKSPACE,
     READY,
     STALE,
     UNUSABLE,
@@ -65,7 +66,8 @@ class StateModelTests(unittest.TestCase):
         self.assertTrue(home["show_result_kpis"])
         self.assertEqual(home["recommendation_count"], 4)
         self.assertIsNotNone(home["top_recommendation"])
-        self.assertEqual(home["next_page"], PAGE_ROUTE_DETAIL)
+        # 결과 확인도 재고 운영 화면에서 한다(경로 상세는 예전 화면으로 격하).
+        self.assertEqual(home["next_page"], PAGE_WORKSPACE)
 
     def test_no_candidates(self):
         home = build_home_state(_all_blocked_state())
@@ -73,7 +75,8 @@ class StateModelTests(unittest.TestCase):
         self.assertFalse(home["show_result_kpis"])
         self.assertEqual(home["recommendation_count"], 0)
         self.assertTrue(home["no_candidate_cause"])
-        self.assertEqual(home["next_page"], PAGE_RECOMMENDATIONS)
+        # 제외 이유도 재고 운영 화면의 '실행 이동 없음' 상태에서 그대로 확인한다.
+        self.assertEqual(home["next_page"], PAGE_WORKSPACE)
 
     def test_unusable_pending(self):
         home = build_home_state(_unusable_state())
@@ -191,11 +194,16 @@ class ActionTargetTests(unittest.TestCase):
             self.assertIn(home["next_page"], MENU_ITEMS)
             self.assertTrue(home["next_action_label"])
 
-    def test_no_candidates_routes_to_recommendations(self):
-        self.assertEqual(build_home_state(_all_blocked_state())["next_page"], PAGE_RECOMMENDATIONS)
+    def test_no_candidates_routes_to_the_workspace(self):
+        self.assertEqual(build_home_state(_all_blocked_state())["next_page"], PAGE_WORKSPACE)
 
-    def test_ready_detail_action_targets_route_detail(self):
-        self.assertEqual(build_home_state(_applied_state())["next_page"], PAGE_ROUTE_DETAIL)
+    def test_ready_detail_action_targets_the_workspace(self):
+        self.assertEqual(build_home_state(_applied_state())["next_page"], PAGE_WORKSPACE)
+
+    def test_analysis_pending_action_runs_the_analysis_on_the_workspace(self):
+        home = build_home_state({**_applied_state(), "analysis_run_required": True})
+        self.assertEqual(home["next_page"], PAGE_WORKSPACE)
+        self.assertEqual(home["next_action_label"], "분석 실행")
 
 
 # --------------------------------------------------------------------------- #

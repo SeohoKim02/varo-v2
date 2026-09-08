@@ -1,4 +1,15 @@
-"""Home result dashboard for Varo V2."""
+"""운영 시뮬레이션 — the moving picture of the recommended routes.
+
+A different job to the 재고 운영 Workspace, which draws a *static* decision
+network. This screen answers "how does the plan actually move?": trucks running
+the top routes, DC legs versus direct legs, and the store states they pass
+through. It plays only when the user presses 시작.
+
+Result numbers (KPI row, 최우선 추천 card) deliberately do **not** live here any
+more — they are the Workspace's job, and repeating them on a second screen was
+the duplication this page was trimmed of. What stays is the animation, its
+controls, and the short list of routes the animation is showing.
+"""
 from __future__ import annotations
 
 import html
@@ -7,11 +18,11 @@ from typing import Mapping, Sequence
 import pandas as pd
 import streamlit as st
 
-from components.cards import render_empty_state, render_kpi_card, render_page_header, render_section_header
+from components.cards import render_empty_state, render_page_header, render_section_header
 from components.state_banner import render_state_action_card
 from components.status import badge_html, route_type_badge
 from components.tables import build_home_top_rows, format_currency, format_number, render_recommendation_table
-from services.analysis_pipeline import calculate_overview_kpis, sort_recommendations, top_recommendations
+from services.analysis_pipeline import sort_recommendations, top_recommendations
 from services.app_state import resolve_selected_route_id
 from services.execution_plan import planned_recommendations
 from services.home_state import READY, build_home_state
@@ -22,6 +33,8 @@ from simulation.dynamic_network import (
     compute_dynamic_layout,
     normalize_route_type,
 )
+
+WORKSPACE_PAGE = "재고 운영"
 
 _ROUTE_COLORS = ["#1f766d", "#2d5f9a", "#b28700"]
 # Slower, calmer motion than before: one loop of the path in this many seconds.
@@ -117,43 +130,6 @@ def _navigate(page: str, route_id: str | None = None) -> None:
 def _render_state_card(home: dict) -> None:
     """A single status card: title, one short message, and one primary action."""
     render_state_action_card(home, key="home_primary_action")
-
-
-# --------------------------------------------------------------------------- #
-# Result KPIs (READY only — never shows 0/"-" placeholders for empty states)
-# --------------------------------------------------------------------------- #
-def _render_result_kpis(home: dict) -> None:
-    recommendations = st.session_state.get("varo_recommendations") or []
-    pipeline_summary = st.session_state.get("pipeline_summary") or {}
-    kpis = pipeline_summary or calculate_overview_kpis(
-        recommendations, st.session_state.get("varo_validation")
-    )
-    pipeline = st.session_state.get("analysis_result") or st.session_state.get("varo_pipeline_result") or {}
-    plan = pipeline.get("execution_plan") if isinstance(pipeline, Mapping) else None
-    if not isinstance(plan, Mapping):
-        plan = {}
-    confidence = home.get("confidence_status") or "계산 불가"
-    cards = [
-        ("추천 후보", format_number(home.get("recommendation_count")), "오늘 실제로 실행할 이동 수"),
-        ("권장 이동 수량", format_number(plan.get("total_transfer_qty", kpis.get("total_recommended_qty"))), "공유 재고를 반영한 실행 수량"),
-        ("예상 순효과", format_currency(plan.get("total_net_benefit", kpis.get("total_net_benefit"))), "실행계획의 이동 비용을 뺀 기대 효과"),
-        ("추천 신뢰도", str(confidence), "실행 가능성과 순위 안정성 기준"),
-        ("데이터 상태", str(home.get("data_status") or "확인 필요"), "현재 사용 중인 데이터"),
-    ]
-    cols = st.columns(5, gap="medium")
-    for idx, (title, value, desc) in enumerate(cards):
-        with cols[idx]:
-            render_kpi_card(st, title, value, caption=desc, compact=True)
-
-
-def _render_flow(current_index: int = 3) -> None:
-    """A single thin progress row that highlights only the current step."""
-    steps = ["엑셀 업로드", "재고 분석", "이동 추천", "결과 확인"]
-    cells = '<span class="v2-flow-arrow">→</span>'.join(
-        f'<span class="v2-flow-item{" v2-flow-current" if index == current_index else ""}">{_safe(label)}</span>'
-        for index, label in enumerate(steps)
-    )
-    st.markdown(f'<div class="v2-flow-row">{cells}</div>', unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -472,59 +448,13 @@ def _render_home_top(top_routes: list[dict]) -> None:
     render_recommendation_table(build_home_top_rows(top_routes), key="overview_home_top", height=225)
 
 
-def _render_best_recommendation_card(top: dict, confidence: str | None) -> None:
-    """The single top recommendation from the shared ranking + a 상세 보기 action.
-
-    Uses the already-ranked recommendation (no re-sorting here) and hides every
-    internal id/score/signature; only what an operator needs to act.
-    """
-    render_section_header(st, "최우선 추천", "")
-    route_label = "DC 경유" if top.get("route_type") == "VIA_DC" else "직접 이동"
-    dc_line = ""
-    if top.get("route_type") == "VIA_DC" and (top.get("dc_name") or top.get("dc_id")):
-        dc_line = f'<span>경유 DC {_safe(top.get("dc_name") or top.get("dc_id"))}</span>'
-    reason = ""
-    reasons = top.get("recommendation_reasons") or []
-    if reasons:
-        reason = str(reasons[0])
-    elif top.get("reason"):
-        reason = str(top.get("reason"))
-    reason_html = f'<div class="v2-card-caption" style="margin-top:0.55rem;">{_safe(reason)}</div>' if reason else ""
-    st.markdown(
-        '<div class="v2-wrap v2-card">'
-        '<div class="v2-card-head"><div>'
-        f'<div class="v2-card-title">{_safe(top.get("product_name"))}</div>'
-        f'<div class="v2-card-caption">{_safe(top.get("source_name") or top.get("source_id"))} → '
-        f'{_safe(top.get("target_name") or top.get("target_id"))}</div>'
-        f'</div><div>{route_type_badge(str(top.get("route_type")))}</div></div>'
-        '<div class="v2-running-route-meta" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:0.6rem;">'
-        f'<span>방식 {_safe(route_label)}</span>'
-        f'{dc_line}'
-        f'<span>수량 {_safe(format_number(top.get("planned_qty") if top.get("planned_qty") is not None else top.get("recommended_qty"), "개"))}</span>'
-        f'<span>예상 순효과 {_safe(format_currency(top.get("net_benefit")))}</span>'
-        f'<span>추천 안정성 {_safe(top.get("robustness_status") or "-")}</span>'
-        f'<span>추천 신뢰도 {_safe(confidence or "-")}</span>'
-        '</div>'
-        f'{reason_html}'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-    cols = st.columns([1.4, 4], gap="small")
-    cols[0].button(
-        "추천 상세 보기",
-        key="home_detail_action",
-        type="primary",
-        width="stretch",
-        on_click=_navigate,
-        args=("경로 상세", str(top.get("route_id") or "")),
-    )
-
-
 def render_overview_page() -> None:
-    render_page_header(st, "Varo 운영 결과", "재고 이동 추천과 예상 절감 효과를 확인합니다.")
+    render_page_header(
+        st, "운영 시뮬레이션", "오늘 권장 이동이 실제로 어떻게 움직이는지 확인합니다.",
+    )
     home = build_home_state(st.session_state)
 
-    # Non-result states: one status card + one action, no result KPIs/network/tables.
+    # Non-result states: one status card + one action, no network/tables.
     if home.get("state_code") != READY:
         _render_state_card(home)
         return
@@ -536,8 +466,6 @@ def render_overview_page() -> None:
 
     data = st.session_state.get("varo_data")
     recommendations = _recommendations()
-    _render_result_kpis(home)
-    _render_flow()
 
     selected_route_id = resolve_selected_route_id(recommendations, st.session_state.get("selected_route_id"))
     if selected_route_id != st.session_state.get("selected_route_id"):
@@ -550,6 +478,10 @@ def render_overview_page() -> None:
     all_routes = _network_routes_from_data()
 
     render_section_header(st, "추천 경로 이동 현황", "")
+    st.caption(
+        "실행 판단과 실행계획 기록은 재고 운영 화면에서 합니다. 여기서는 상위 이동 3건의 "
+        "이동 흐름만 재생합니다."
+    )
     _render_controls()
     playing = bool(st.session_state.get("home_sim_playing", False))
     speed_seconds = animation_duration_seconds(st.session_state.get("simulation_speed", "보통"))
@@ -561,6 +493,7 @@ def render_overview_page() -> None:
         _render_running_routes(sim_routes, states)
 
     _render_home_top(top5_routes)
-    top = home.get("top_recommendation")
-    if top:
-        _render_best_recommendation_card(top, home.get("confidence_status"))
+    st.button(
+        "재고 운영으로 이동", key="home_go_workspace",
+        on_click=_navigate, args=(WORKSPACE_PAGE,),
+    )

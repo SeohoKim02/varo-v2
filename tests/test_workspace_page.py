@@ -6,6 +6,8 @@ that no internal vocabulary or invented number reaches the page.
 """
 from __future__ import annotations
 
+import html
+import re
 import unittest
 from pathlib import Path
 
@@ -186,17 +188,20 @@ class WorkspaceRenderTests(unittest.TestCase):
         # Stores, DCs and at least one arrow-terminated edge are drawn.
         self.assertIn("ws-node-store", blob)
         self.assertIn("ws-arrow-selected", blob)
-        self.assertEqual([tab.label for tab in app.tabs], ["대안 비교", "검증", "실행 이력", "세부정보"])
+        # 실행 판단 → 세부 → 검증 → 기록.
+        self.assertEqual([tab.label for tab in app.tabs], ["대안 비교", "세부 정보", "검증", "실행 이력"])
 
-    def test_left_panel_holds_data_analysis_and_a_small_filter_set(self):
+    def test_left_panel_holds_status_filters_and_the_plan_list(self):
         app = self._ready_app()
         blob = self._blob(app)
-        for required in ("데이터", "분석", "필터"):
+        for required in ("상태", "실행 계획"):
             self.assertIn(required, blob)
         labels = [item.label for item in app.selectbox]
         for required in ("상품", "출발 점포", "도착 점포", "경로 유형"):
             self.assertIn(required, labels)
-        self.assertIn("순효과가 있는 이동만", [item.label for item in app.checkbox])
+        checkboxes = [item.label for item in app.checkbox]
+        self.assertIn("순효과가 있는 이동만", checkboxes)
+        self.assertIn("주의가 필요한 이동만", checkboxes)
         # No algorithm chooser is offered to a normal user.
         for banned in ("VHS", "Greedy", "MILP", "DQN"):
             self.assertNotIn(banned, labels)
@@ -204,7 +209,7 @@ class WorkspaceRenderTests(unittest.TestCase):
         self.assertIn("ws_go_data", keys)
         # Re-running is available but never the primary call to action on a result.
         rerun = next(b for b in app.button if b.key == "ws_run_analysis_side")
-        self.assertEqual(rerun.label, "분석 다시 실행")
+        self.assertEqual(rerun.label, "다시 분석")
         self.assertNotIn("ws_run_analysis_main", keys)
 
     def test_planned_quantity_is_the_same_in_panel_edge_and_network(self):
@@ -220,42 +225,79 @@ class WorkspaceRenderTests(unittest.TestCase):
         net = selected.get("planned_net_benefit")
         self.assertIn(money_text(net), blob)
 
-    def test_selecting_a_route_from_the_network_updates_the_execution_panel(self):
+    def _plan_list(self, app):
+        return next(item for item in app.radio if item.key == "ws_plan_pick")
+
+    def test_the_plan_list_is_one_scrolling_control_over_every_move(self):
+        app = self._ready_app()
+        widget = self._plan_list(app)
+        # Every move in the plan is selectable, and only one control does it —
+        # no column of per-move buttons that would grow with the plan.
+        self.assertEqual(len(widget.options), len(self.plan_items))
+        self.assertEqual(
+            [b for b in app.button if b.key.startswith(("ws_pick_", "ws_move_"))], [],
+        )
+        # 출발 → 도착 · 상품: a leg alone is not a move, so the product is part of
+        # the line a user scans, not only of the caption below it.
+        first = self.plan_items[0]
+        self.assertIn(
+            f"{first.get('source_name') or first.get('source_id')} → "
+            f"{first.get('target_name') or first.get('target_id')} · "
+            f"{first.get('product_name')}",
+            widget.options,
+        )
+        self.assertEqual(len(set(widget.options)), len(widget.options), "목록 항목이 중복돼 보입니다")
+
+    def test_selecting_a_move_from_the_list_moves_network_panel_and_tabs_together(self):
         app = self._ready_app()
         first = str(app.session_state["selected_route_id"])
-        picker = [b for b in app.button if b.key.startswith("ws_pick_")]
-        self.assertGreater(len(picker), 1)
-        target = next(
-            item for item in self.plan_items if str(item["route_id"]) != first
-        )
+        target = next(item for item in self.plan_items if str(item["route_id"]) != first)
+        self._plan_list(app).set_value(str(target["route_id"])).run()
+        self.assertFalse(app.exception)
+
+        # One selection id, read by every region of the screen.
+        self.assertEqual(app.session_state["selected_route_id"], str(target["route_id"]))
+        blob = self._blob(app)
         label = (
             f"{target.get('source_name') or target.get('source_id')} → "
             f"{target.get('target_name') or target.get('target_id')}"
         )
-        button = next(b for b in picker if b.label == label)
-        button.click().run()
-        self.assertFalse(app.exception)
-        self.assertEqual(app.session_state["selected_route_id"], str(target["route_id"]))
-        blob = self._blob(app)
-        self.assertIn(f'class="ws-action-route">{label}<', blob)
+        self.assertIn(f'class="ws-action-route">{label}<', blob)               # right panel
         self.assertIn(f'class="ws-action-qty">{qty_text(action_qty(target))}<', blob)
-
-    def test_selecting_a_move_from_the_list_updates_the_network_highlight(self):
-        app = self._ready_app()
-        first = str(app.session_state["selected_route_id"])
-        moves = [b for b in app.button if b.key.startswith("ws_move_")]
-        self.assertGreater(len(moves), 1)
-        other = next(b for b in moves if b.key != "ws_move_0")
-        other.click().run()
-        self.assertFalse(app.exception)
-        self.assertNotEqual(app.session_state["selected_route_id"], first)
-        selected = next(
-            item for item in self.plan_items
-            if str(item["route_id"]) == str(app.session_state["selected_route_id"])
+        self.assertIn("ws-arrow-selected", blob)                                # network
+        self.assertIn(f">{qty_text(action_qty(target))}</text>", blob)          # network chip
+        # 세부 정보 tab follows the same move.
+        rows = self._detail_rows(app)
+        self.assertEqual(rows["실행 수량"], qty_text(action_qty(target)))
+        self.assertEqual(
+            rows["출발 점포"], str(target.get("source_name") or target.get("source_id")),
         )
+
+    def _detail_rows(self, app) -> dict[str, str]:
+        """이동 세부 표는 in-DOM HTML 표라서 값이 그대로 읽힌다(가상화 그리드 아님)."""
         blob = self._blob(app)
-        self.assertIn(f'class="ws-action-qty">{qty_text(action_qty(selected))}<', blob)
-        self.assertIn("ws-arrow-selected", blob)
+        rows: dict[str, str] = {}
+        for chunk in blob.split("<tr>"):
+            cells = re.findall(r"<td>(.*?)</td>", chunk)
+            if len(cells) >= 2:
+                rows.setdefault(html.unescape(cells[0]), html.unescape(cells[1]))
+        return rows
+
+    def test_detail_tab_carries_the_route_detail_values(self):
+        app = self._ready_app()
+        rows = set(self._detail_rows(app))
+        self.assertTrue(rows, "세부 정보 탭에 이동 세부 표가 없습니다")
+        for required in (
+            "출발 점포", "도착 점포", "경유 DC", "경로 유형", "실행 수량",
+            "출발 현재재고", "유지해야 할 재고", "이동 가능 수량", "이동 후 출발 재고",
+            "도착 점포 필요량", "예상 비용", "예상 절감", "예상 순효과", "안정성",
+            # 미확보 물류 값도 같은 탭에서 0이 아니라 미확보로 읽힌다.
+            "실제 도로 거리", "실제 이동 시간", "차량 용량", "실제 운송비",
+        ):
+            self.assertIn(required, rows, f"세부 정보에 없음: {required}")
+        detail = self._detail_rows(app)
+        for missing in ("실제 도로 거리", "차량 용량", "실제 운송비"):
+            self.assertEqual(detail[missing], "미확보")
 
     def test_network_scope_can_be_narrowed_and_widened_without_breaking(self):
         app = self._ready_app()
@@ -324,9 +366,11 @@ class WorkspaceRenderTests(unittest.TestCase):
 
     def test_selection_made_in_the_workspace_survives_into_route_detail(self):
         app = self._ready_app()
-        other = next(b for b in app.button if b.key == "ws_move_1")
-        other.click().run()
+        first = str(app.session_state["selected_route_id"])
+        other = next(item for item in self.plan_items if str(item["route_id"]) != first)
+        self._plan_list(app).set_value(str(other["route_id"])).run()
         chosen = str(app.session_state["selected_route_id"])
+        self.assertNotEqual(chosen, first)
         next(b for b in app.button if b.key == "ws_open_route_detail").click().run()
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state["current_menu"], "경로 상세")
@@ -396,7 +440,7 @@ class WorkspaceRenderTests(unittest.TestCase):
     def test_validation_leads_with_a_verdict_and_keeps_the_numbers_folded_away(self):
         app = self._ready_app()
         blob = self._blob(app)
-        for headline in ("계획 제약", "안전재고", "도착 필요 수량", "추천 안정성"):
+        for headline in ("계획 제약", "안전재고", "도착 필요 수량", "안정성"):
             self.assertIn(f'class="ws-kpi-title">{headline}<', blob)
         self.assertIn('class="ws-check-value">', blob)
         self.assertIn("검증 상세 보기", [item.label for item in app.expander])

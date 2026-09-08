@@ -41,6 +41,7 @@ ANALYSIS_PENDING = "analysis_pending"
 
 # Page names must match components.navigation.MENU_ITEMS / router._PAGE_RENDERERS.
 PAGE_DATA = "데이터 관리"
+PAGE_WORKSPACE = "재고 운영"
 PAGE_RECOMMENDATIONS = "추천 실행"
 PAGE_ROUTE_DETAIL = "경로 상세"
 PAGE_VALIDATION = "분석 및 검증"
@@ -282,10 +283,12 @@ def _build(state: Mapping[str, Any]) -> dict[str, Any]:
         return {
             **base,
             "state_code": ANALYSIS_PENDING,
-            "title": "추천 실행 준비가 완료되었습니다",
-            "short_message": "적용된 데이터로 추천 계산을 시작할 수 있습니다.",
-            "next_action_label": "추천 실행",
-            "next_page": PAGE_RECOMMENDATIONS,
+            "title": "분석 실행 준비가 완료되었습니다",
+            "short_message": "적용된 데이터로 이동 계산을 시작할 수 있습니다.",
+            # 분석 실행은 재고 운영 화면 안에서 이뤄진다. 예전에는 추천 실행
+            # 페이지로 보냈지만, 이제 같은 화면에서 실행하고 결과까지 본다.
+            "next_action_label": "분석 실행",
+            "next_page": PAGE_WORKSPACE,
             "data_status": data_status_label,
             "analysis_status": "실행 전",
             "recommendation_status": "실행 필요",
@@ -319,8 +322,8 @@ def _build(state: Mapping[str, Any]) -> dict[str, Any]:
             "state_code": READY,
             "title": "오늘 권장 이동을 확인하세요" if plan_present else "추천 결과를 확인하세요",
             "short_message": str((pipeline.get("execution_plan") or {}).get("user_message") or "가장 우선순위가 높은 이동부터 검토할 수 있습니다."),
-            "next_action_label": "추천 상세 보기",
-            "next_page": PAGE_ROUTE_DETAIL,
+            "next_action_label": "오늘 권장 이동 보기",
+            "next_page": PAGE_WORKSPACE,
             "data_status": data_status_label,
             "analysis_status": "완료",
             "recommendation_status": "추천 있음",
@@ -357,7 +360,8 @@ def _build(state: Mapping[str, Any]) -> dict[str, Any]:
         "title": "추천할 이동이 없습니다",
         "short_message": _no_candidate_cause(pipeline, state),
         "next_action_label": "제외 이유 확인",
-        "next_page": PAGE_RECOMMENDATIONS,
+        # 제외 이유도 재고 운영 화면의 '실행 이동 없음' 상태에서 그대로 볼 수 있다.
+        "next_page": PAGE_WORKSPACE,
         "data_status": data_status_label,
         "analysis_status": "완료",
         "recommendation_status": "추천 없음",

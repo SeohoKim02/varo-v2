@@ -31,7 +31,9 @@ from services.sample_catalog import discover_dqn_samples, sample_options, sample
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-PAGE_RECOMMENDATIONS = "추천 실행"
+# 적용이 끝난 데이터의 다음 행동은 재고 운영 화면이다. 분석 실행도, 결과 확인도
+# 그 한 화면에서 이어진다.
+PAGE_WORKSPACE = "재고 운영"
 _PREVIEW_ROW_LIMIT = 200
 # A real upload can produce hundreds of row issues; the on-screen table stays
 # bounded and the full list is available through the CSV download.
@@ -54,7 +56,7 @@ def _render_status_header(view: dict) -> None:
     if view["show_next_action"]:
         render_state_summary_card(
             home.get("title"), home.get("short_message"),
-            action_label="추천 실행", action_page=PAGE_RECOMMENDATIONS, key="data_next_action",
+            action_label="재고 운영으로 이동", action_page=PAGE_WORKSPACE, key="data_next_action",
         )
     else:
         render_state_summary_card(home.get("title"), home.get("short_message"))

@@ -72,6 +72,13 @@ def apply_global_styles() -> None:
         }}
         /* On a wide desktop the network is the part that benefits from the space
            the 1480px cap was leaving unused on both sides. */
+        /* Below ~1560px the 5rem side gutters cost more than they are worth: the
+           workspace has three columns to fit, and the centre network is the part
+           that stops being legible first. Wider screens are capped by max-width
+           anyway, so this changes nothing above the breakpoint. */
+        @media (min-width: 641px) and (max-width: 1560px) {{
+            .block-container {{ padding-left: 2rem !important; padding-right: 2rem !important; }}
+        }}
         @media (min-width: 1700px) {{
             .block-container {{ max-width: 1660px; }}
         }}
@@ -551,27 +558,8 @@ def apply_global_styles() -> None:
             white-space: nowrap;
         }}
         .v2-home-value {{ font-size: 1.9rem; font-weight: 820; line-height: 1.05; }}
-        /* Thin single-row progress strip (엑셀 업로드 → 재고 분석 → 이동 추천 → 결과 확인). */
-        .v2-flow-row {{
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 0.5rem;
-            margin: 0.55rem 0 0.2rem;
-            padding: 0.5rem 0.8rem;
-            border: 1px solid var(--varo-line);
-            background: var(--varo-panel-soft);
-            border-radius: 999px;
-            font-size: 0.9rem;
-        }}
-        .v2-flow-item {{ color: var(--varo-muted); font-weight: 600; }}
-        .v2-flow-current {{
-            color: var(--varo-accent); font-weight: 760;
-            background: var(--varo-accent-soft); border: 1px solid var(--varo-accent-border);
-            border-radius: 999px; padding: 0.1rem 0.62rem;
-        }}
-        .v2-flow-arrow {{ color: var(--varo-muted); font-weight: 700; }}
-        @media (max-width: 640px) {{ .v2-flow-row {{ border-radius: 14px; }} }}
+        /* The four-step progress strip is gone with the second dashboard it sat
+           on: the one flow now lives on the 재고 운영 screen itself. */
         .stTabs [data-baseweb="tab-list"] {{ flex-wrap: wrap; gap: 0.35rem; overflow-x: visible; }}
         .stTabs [data-baseweb="tab"] {{
             min-width: max-content;
@@ -614,6 +602,43 @@ def apply_global_styles() -> None:
             margin-bottom: 0.22rem;
             word-break: keep-all;
             overflow-wrap: anywhere;
+        }}
+        .ws-side-line {{
+            margin-top: 0.3rem;
+            font-size: 0.83rem;
+            font-weight: 640;
+            line-height: 1.4;
+            color: var(--varo-text);
+            word-break: keep-all;
+            overflow-wrap: anywhere;
+        }}
+        .ws-count {{ color: var(--varo-muted); font-weight: 640; font-size: 0.88rem; }}
+        /* 실행 계획 목록: 항목 수와 무관하게 높이가 고정된 스크롤 목록.
+           선택 상태는 색이 아니라 radio 컨트롤 + 굵은 이름 + 왼쪽 표시선으로 읽힌다. */
+        .st-key-ws_plan_pick [role="radiogroup"] {{ gap: 0.1rem; }}
+        .st-key-ws_plan_pick [role="radiogroup"] > label {{
+            align-items: flex-start;
+            padding: 0.34rem 0.4rem 0.34rem 0.3rem;
+            border-left: 3px solid transparent;
+            border-radius: 6px;
+        }}
+        .st-key-ws_plan_pick [role="radiogroup"] > label:hover {{ background: #f3f6f9; }}
+        .st-key-ws_plan_pick [role="radiogroup"] > label:has(input:checked) {{
+            background: #eef4fa;
+            border-left-color: {DESIGN_TOKENS['accent']};
+        }}
+        .st-key-ws_plan_pick [role="radiogroup"] > label p {{
+            font-size: 0.88rem;
+            font-weight: 640;
+            line-height: 1.35;
+            word-break: keep-all;
+            overflow-wrap: anywhere;
+        }}
+        .st-key-ws_plan_pick [role="radiogroup"] > label:has(input:checked) p {{ font-weight: 800; }}
+        .st-key-ws_plan_pick [data-testid="stCaptionContainer"] p {{
+            font-size: 0.76rem;
+            line-height: 1.35;
+            font-weight: 500;
         }}
         .ws-kpi {{ padding: 0.85rem 0.95rem; min-height: 0; }}
         .ws-kpi-title {{ color: var(--varo-muted); font-size: 0.88rem; font-weight: 700; }}
