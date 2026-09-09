@@ -54,10 +54,20 @@ def data_quality_badge(label: str = "데이터 없음", variant: str = "neutral"
 def app_status_badges(state) -> list[tuple[str, str]]:
     """The two canonical status chips shown once in the top header.
 
-    데이터(적용 완료/확인 필요) · 분석(완료/실행 필요). Nothing else belongs in the
+    데이터(적용 완료/미적용) · 분석(완료/실행 필요). Nothing else belongs in the
     header: a user only needs to know whether the data is ready and whether the
     analysis can be run. Learning-model and map-connection state are working
     detail and live on their own detail screens.
+
+    **Neither pending chip is a warning.** Both only say a normal step has not
+    happened yet, and on a first run both are pending at once — two amber pills
+    side by side made an empty app look like an app with two problems. So the
+    colour follows the meaning: 아직 안 한 일 is neutral, the step that is next is
+    the accent notice, 완료 is success, and warning/error stay reserved for data
+    the user actually has to fix (that is said on 데이터 관리, with the detail).
+    The chip that is not yet done is still shown — nothing is hidden, only
+    recoloured, and 미적용 says the applied slot is empty rather than borrowing
+    ``데이터 확인 필요``, which means something else on a candidate.
     """
     from services.app_state import has_app_data, has_applied_data
 
@@ -66,8 +76,11 @@ def app_status_badges(state) -> list[tuple[str, str]]:
     pipeline = state.get("analysis_result") or state.get("varo_pipeline_result") or {}
     calc_ok = result_ok and bool(pipeline.get("connected_algorithms") or pipeline.get("v2_summary_functions"))
     return [
-        ("데이터 적용 완료", "success") if data_ok else ("데이터 확인 필요", "warning"),
-        ("분석 완료", "success") if calc_ok else ("분석 실행 필요", "warning"),
+        ("데이터 적용 완료", "success") if data_ok else ("데이터 미적용", "neutral"),
+        # 분석 실행 필요 is the accent notice only once there is data to analyse;
+        # before that the next step is loading data, not running anything.
+        ("분석 완료", "success") if calc_ok
+        else ("분석 실행 필요", "accent" if data_ok else "neutral"),
     ]
 
 

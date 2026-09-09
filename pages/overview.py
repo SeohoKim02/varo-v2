@@ -22,7 +22,13 @@ import streamlit as st
 from components.cards import render_empty_state, render_page_header, render_section_header
 from components.state_banner import render_state_action_card
 from components.status import badge_html, route_type_badge
-from components.tables import build_home_top_rows, format_currency, format_number, render_recommendation_table
+from components.tables import (
+    build_home_top_rows,
+    format_currency,
+    format_number,
+    home_top_column_config,
+    render_recommendation_table,
+)
 from services.analysis_pipeline import sort_recommendations, top_recommendations
 from services.app_state import resolve_selected_route_id
 from services.execution_plan import planned_recommendations
@@ -533,8 +539,12 @@ def _render_home_top(top_routes: list[dict]) -> None:
     # Deliberately still the virtualised grid, not the in-DOM table the workspace
     # tabs use: this screen must not restate 재고 운영's decision numbers in the
     # page markup (test_simulation_page_is_the_moving_picture_not_a_second_dashboard
-    # guards that), and the price is that its two numeric columns stay left-aligned.
-    render_recommendation_table(build_home_top_rows(top_routes), key="overview_home_top", height=225)
+    # guards that). The grid's own NumberColumn buys back the alignment that cost
+    # — 수량 and 예상 순효과 line up on their last digit, like every other table.
+    render_recommendation_table(
+        build_home_top_rows(top_routes), key="overview_home_top", height=225,
+        column_config=home_top_column_config(),
+    )
 
 
 def render_overview_page() -> None:

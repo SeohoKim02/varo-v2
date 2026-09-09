@@ -89,6 +89,18 @@ class WorkspaceRenderTests(unittest.TestCase):
             columns.add(html.unescape(header))
         return columns
 
+    def _primary_labels(self, app) -> list[str]:
+        """Primary-styled buttons on the page itself.
+
+        Sidebar nav buttons are excluded: their primary style marks *which page
+        you are on*, not an action competing for the click.
+        """
+        return [
+            button.label for button in app.button
+            if getattr(button.proto, "type", "") == "primary"
+            and not str(button.key or "").startswith("nav_")
+        ]
+
     def _alerts(self, app) -> str:
         parts = []
         for attribute in ("info", "success", "warning", "error"):
@@ -111,6 +123,55 @@ class WorkspaceRenderTests(unittest.TestCase):
         self.assertEqual(button.label, "데이터 불러오기")
         button.click().run()
         self.assertEqual(app.session_state["current_menu"], "데이터 관리")
+
+    # -------------------------------------------- 첫 5초: 세 상태의 다음 행동
+    def test_the_empty_screen_says_what_file_to_bring_and_in_what_order(self):
+        """An empty app must answer "무엇을 해야 하는가" without a manual.
+
+        Before this it said only that it was empty, three times over, and never
+        named the file it needs. The sheet names below are the four in
+        ``data_loader.REQUIRED_SHEETS`` — read from the schema, never invented.
+        """
+        from services.data_loader import REQUIRED_SHEETS
+
+        self.assertEqual(REQUIRED_SHEETS, ("stores", "products", "inventory", "routes"))
+        app = AppTest.from_file(APP_PATH, default_timeout=180)
+        app.run()
+        blob = self._blob(app)
+        for sheet in ("점포", "상품", "재고", "경로"):
+            self.assertIn(sheet, blob)
+        # A workbook, because a CSV cannot carry four sheets (file_reader refuses
+        # one), so the empty screen must not offer CSV as the way in.
+        self.assertIn(".xlsx", blob)
+        for step in ("데이터 등록", "검증", "적용", "분석 실행"):
+            self.assertIn(step, blob)
+
+    def test_each_first_screen_has_exactly_one_primary_action(self):
+        """데이터 없음 → 데이터, 분석 전 → 분석 실행, 결과 → no competing primary."""
+        # A · nothing applied
+        empty = AppTest.from_file(APP_PATH, default_timeout=180)
+        empty.run()
+        self.assertEqual(self._primary_labels(empty), ["데이터 불러오기"])
+
+        # B · applied, not analysed
+        pending = AppTest.from_file(APP_PATH, default_timeout=180)
+        pending.run()
+        for key in CANONICAL_DATA_KEYS:
+            pending.session_state[key] = self.payload.get(key)
+        pending.session_state["varo_recommendations"] = []
+        pending.session_state["analysis_result"] = {}
+        pending.session_state["varo_pipeline_result"] = {}
+        pending.session_state["analysis_run_required"] = True
+        pending.session_state["current_menu"] = WORKSPACE
+        pending.run()
+        self.assertEqual(self._primary_labels(pending), ["분석 실행"])
+
+        # C · a result is on screen: the result is the answer, so re-running is
+        # explicitly secondary and nothing competes with reading it.
+        ready = self._ready_app()
+        self.assertEqual(self._primary_labels(ready), [])
+        labels = {b.label for b in ready.button}
+        self.assertIn("다시 분석", labels)
 
     def test_analysis_pending_state_offers_the_run_on_this_screen(self):
         app = AppTest.from_file(APP_PATH, default_timeout=180)

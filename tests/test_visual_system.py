@@ -183,6 +183,87 @@ class NumericColumnTests(unittest.TestCase):
         self.assertIn(".v2-html-table td.v2-num", CSS)
         self.assertIn("text-align: right", CSS)
 
+    def test_the_home_top_grid_aligns_its_numbers_the_same_way(self):
+        """The one table that is a grid, not an in-DOM table, still lines up.
+
+        ``st.dataframe`` draws on a canvas and left-aligns text, so 수량 and
+        예상 순효과 are right-aligned through the grid's own column option — the
+        printed value is untouched.
+        """
+        from components.tables import (
+            HOME_TOP_NUMERIC_COLUMNS,
+            build_home_top_rows,
+            home_top_column_config,
+        )
+
+        rows = build_home_top_rows([{
+            "route_id": "R1", "product_name": "냉동만두500g",
+            "source_name": "연신내점", "target_name": "홍제점",
+            "route_type": "DIRECT", "planned_qty": 58, "net_benefit": 57699.4,
+        }])
+        # The cell text is still exactly what every other table in the app prints.
+        self.assertEqual(rows[0]["수량"], "58개")
+        self.assertEqual(rows[0]["예상 순효과"], "57,699원")
+        config = home_top_column_config()
+        self.assertEqual(set(config), set(HOME_TOP_NUMERIC_COLUMNS))
+        for column in HOME_TOP_NUMERIC_COLUMNS:
+            self.assertEqual(config[column]["alignment"], "right")
+        # Text columns are never aligned right by accident.
+        self.assertNotIn("상품", config)
+        self.assertNotIn("출발", config)
+
+    def test_a_missing_number_still_reads_as_a_dash_not_a_blank(self):
+        from components.tables import build_home_top_rows
+
+        rows = build_home_top_rows([{
+            "route_id": "R1", "product_name": "상품", "route_type": "DIRECT",
+            "planned_qty": None, "recommended_qty": None, "net_benefit": None,
+        }])
+        self.assertEqual(rows[0]["수량"], "-")
+        self.assertEqual(rows[0]["예상 순효과"], "-")
+
+
+class StatusColourTests(unittest.TestCase):
+    """Status colour follows meaning: warning is for a problem, not for a to-do.
+
+    On a first run both header chips are pending at once. Painting both amber
+    made an app with nothing wrong look like an app with two faults, so the two
+    'not done yet' states are neutral/accent and warning stays reserved.
+    """
+
+    def _badges(self, **state):
+        from components.status import app_status_badges
+
+        base = {
+            "varo_data": None, "varo_recommendations": [],
+            "analysis_result": {}, "varo_pipeline_result": {},
+        }
+        return app_status_badges({**base, **state})
+
+    def test_an_empty_app_shows_no_warning_at_all(self):
+        variants = [variant for _label, variant in self._badges()]
+        self.assertNotIn("warning", variants)
+        self.assertNotIn("error", variants)
+        self.assertEqual(variants, ["neutral", "neutral"])
+
+    def test_applied_data_makes_the_run_the_accent_notice_not_a_warning(self):
+        badges = self._badges(varo_data={"stores": [{"node_id": "S1"}]})
+        labels = dict(badges)
+        self.assertEqual(labels.get("데이터 적용 완료"), "success")
+        self.assertEqual(labels.get("분석 실행 필요"), "accent")
+        self.assertNotIn("warning", [variant for _label, variant in badges])
+
+    def test_the_pending_data_chip_is_still_shown(self):
+        """Recoloured, never hidden — the user still learns the step is open."""
+        labels = [label for label, _variant in self._badges()]
+        self.assertEqual(len(labels), 2)
+        self.assertIn("분석 실행 필요", labels)
+        self.assertTrue(any("데이터" in label for label in labels))
+
+    def test_warning_and_error_pills_still_exist_for_real_problems(self):
+        self.assertIn(".v2-badge-warning", CSS)
+        self.assertIn(".v2-badge-error", CSS)
+
 
 class StyleHygieneTests(unittest.TestCase):
     def test_emitted_css_comments_carry_no_user_facing_wording(self):

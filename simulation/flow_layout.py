@@ -44,7 +44,9 @@ DC_BAND = "dc"
 TARGET_BAND = "target"
 
 CANVAS_WIDTH = 940.0
-#: Small networks keep the height the workspace has always used.
+#: The canvas a plan too big for its content gets. It is also the height the lane
+#: decision below is made against, so it must not be lowered to trim empty space:
+#: a shorter default would give a mid-sized plan a second lane it does not need.
 MIN_HEIGHT = 620.0
 #: Measured ceiling: at 1366 with the sidebar open the centre column is ~646px,
 #: so the SVG is drawn at 0.685x and 1130 user units land at ~774px — a panel
@@ -69,6 +71,19 @@ ROW_GAP = 22.0
 DC_ROW_GAP = 34.0
 #: Room above the topmost box for that role label.
 TOP_PAD = 30.0
+#: At or below this many drawn nodes the picture is sized to what it draws rather
+#: than to :data:`MIN_HEIGHT`. Measured in Chrome at 1920 before this existed: a
+#: two-node move left 207px of empty canvas above it and 222px below (13% of the
+#: panel was the picture), and a four-node plan filled a quarter of its card — a
+#: plan that small reads as a broken screen, not as a small plan. 10 is where the
+#: default canvas stops being mostly empty (a 10-node plan already fills ~64% of
+#: it) and it sits well clear of the dense sizes, whose geometry is unchanged:
+#: 16 and 24 nodes keep the MIN_HEIGHT canvas, 40 and 60 already outgrew it.
+SMALL_NETWORK_NODES = 10
+#: Room left above and below a small picture *on top of* the ``TOP_PAD`` the rows
+#: already reserve. TOP_PAD alone is the role label's own clearance, so without
+#: this the 출발 / 도착 label of a focused node would sit ~8px under the card edge.
+SMALL_NETWORK_PAD = 26.0
 #: Two lanes per band. A third would push a store box under ~110 units wide,
 #: where a Korean store name has to be cut to five characters — leaving context
 #: stores out and saying so is more honest than drawing unreadable ones.
@@ -368,11 +383,22 @@ def compute_flow_layout(
         math.ceil(len(left) / lanes) if left else 0,
         math.ceil(len(right) / lanes) if right else 0,
     )
-    needed = _span(rows, step, lanes) + store_h + 2 * TOP_PAD if rows else min_height
+    needed = _span(rows, step, lanes) + store_h + 2 * TOP_PAD if rows else 0.0
     if dcs:
         dc_rows = math.ceil(len(dcs) / dc_lanes)
         needed = max(needed, _span(dc_rows, dc_step, dc_lanes) + dc_h + 2 * TOP_PAD)
-    height = round(min(max_height, max(min_height, needed)), 2)
+    # A picture smaller than the default canvas is centred in it, and everything
+    # left over becomes empty canvas above and below the plan. Below
+    # SMALL_NETWORK_NODES the canvas follows the content instead, so a two- or
+    # four-node move fills its card; at every larger size the floor is unchanged,
+    # which is what keeps the dense layouts exactly where they were.
+    if not needed:
+        height = min_height
+    elif len(left) + len(right) + len(dcs) <= SMALL_NETWORK_NODES:
+        height = min(max_height, needed + 2 * SMALL_NETWORK_PAD)
+    else:
+        height = min(max_height, max(min_height, needed))
+    height = round(height, 2)
 
     ordered_left, ordered_dcs, ordered_right = _order_bands(left, dcs, right, pairs)
     positions: dict[str, tuple[float, float]] = {}
@@ -436,6 +462,8 @@ __all__ = [
     "MAX_HEIGHT",
     "MAX_LANES",
     "MIN_HEIGHT",
+    "SMALL_NETWORK_NODES",
+    "SMALL_NETWORK_PAD",
     "SOURCE_BAND",
     "TARGET_BAND",
     "clip_to_box",

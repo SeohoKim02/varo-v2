@@ -619,6 +619,33 @@ _PLACEHOLDER_TEXT = {
     "no_candidates": "현재 조건에서 실행 가능한 이동이 없습니다.",
 }
 
+#: The four steps between an empty app and a result, in the order the product
+#: already performs them (intake → 검사 → 적용 → 분석). It is a map, not a manual:
+#: one line each, and it replaces nothing — the primary action above it is still
+#: the single thing to click. Shown only while nothing is applied, because from
+#: 분석 실행 준비 onwards the card above already names the one remaining step.
+_START_STEPS = (
+    ("데이터 등록", "엑셀 파일을 올리거나 기본 샘플을 선택합니다."),
+    ("검증", "필수 시트와 열, 값의 문제를 확인합니다."),
+    ("적용", "‘이 데이터 사용’을 눌러 분석 대상으로 확정합니다."),
+    ("분석 실행", "이 화면에서 이동 계산을 실행합니다."),
+)
+
+
+def _start_guide_html(lead: str) -> str:
+    steps = "".join(
+        f'<li class="ws-start-step"><span class="ws-start-step-badge">{index}</span>'
+        f'<span class="ws-start-step-body"><strong>{_safe(name)}</strong>'
+        f"<em>{_safe(note)}</em></span></li>"
+        for index, (name, note) in enumerate(_START_STEPS, start=1)
+    )
+    return (
+        '<div class="v2-wrap ws-network-placeholder ws-start-guide">'
+        f'<div class="ws-start-lead">{_safe(lead)}</div>'
+        f'<ol class="ws-start-steps">{steps}</ol>'
+        "</div>"
+    )
+
 
 def _render_waiting_state(view: Mapping[str, Any]) -> None:
     home = view.get("home") or {}
@@ -643,10 +670,15 @@ def _render_waiting_state(view: Mapping[str, Any]) -> None:
     )
     if state_code == "no_candidates" and view.get("plan_message"):
         placeholder = str(view["plan_message"])
-    st.markdown(
-        f'<div class="v2-wrap ws-network-placeholder">{_safe(placeholder)}</div>',
-        unsafe_allow_html=True,
-    )
+    if state_code == "no_data":
+        # An empty screen that only says it is empty leaves the user to guess the
+        # order of the work, so the same space carries the four steps instead.
+        st.markdown(_start_guide_html(placeholder), unsafe_allow_html=True)
+    else:
+        st.markdown(
+            f'<div class="v2-wrap ws-network-placeholder">{_safe(placeholder)}</div>',
+            unsafe_allow_html=True,
+        )
     if state_code == "no_candidates":
         render_excluded_candidates(st, view.get("pipeline"))
     with st.expander("데이터 상태 자세히 보기", expanded=False):

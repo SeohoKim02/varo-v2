@@ -110,13 +110,42 @@ def build_home_top_rows(recommendations: Iterable[dict], limit: int = 5) -> list
     return rows
 
 
-def render_recommendation_table(rows: list[dict], key: str = "recommendation_table", height: int | None = None) -> None:
+#: Columns of the home Top table that hold a quantity or an amount.
+HOME_TOP_NUMERIC_COLUMNS = ("수량", "예상 순효과")
+
+
+def home_top_column_config() -> dict:
+    """Right-align the two numeric columns of the home Top table.
+
+    ``st.dataframe`` draws its cells on a canvas and left-aligns text, so the
+    "58개" / "57,699원" strings the rest of the product prints could not line up
+    on their last digit here — five amounts all started at the same left edge,
+    which is the one place the grid disagreed with the in-DOM tables' ``.v2-num``.
+    ``alignment`` is the grid's own supported option, so the fix costs no custom
+    table, no DOM selector and not one changed character of the printed value:
+    the cell text stays exactly what :func:`format_number` / :func:`format_currency`
+    produced, including the 미확보-safe "-".
+    """
+    return {
+        column: st.column_config.TextColumn(column, alignment="right")
+        for column in HOME_TOP_NUMERIC_COLUMNS
+    }
+
+
+def render_recommendation_table(
+    rows: list[dict],
+    key: str = "recommendation_table",
+    height: int | None = None,
+    column_config: dict | None = None,
+) -> None:
     if not rows:
         st.info("표시할 추천 결과가 없습니다.")
         return
     kwargs = {"hide_index": True, "width": "stretch", "key": key}
     if height is not None:
         kwargs["height"] = height
+    if column_config:
+        kwargs["column_config"] = column_config
     st.dataframe(pd.DataFrame(rows), **kwargs)
 
 

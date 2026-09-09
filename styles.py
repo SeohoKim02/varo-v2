@@ -1025,6 +1025,79 @@ def apply_global_styles() -> None:
             background: #fbfcfd;
             margin-top: 0.5rem;
         }}
+        /* The empty workspace reuses the placeholder box, but fills it with the
+           order of the work instead of a second sentence saying it is empty. It
+           borrows the existing type scale and the accent token — no new colour,
+           no new radius — and the numbers are the badge pill at button size. */
+        .ws-start-guide {{ text-align: left; align-content: center; justify-items: center; }}
+        .ws-start-lead {{
+            font-size: var(--varo-fs-body);
+            color: var(--varo-muted);
+            text-align: center;
+            max-width: 46rem;
+            margin: 0 auto 0.9rem;
+            line-height: 1.5;
+            word-break: keep-all;
+        }}
+        .ws-start-steps {{
+            list-style: none;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 0.7rem 1.5rem;
+            /* Kept together rather than stretched across a 1500px card: four
+               steps spread edge to edge stop reading as one sequence. 64rem is
+               the width at which all four still share one line inside the
+               narrowest supported card (1366 with the sidebar open); below that
+               they wrap two and two, which still reads in order. */
+            max-width: 64rem;
+            margin: 0 auto;
+            padding: 0;
+        }}
+        /* Streamlit indents every markdown <li> (an 18px left margin plus a
+           padding) with an element-qualified rule, so a bare class loses to it.
+           The selector is qualified with the element too — using this file's own
+           class names, never a Streamlit-generated one — because this row is a
+           step strip, not a bulleted list, and four steps only share one line
+           once the four inherited indents are gone. */
+        .ws-start-steps li.ws-start-step {{
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+            max-width: 15rem;
+            margin: 0;
+            padding: 0;
+        }}
+        .ws-start-step-badge {{
+            flex: 0 0 auto;
+            width: 1.35rem;
+            height: 1.35rem;
+            border-radius: 999px;
+            background: var(--varo-accent-soft);
+            border: 1px solid var(--varo-accent-border);
+            color: var(--varo-accent);
+            font-size: var(--varo-fs-caption);
+            font-weight: 700;
+            display: grid;
+            place-items: center;
+            line-height: 1;
+        }}
+        .ws-start-step-body {{ display: block; }}
+        .ws-start-step-body strong {{
+            display: block;
+            font-size: var(--varo-fs-secondary);
+            font-weight: var(--varo-fw-value);
+            color: var(--varo-text);
+        }}
+        .ws-start-step-body em {{
+            display: block;
+            font-style: normal;
+            font-size: var(--varo-fs-caption);
+            color: var(--varo-muted);
+            line-height: 1.45;
+            margin-top: 0.1rem;
+            word-break: keep-all;
+        }}
         /* The one card the whole screen exists to deliver. Its internal order is
            reading order: route, product, quantity, then the supporting values. */
         .ws-action-card {{ padding: 1rem 1.05rem; }}

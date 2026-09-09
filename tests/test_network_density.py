@@ -37,6 +37,9 @@ from simulation.flow_layout import (
     DC_BAND,
     MAX_HEIGHT,
     MIN_HEIGHT,
+    SMALL_NETWORK_NODES,
+    SMALL_NETWORK_PAD,
+    TOP_PAD,
     compute_flow_layout,
     dc_dimensions,
     store_dimensions,
@@ -174,12 +177,30 @@ class DenseLayoutTests(unittest.TestCase):
         heights = []
         for size in NETWORK_SIZES:
             picture = _draw(dense_case(size, dc_count=2), scope=SCOPE_ALL)
-            self.assertEqual(picture.width, CANVAS_WIDTH)
-            self.assertGreaterEqual(picture.height, MIN_HEIGHT)
-            self.assertLessEqual(picture.height, MAX_HEIGHT)
+            with self.subTest(size=size):
+                self.assertEqual(picture.width, CANVAS_WIDTH)
+                self.assertLessEqual(picture.height, MAX_HEIGHT)
+                if size > SMALL_NETWORK_NODES:
+                    # Above the small threshold the default canvas is the floor,
+                    # exactly as before — this is what pins the dense layouts.
+                    self.assertGreaterEqual(picture.height, MIN_HEIGHT)
+                else:
+                    # Below it the canvas follows the content, so a small plan is
+                    # not centred inside hundreds of units of empty space.
+                    self.assertLess(picture.height, MIN_HEIGHT)
             heights.append(picture.height)
         self.assertEqual(heights, sorted(heights), "height must not fall as nodes are added")
-        self.assertEqual(heights[0], MIN_HEIGHT, "a small plan keeps the original canvas")
+
+    def test_the_dense_sizes_keep_the_canvas_they_had(self):
+        """The small-network sizing must not move a single dense layout.
+
+        These four heights are the ones measured before small plans were given
+        their own floor; any change here means the density work leaked upward.
+        """
+        for size, expected in ((16, MIN_HEIGHT), (24, MIN_HEIGHT), (40, 836.0), (60, 1185.0)):
+            with self.subTest(size=size):
+                picture = _draw(dense_case(size, dc_count=2), scope=SCOPE_ALL)
+                self.assertEqual(picture.height, expected)
 
     def test_a_plan_beyond_the_canvas_says_what_it_left_out(self):
         # Far more stores than the canvas can hold, but only a handful of moves:
@@ -196,6 +217,92 @@ class DenseLayoutTests(unittest.TestCase):
         for item in case["items"]:
             for name in (item["source_name"], item["target_name"]):
                 self.assertIsNotNone(picture.named(name), f"{name} was dropped")
+
+
+#: The margin a small picture keeps above its first box and below its last one.
+SMALL_MARGIN = TOP_PAD + SMALL_NETWORK_PAD
+
+#: Plan sizes a user reads at a glance. 2 is one move drawn on its own — the
+#: 선택한 이동 scope — and it is the size the old fixed canvas hurt most.
+SMALL_SIZES = (2, 4, 8)
+
+
+class SmallNetworkTests(unittest.TestCase):
+    """A′ · a small plan looks like a small plan, not like an empty screen.
+
+    Measured in Chrome at 1920 before this behaviour existed: a two-node move sat
+    in 207px of empty canvas above and 222px below, filling 13% of its panel, and
+    a four-node plan filled a quarter of its card. The canvas now follows the
+    content below :data:`SMALL_NETWORK_NODES` nodes; every assertion here is a
+    proportion or a margin, never a pixel comparison.
+    """
+
+    def _bounds(self, picture: Picture) -> tuple[float, float]:
+        tops = [top for _left, top, _width, _height in (node["box"] for node in picture.nodes)]
+        bottoms = [
+            top + height for _left, top, _width, height in (node["box"] for node in picture.nodes)
+        ]
+        return min(tops), max(bottoms)
+
+    def test_a_small_plan_is_sized_to_what_it_draws(self):
+        for size in SMALL_SIZES:
+            with self.subTest(nodes=size):
+                picture = _draw(dense_case(size, dc_count=0), scope=SCOPE_ALL)
+                self.assertEqual(len(picture.nodes), size)
+                self.assertLess(
+                    picture.height, MIN_HEIGHT,
+                    "a small plan must not be centred inside the default canvas",
+                )
+
+    def test_a_small_plan_keeps_a_margin_but_not_an_empty_half_canvas(self):
+        """Not glued to the card edge, and not floating in the middle of it."""
+        for size in SMALL_SIZES:
+            for dc_count in (0, 1):
+                with self.subTest(nodes=size, dcs=dc_count):
+                    picture = _draw(dense_case(size, dc_count=dc_count), scope=SCOPE_ALL)
+                    top, bottom = self._bounds(picture)
+                    below = picture.height - bottom
+                    # The role label of a selected node is drawn above its box and
+                    # needs TOP_PAD on its own, so the margin is never smaller.
+                    self.assertGreaterEqual(round(top, 2), SMALL_MARGIN - 0.01)
+                    self.assertGreaterEqual(round(below, 2), SMALL_MARGIN - 0.01)
+                    # And it never grows into the empty half-canvas it replaced.
+                    self.assertLessEqual(top, SMALL_MARGIN + 60.0)
+                    self.assertLessEqual(below, SMALL_MARGIN + 60.0)
+
+    def test_a_small_plan_fills_most_of_its_canvas(self):
+        """The picture, not the padding, is the larger part of the panel."""
+        for size, least in ((2, 0.35), (4, 0.5), (8, 0.6)):
+            with self.subTest(nodes=size):
+                picture = _draw(dense_case(size, dc_count=0), scope=SCOPE_ALL)
+                top, bottom = self._bounds(picture)
+                self.assertGreaterEqual((bottom - top) / picture.height, least)
+
+    def test_a_small_plan_still_draws_every_node_without_overlap(self):
+        for size in SMALL_SIZES:
+            for shape in SHAPES:
+                with self.subTest(nodes=size, shape=shape):
+                    picture = _draw(dense_case(size, dc_count=1, shape=shape), scope=SCOPE_ALL)
+                    boxes = [node["box"] for node in picture.nodes]
+                    for first in range(len(boxes)):
+                        for second in range(first + 1, len(boxes)):
+                            self.assertFalse(
+                                _hits(boxes[first], boxes[second]),
+                                f"{boxes[first]} overlaps {boxes[second]}",
+                            )
+                    for left, top, width, height in boxes + picture.chips:
+                        self.assertGreaterEqual(left, -1)
+                        self.assertGreaterEqual(top, -1)
+                        self.assertLessEqual(left + width, picture.width + 1)
+                        self.assertLessEqual(top + height, picture.height + 1)
+
+    def test_one_selected_move_on_its_own_is_a_compact_picture(self):
+        """SCOPE_SELECTED draws two nodes; that is the smallest real case."""
+        picture = _draw(dense_case(8, dc_count=1, shape="direct"), scope=SCOPE_SELECTED)
+        self.assertEqual(len(picture.nodes), 2)
+        top, bottom = self._bounds(picture)
+        self.assertLess(picture.height, MIN_HEIGHT / 2)
+        self.assertGreaterEqual((bottom - top) / picture.height, 0.35)
 
 
 class DeterminismTests(unittest.TestCase):

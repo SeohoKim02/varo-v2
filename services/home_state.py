@@ -267,7 +267,15 @@ def _build(state: Mapping[str, Any]) -> dict[str, Any]:
             **base,
             "state_code": NO_DATA,
             "title": "데이터를 준비하세요",
-            "short_message": "재고 데이터를 불러오면 이동 추천을 시작할 수 있습니다.",
+            # What to bring, in the words of the file the user actually has. The
+            # sheet names are the four in data_loader.REQUIRED_SHEETS and the
+            # extensions are the ones file_reader accepts for analysis — a CSV is
+            # read but refused, because one table cannot carry four sheets, so it
+            # is not offered here.
+            "short_message": (
+                "점포 · 상품 · 재고 · 경로 시트가 있는 엑셀 파일(.xlsx · .xls) 하나를 "
+                "등록하면 이동 추천을 시작할 수 있습니다."
+            ),
             "next_action_label": "데이터 불러오기",
             "next_page": PAGE_DATA,
             "data_source": "없음",
