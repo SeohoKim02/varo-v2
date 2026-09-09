@@ -677,7 +677,10 @@ def apply_global_styles() -> None:
         /* The SVG scales to the centre column, so every size below is multiplied
            by (column width / 940) on screen. Measured in a browser at 1366×768:
            the centre column is ~630px, a 0.67x downscale, so 19.5 lands at ~13px
-           and 15 (the node-name floor in workspace_network) at ~10px. */
+           and 15 (the node-name floor in workspace_network) at ~10px.
+           The ratio here is only the default for the smallest picture; a denser
+           plan needs a taller canvas and writes its own aspect-ratio inline, so
+           growing the canvas costs vertical room and never one glyph of size. */
         .ws-network-svg {{
             display: block;
             width: 100%;
@@ -685,11 +688,20 @@ def apply_global_styles() -> None:
             aspect-ratio: 940 / 620;
         }}
         .ws-network-svg text {{ font-family: inherit; fill: var(--varo-text); }}
+        /* Size only: the component measures each name against its own box and
+           writes the result inline, which has to win over this default — a
+           stylesheet rule outranks an SVG font-size *attribute*, which is how
+           long store names used to be painted past the edge of their box. */
         .ws-network-svg .ws-node-name {{ font-size: 19.5px; font-weight: 760; }}
         .ws-network-svg .ws-node-sub {{ font-size: 15px; fill: var(--varo-muted); }}
         .ws-network-svg .ws-node-role {{ font-size: 16px; font-weight: 800; fill: {DESIGN_TOKENS['accent']}; }}
         .ws-network-svg .ws-edge-label {{ font-size: 17px; font-weight: 800; }}
         .ws-network-svg .ws-node {{ filter: drop-shadow(0 1px 2px rgba(30, 41, 59, 0.06)); }}
+        /* Emphasis, not visibility: a node outside the current move stays fully
+           drawn and keeps its name, it simply stops competing for attention. */
+        .ws-network-svg .ws-node-context {{ opacity: 0.72; filter: none; }}
+        .ws-network-svg .ws-node-context .ws-node-name {{ fill: var(--varo-muted); font-weight: 620; }}
+        .ws-network-svg .ws-node-focus {{ filter: drop-shadow(0 2px 5px rgba(29, 111, 163, 0.22)); }}
         .ws-network-legend {{
             display: flex;
             flex-wrap: wrap;
@@ -704,6 +716,7 @@ def apply_global_styles() -> None:
         .ws-legend-line-selected {{ border-top: 3px solid #1d6fa3; }}
         .ws-legend-line-dashed {{ border-top-style: dashed; }}
         .ws-legend-dot {{ width: 9px; height: 9px; border-radius: 50%; border: 1px solid; display: inline-block; }}
+        .ws-legend-shape {{ width: 12px; height: 12px; display: inline-block; overflow: visible; }}
         .ws-network-placeholder {{
             min-height: 220px;
             display: grid;
@@ -756,7 +769,7 @@ def apply_global_styles() -> None:
             .ws-kpi-value {{ font-size: 1.5rem; }}
             .ws-header-title {{ font-size: 1.14rem; }}
         }}
-        /* ---- 1366 with the sidebar open --------------------------------------
+        /* ---- narrow desktops, and any desktop with the sidebar open ----------
            On a 1366-wide screen the expanded sidebar took 300px out of the window,
            which left the centre network ~547px wide. Because the SVG scales to its
            column (column width / 940), that pushed its smallest labels to 8.7-9.9px
@@ -768,12 +781,17 @@ def apply_global_styles() -> None:
              . the page gutters shrink from 2rem to 0.9rem,
              . the three columns of the main row re-balance toward the centre
                (20 / 60 / 20) instead of 22 / 52 / 26.
-           Together the network keeps ~646px at 1366 with the sidebar open, so the
-           smallest SVG label lands above 10.5px. Above 1450px nothing here applies.
+
+           The ceiling is 1680 rather than 1450 because 1450 was the wrong bound:
+           measured in Chrome at 1600x900 with the sidebar open, the centre column
+           came out at 569px -- *narrower* than 1366 gets with this block applied
+           (646px) -- and every SVG label landed at 9.2-9.7px. 1680 is the width
+           above which an open 300px sidebar still leaves the centre column wide
+           enough on its own, so the two sides of the bound meet without a cliff.
 
            The :has() guard restricts the ratio change to the one three-column row;
            the two-column rows nested inside it keep their own widths. */
-        @media (max-width: 1450px) {{
+        @media (max-width: 1680px) {{
             section[data-testid="stSidebar"][aria-expanded="true"] {{
                 width: 196px !important;
                 min-width: 196px !important;

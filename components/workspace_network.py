@@ -2,9 +2,21 @@
 
 This is the decision picture, not an animation: it draws the stores, the DCs and
 the moves of the *current execution plan*, and highlights the one move the user
-has selected. The layout helpers are reused from
-:mod:`simulation.dynamic_network`, so node classification and DIRECT / VIA_DC
-segmentation behave exactly as everywhere else in the app.
+has selected. Node classification and DIRECT / VIA_DC segmentation are reused
+from :mod:`simulation.dynamic_network`, so they behave exactly as everywhere else
+in the app; the geometry comes from :mod:`simulation.flow_layout`, which lays the
+plan out as a flow — 내보내는 점포 왼쪽, 경유 물류센터 가운데, 받는 점포 오른쪽.
+
+The picture is built around one idea: **선택한 이동이 먼저 읽히고, 나머지는 맥락으로
+남는다.** As a plan grows past a dozen or so moves, showing every name, badge and
+number at the same visual weight stops being informative, so this module ranks
+what it draws instead of shrinking it:
+
+* the selected move keeps a wider node box, a role label, its 상태 badge and its
+  planned_qty at every size — it is never reduced to match its neighbours,
+* the other planned moves keep their names and their line, and give up their
+  quantity chip first,
+* nodes no drawn move touches stay as light context.
 
 Deliberate limits, so the picture stays readable and honest:
 
@@ -26,16 +38,15 @@ from simulation.dynamic_network import (
     build_network_nodes,
     build_route_segments,
     classify_node,
-    compute_network_layout,
     normalize_route_type,
 )
-
-# The canvas is deliberately narrow and tall. On a 1366px desktop the centre
-# column is roughly 640px wide, so a wider viewBox would shrink the SVG text
-# below a readable size once the browser scales it down.
-CANVAS_WIDTH = 940.0
-CANVAS_HEIGHT = 620.0
-CANVAS_MARGIN = 78.0
+from simulation.flow_layout import (
+    CANVAS_WIDTH,
+    DC_BAND,
+    FlowLayout,
+    clip_to_box,
+    compute_flow_layout,
+)
 
 SCOPE_PLAN = "현재 실행계획"
 SCOPE_SELECTED = "선택한 이동"
@@ -47,6 +58,7 @@ COLOR_SELECTED = "#1d6fa3"
 COLOR_PLANNED = "#8fa3b5"
 COLOR_BACKGROUND = "#d8dee5"
 COLOR_LINE = "#cbd5df"
+COLOR_CONTEXT = "#dfe5ec"
 
 STATE_STYLES: dict[str, tuple[str, str]] = {
     "과잉": ("#b26a1f", "#fdeecb"),
@@ -55,12 +67,33 @@ STATE_STYLES: dict[str, tuple[str, str]] = {
     "이동 대상": ("#2d6fa8", "#e2eefb"),
 }
 
+#: A state is never carried by colour alone: each one also has its own outline
+#: shape, used wherever the picture is too dense for the written badge.
+STATE_MARKERS: dict[str, str] = {
+    "과잉": "M 0 -5.2 L 5.2 4.2 L -5.2 4.2 Z",
+    "부족": "M -5.2 -4.2 L 5.2 -4.2 L 0 5.2 Z",
+    "정상": "M -4.4 -4.4 L 4.4 -4.4 L 4.4 4.4 L -4.4 4.4 Z",
+    "이동 대상": "M 0 -5.6 L 5.6 0 L 0 5.6 L -5.6 0 Z",
+}
+
 ROLE_SOURCE = "출발"
 ROLE_TARGET = "도착"
 ROLE_DC = "경유 DC"
 
+#: Emphasis levels. FOCUS is the selected move, PLAN is every other drawn move,
+#: CONTEXT is a node no drawn move touches (only reachable from 전체 네트워크).
+LEVEL_FOCUS = "focus"
+LEVEL_PLAN = "plan"
+LEVEL_CONTEXT = "context"
+
 _MAX_BACKGROUND_EDGES = 24
 _MAX_LABELLED_EDGES = 8
+#: Above this many drawn nodes the written 과잉/부족/정상 badge is kept for the
+#: selected move and for the moves competing with it, and every other node states
+#: the same thing with its outline marker instead. The number is not a guess: it
+#: is the node count at which the store box drops below 58 units high, which is
+#: where the badge stops having room to sit beside a full store name.
+_BADGE_TEXT_LIMIT = 26
 
 # On-screen legibility budget. The SVG is scaled to the width of the centre
 # column, so every size below is multiplied by (column width / CANVAS_WIDTH)
@@ -149,130 +182,6 @@ def _qty_label(item: Mapping[str, Any]) -> str:
     return ""
 
 
-def _dc_size(store_size: tuple[float, float]) -> tuple[float, float]:
-    """DC box size. Kept at the size the shared radial layout is tuned for — a
-    wider box pushed the DCs into the neighbouring stores on a two-DC network, so
-    a long 물류센터 name is wrapped onto two lines instead (see ``_fit_dc_label``)."""
-    store_w, store_h = store_size
-    return max(150.0, store_w * 1.15), max(72.0, store_h * 1.2)
-
-
-def _dimensions(count: int) -> tuple[float, float]:
-    if count <= 6:
-        return 138.0, 60.0
-    if count <= 12:
-        return 120.0, 54.0
-    if count <= 24:
-        return 102.0, 48.0
-    return 86.0, 42.0
-
-
-_SINGLE_RING_LIMIT = 16
-_CENTRAL_ROW_DC_LIMIT = 3
-
-
-def _ellipse_perimeter(radius_x: float, radius_y: float) -> float:
-    """Ramanujan's approximation — accurate enough to count node slots."""
-    a, b = max(radius_x, radius_y), min(radius_x, radius_y)
-    return math.pi * (3 * (a + b) - math.sqrt(max(0.0, (3 * a + b) * (a + 3 * b))))
-
-
-def _dc_grid(dcs: Sequence[Mapping[str, Any]], dc_size: tuple[float, float]) -> tuple[
-    dict[str, tuple[float, float]], float, float,
-]:
-    """Centre the DCs in a compact grid; return positions and its half-extents."""
-    dc_w, dc_h = dc_size
-    cx, cy = CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2
-    dc_list = list(dcs)
-    if not dc_list:
-        return {}, 0.0, 0.0
-    columns = 1 if len(dc_list) <= 3 else 2
-    rows = math.ceil(len(dc_list) / columns)
-    step_x, step_y = dc_w + 18.0, dc_h + 14.0
-    left = cx - (columns - 1) * step_x / 2
-    top = cy - (rows - 1) * step_y / 2
-    positions: dict[str, tuple[float, float]] = {}
-    for index, row in enumerate(dc_list):
-        column, line = index % columns, index // columns
-        positions[_text(row.get("node_id"))] = (
-            round(left + column * step_x, 2), round(top + line * step_y, 2),
-        )
-    return positions, (columns * step_x) / 2, (rows * step_y) / 2
-
-
-def ring_capacity(store_size: tuple[float, float], dc_count: int) -> int:
-    """How many stores this canvas can hold without nodes touching."""
-    return sum(count for _rx, _ry, count in _ring_plan(store_size, dc_count))
-
-
-def _ring_plan(store_size: tuple[float, float], dc_count: int) -> list[tuple[float, float, int]]:
-    """Ring radii (outermost first) and how many stores each one can carry."""
-    store_w, store_h = store_size
-    dc_w, dc_h = _dc_size((store_w, store_h))
-    _positions, half_w, half_h = _dc_grid(
-        [{"node_id": f"_{index}"} for index in range(dc_count)], (dc_w, dc_h),
-    )
-    cx, cy = CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2
-    max_rx = cx - (CANVAS_MARGIN + store_w / 2)
-    max_ry = cy - (CANVAS_MARGIN + store_h / 2 + 14.0)
-    floor_rx = half_w + store_w * 0.8 if dc_count else store_w * 0.8
-    floor_ry = half_h + store_h * 1.1 if dc_count else store_h * 1.1
-
-    plan: list[tuple[float, float, int]] = []
-    scale = 1.0
-    # Each ring steps inward by a whole node, so two rings can never touch.
-    step = max(store_w * 1.25 / max_rx, store_h * 1.9 / max_ry) if max_rx and max_ry else 1.0
-    while scale > 0:
-        radius_x, radius_y = max_rx * scale, max_ry * scale
-        if radius_x < floor_rx or radius_y < floor_ry:
-            break
-        count = int(_ellipse_perimeter(radius_x, radius_y) // (store_w * 1.16))
-        if count < 3:
-            break
-        plan.append((radius_x, radius_y, count))
-        scale -= step
-    return plan
-
-
-def _ring_positions(
-    stores: Sequence[Mapping[str, Any]],
-    dcs: Sequence[Mapping[str, Any]],
-    store_size: tuple[float, float],
-) -> dict[str, tuple[float, float]]:
-    """Concentric-ring placement for node sets a single ellipse cannot hold.
-
-    The shared radial layout puts every store on one ellipse around one or two
-    DCs, which starts to overlap past ~16 stores or with three or more DCs.
-    Rather than change that layout (the movement simulation depends on it), the
-    workspace lays those cases out itself: DCs in a compact central grid, stores
-    on rings outward, each ring holding only as many nodes as its own
-    circumference allows.
-    """
-    store_w, store_h = store_size
-    dc_w, dc_h = _dc_size((store_w, store_h))
-    cx, cy = CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2
-
-    positions, _half_w, _half_h = _dc_grid(dcs, (dc_w, dc_h))
-    store_list = list(stores)
-    if not store_list:
-        return positions
-
-    index = 0
-    for ring, (radius_x, radius_y, capacity) in enumerate(_ring_plan(store_size, len(dcs))):
-        if index >= len(store_list):
-            break
-        count = min(capacity, len(store_list) - index)
-        offset = math.pi / max(1, capacity) if ring % 2 else 0.0
-        for slot in range(count):
-            angle = offset - math.pi / 2 + 2 * math.pi * slot / count
-            positions[_text(store_list[index + slot].get("node_id"))] = (
-                round(cx + radius_x * math.cos(angle), 2),
-                round(cy + radius_y * math.sin(angle), 2),
-            )
-        index += count
-    return positions
-
-
 def plan_edge_options(items: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     """One selectable entry per plan move — the network's own picker."""
     options: list[dict[str, str]] = []
@@ -291,6 +200,18 @@ def plan_edge_options(items: Sequence[Mapping[str, Any]]) -> list[dict[str, str]
     return options
 
 
+def _route_pairs(
+    route: Mapping[str, Any], nodes: Sequence[Mapping[str, Any]],
+) -> list[tuple[str, str]]:
+    try:
+        segments = build_route_segments(route, nodes)
+    except ValueError:
+        return []
+    return [
+        (_text(segment["from_node_id"]), _text(segment["to_node_id"])) for segment in segments
+    ]
+
+
 def visible_nodes(
     all_nodes: Sequence[Mapping[str, Any]],
     routes: Sequence[Mapping[str, Any]],
@@ -300,18 +221,7 @@ def visible_nodes(
     nodes = [dict(node) for node in all_nodes]
     if scope == SCOPE_ALL or not routes:
         return nodes
-    wanted: set[str] = set()
-    for route in routes:
-        for key in ("source_id", "target_id", "dc_id"):
-            value = _text(route.get(key))
-            if value:
-                wanted.add(value)
-        try:
-            for segment in build_route_segments(route, nodes):
-                wanted.add(_text(segment["from_node_id"]))
-                wanted.add(_text(segment["to_node_id"]))
-        except ValueError:
-            continue
+    wanted = _related_node_ids(routes, nodes)
     kept = [node for node in nodes if _text(node.get("node_id")) in wanted]
     return kept or nodes
 
@@ -326,16 +236,15 @@ def _related_node_ids(
             value = _text(route.get(key))
             if value:
                 related.add(value)
-        try:
-            for segment in build_route_segments(route, nodes):
-                related.add(_text(segment["from_node_id"]))
-                related.add(_text(segment["to_node_id"]))
-        except ValueError:
-            continue
+        for start, end in _route_pairs(route, nodes):
+            related.add(start)
+            related.add(end)
     return related
 
 
-def _node_roles(selected: Mapping[str, Any] | None, nodes: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+def _node_roles(
+    selected: Mapping[str, Any] | None, nodes: Sequence[Mapping[str, Any]],
+) -> dict[str, str]:
     if not selected:
         return {}
     roles: dict[str, str] = {}
@@ -345,28 +254,113 @@ def _node_roles(selected: Mapping[str, Any] | None, nodes: Sequence[Mapping[str,
     if target:
         roles[target] = ROLE_TARGET
     if normalize_route_type(selected) == "VIA_DC":
-        try:
-            for segment in build_route_segments(selected, nodes):
-                node_id = _text(segment["to_node_id"])
-                if segment["phase"] == "TO_DC" and node_id:
-                    roles[node_id] = ROLE_DC
-        except ValueError:
-            pass
+        for index, (_start, end) in enumerate(_route_pairs(selected, nodes)):
+            if index == 0 and end:
+                roles[end] = ROLE_DC
     return roles
 
 
-def _dc_svg(node: Mapping[str, Any], role: str) -> str:
+# --------------------------------------------------------------------------- #
+# Nodes
+# --------------------------------------------------------------------------- #
+def _state_marker_svg(state: str, x: float, y: float) -> str:
+    """The state as an outline shape, for nodes too dense to carry the badge."""
+    color, fill = STATE_STYLES.get(state, STATE_STYLES["정상"])
+    path = STATE_MARKERS.get(state, STATE_MARKERS["정상"])
+    return (
+        f'<path class="ws-node-marker" transform="translate({x:.2f} {y:.2f})" d="{path}" '
+        f'fill="{fill}" stroke="{color}" stroke-width="1.5" stroke-linejoin="round" />'
+    )
+
+
+def _state_pill_svg(state: str, width: float, height: float) -> str:
+    # The state pill scales with the node so its text stays readable instead of
+    # sitting at a fixed 9px that vanished once the SVG was scaled to a column.
+    # The cap was measured, not guessed: at 1366 with the sidebar expanded the
+    # centre column is ~654px, a 0.70x downscale, and the old 15.0 cap landed the
+    # pill at 10.4px on screen. The pill box grows with the font (pill_w reads the
+    # same value and is still clamped to the node), so nothing overflows.
+    color, fill = STATE_STYLES.get(state, STATE_STYLES["정상"])
+    pill_h = max(13.0, min(20.0, height * 0.35))
+    pill_font = round(min(STATE_PILL_FONT_MAX, pill_h * 0.84), 1)
+    pill_w = max(46.0, min(width - 8.0, _glyph_width(state, pill_font) + 16.0))
+    pill_top = height / 2 - pill_h - 3.0
+    return (
+        f'<rect x="{-pill_w / 2:.2f}" y="{pill_top:.2f}" width="{pill_w:.2f}" '
+        f'height="{pill_h:.2f}" rx="{pill_h / 2:.2f}" fill="{fill}" stroke="{color}" '
+        f'stroke-width="0.9" />'
+        f'<text x="0" y="{pill_top + pill_h * 0.74:.2f}" text-anchor="middle" fill="{color}" '
+        f'font-size="{pill_font}" font-weight="700">{_safe(state)}</text>'
+    )
+
+
+def _store_svg(
+    node: Mapping[str, Any], role: str, level: str, *, badge_text: bool,
+) -> str:
+    x, y = float(node["x"]), float(node["y"])
+    width, height = float(node["width"]), float(node["height"])
+    name = _text(node.get("node_name")) or _text(node.get("node_id"))
+    state = _text(node.get("inventory_state")) or "정상"
+    focused = level == LEVEL_FOCUS
+    context = level == LEVEL_CONTEXT
+    # A written badge takes the bottom of the box, so the name gets the rest;
+    # with the outline marker the name may use the full width of the node.
+    name_room = width - (0.0 if badge_text else 22.0)
+    label, font = _fit_label(name, name_room, NAME_FONT, NAME_FONT_MIN)
+    stroke = COLOR_SELECTED if focused else COLOR_CONTEXT if context else COLOR_LINE
+    left, top = -width / 2, -height / 2
+    # Just above the box, inside the row clearance the layout reserves for it —
+    # the old offset put this label on the state badge of the node above.
+    role_svg = (
+        f'<text class="ws-node-role" x="0" y="{top - 2:.2f}" text-anchor="middle">{_safe(role)}</text>'
+        if focused and role else ""
+    )
+    baseline = -height * 0.08 if badge_text else height * 0.09
+    dashed = ' stroke-dasharray="4 3"' if context else ""
+    fill = "#fbfcfd" if context else "#ffffff"
+    return (
+        f'<g class="ws-node ws-node-store ws-node-{level}" transform="translate({x:.2f} {y:.2f})">'
+        f"<title>{_safe(name)} · 점포 · 재고 {_safe(state)}</title>"
+        f"{role_svg}"
+        f'<rect x="{left:.2f}" y="{top:.2f}" width="{width:.2f}" height="{height:.2f}" rx="8" '
+        f'fill="{fill}" stroke="{stroke}" stroke-width="{2.6 if focused else 1.2}"{dashed} />'
+        f'<text class="ws-node-name" x="{0.0 if badge_text else 9.0:.2f}" y="{baseline:.2f}" '
+        f'text-anchor="middle" style="font-size:{font:.1f}px">{_safe(label)}</text>'
+        + (
+            _state_pill_svg(state, width, height) if badge_text
+            else _state_marker_svg(state, left + 12.0, 0.0)
+        )
+        + "</g>"
+    )
+
+
+def _dc_name_svg(lines: Sequence[str], font: float, height: float) -> str:
+    baseline = -height * 0.02
+    if len(lines) == 1:
+        return (
+            f'<text class="ws-node-name" x="0" y="{baseline:.2f}" text-anchor="middle" '
+            f'style="font-size:{font:.1f}px">{_safe(lines[0])}</text>'
+        )
+    step = font * 1.16
+    return "".join(
+        f'<text class="ws-node-name" x="0" y="{baseline - step / 2 + index * step:.2f}" '
+        f'text-anchor="middle" style="font-size:{font:.1f}px">{_safe(line)}</text>'
+        for index, line in enumerate(lines)
+    )
+
+
+def _dc_svg(node: Mapping[str, Any], role: str, *, sub_label: str) -> str:
     x, y = float(node["x"]), float(node["y"])
     width, height = float(node["width"]), float(node["height"])
     name = _text(node.get("node_name")) or _text(node.get("node_id"))
     lines, font = _fit_dc_label(name, width)
-    # 이름이 이미 물류센터를 말하고 있으면 아래에 같은 말을 한 번 더 적지 않는다.
-    show_kind = not any(token in name for token in ("물류센터", "센터", "DC"))
     highlighted = role == ROLE_DC
     stroke = COLOR_SELECTED if highlighted else "#a98a3d"
     left, top = -width / 2, -height / 2
+    # The DC roof rises above the box, so its role label clears the apex, not the
+    # rectangle — at the store offset the two touched.
     role_svg = (
-        f'<text class="ws-node-role" x="0" y="{top - 8:.2f}" text-anchor="middle">{_safe(role)}</text>'
+        f'<text class="ws-node-role" x="0" y="{top - 11:.2f}" text-anchor="middle">{_safe(role)}</text>'
         if highlighted else ""
     )
     return (
@@ -379,80 +373,85 @@ def _dc_svg(node: Mapping[str, Any], role: str) -> str:
         f'fill="#f3e4b8" stroke="{stroke}" stroke-width="1.6" />'
         + _dc_name_svg(lines, font, height)
         + (
-            f'<text class="ws-node-sub" x="0" y="{height / 2 - 9:.2f}" text-anchor="middle">물류센터</text>'
-            if show_kind else ""
+            f'<text class="ws-node-sub" x="0" y="{height / 2 - 9:.2f}" text-anchor="middle">'
+            f'{_safe(sub_label)}</text>'
+            if sub_label else ""
         )
         + "</g>"
     )
 
 
-def _dc_name_svg(lines: Sequence[str], font: float, height: float) -> str:
-    baseline = -height * 0.02
-    if len(lines) == 1:
-        return (
-            f'<text class="ws-node-name" x="0" y="{baseline:.2f}" text-anchor="middle" '
-            f'font-size="{font:.1f}">{_safe(lines[0])}</text>'
-        )
-    step = font * 1.16
-    return "".join(
-        f'<text class="ws-node-name" x="0" y="{baseline - step / 2 + index * step:.2f}" '
-        f'text-anchor="middle" font-size="{font:.1f}">{_safe(line)}</text>'
-        for index, line in enumerate(lines)
-    )
+def _dc_sub_label(name: str, node_id: str, dc_count: int) -> str:
+    """What the second line of a 물류센터 box says.
+
+    With more than one DC the picture must let a reader tell DC01 from DC02 even
+    when the two names look alike, so the code is written under the name. With a
+    single DC the code carries nothing, and the line only repeats 물류센터 when the
+    name does not already say it.
+    """
+    if dc_count > 1 and node_id and node_id.upper() != name.upper():
+        return node_id
+    return "" if any(token in name for token in ("물류센터", "센터", "DC")) else "물류센터"
 
 
-def _store_svg(node: Mapping[str, Any], role: str) -> str:
-    x, y = float(node["x"]), float(node["y"])
-    width, height = float(node["width"]), float(node["height"])
-    name = _text(node.get("node_name")) or _text(node.get("node_id"))
-    label, font = _fit_label(name, width, NAME_FONT, NAME_FONT_MIN)
-    state = _text(node.get("inventory_state")) or "정상"
-    text_color, fill_tint = STATE_STYLES.get(state, STATE_STYLES["정상"])
-    highlighted = role in (ROLE_SOURCE, ROLE_TARGET)
-    stroke = COLOR_SELECTED if highlighted else COLOR_LINE
-    left, top = -width / 2, -height / 2
-    role_svg = (
-        f'<text class="ws-node-role" x="0" y="{top - 8:.2f}" text-anchor="middle">{_safe(role)}</text>'
-        if highlighted else ""
-    )
-    # The state pill scales with the node so its text stays readable instead of
-    # sitting at a fixed 9px that vanished once the SVG was scaled to a column.
-    # The cap was measured, not guessed: at 1366 with the sidebar expanded the
-    # centre column is ~654px, a 0.70x downscale, and the old 15.0 cap landed the
-    # pill at 10.4px on screen. The pill box grows with the font (pill_w reads the
-    # same value and is still clamped to the node), so nothing overflows.
-    pill_h = max(13.0, min(20.0, height * 0.35))
-    pill_font = round(min(STATE_PILL_FONT_MAX, pill_h * 0.84), 1)
-    pill_w = max(46.0, min(width - 8.0, _glyph_width(state, pill_font) + 16.0))
-    pill_top = height / 2 - pill_h - 3.0
+# --------------------------------------------------------------------------- #
+# Edges
+# --------------------------------------------------------------------------- #
+def _bow_control(
+    start: tuple[float, float], end: tuple[float, float], apex_x: float,
+) -> tuple[float, float]:
+    """Control point that puts the middle of the bow exactly on ``apex_x``.
+
+    A quadratic passes through ``(P0 + 2C + P1) / 4`` at its midpoint, so solving
+    for C is what makes a same-band move leave its column by a known amount
+    instead of by a guessed one — the earlier relative bulge pushed the curve off
+    the side of the canvas whenever the column already hugged the edge.
+    """
     return (
-        f'<g class="ws-node ws-node-store" transform="translate({x:.2f} {y:.2f})">'
-        f"<title>{_safe(name)} · 점포 · 재고 {_safe(state)}</title>"
-        f"{role_svg}"
-        f'<rect x="{left:.2f}" y="{top:.2f}" width="{width:.2f}" height="{height:.2f}" rx="8" '
-        f'fill="#ffffff" stroke="{stroke}" stroke-width="{2.6 if highlighted else 1.2}" />'
-        f'<text class="ws-node-name" x="0" y="{-height * 0.08:.2f}" text-anchor="middle" '
-        f'font-size="{font:.1f}">{_safe(label)}</text>'
-        f'<rect x="{-pill_w / 2:.2f}" y="{pill_top:.2f}" width="{pill_w:.2f}" height="{pill_h:.2f}" '
-        f'rx="{pill_h / 2:.2f}" fill="{fill_tint}" stroke="{text_color}" stroke-width="0.9" />'
-        f'<text x="0" y="{pill_top + pill_h * 0.74:.2f}" text-anchor="middle" fill="{text_color}" '
-        f'font-size="{pill_font}" font-weight="700">{_safe(state)}</text>'
-        "</g>"
+        (4 * apex_x - start[0] - end[0]) / 2,
+        (start[1] + end[1]) / 2,
     )
 
 
 def _edge_line_svg(
-    start: tuple[float, float], end: tuple[float, float], *, selected: bool, via_dc: bool,
+    start: tuple[float, float], end: tuple[float, float], *,
+    selected: bool, via_dc: bool, control: tuple[float, float] | None,
 ) -> str:
+    """One drawn segment, stopped at both node boxes so its arrowhead is visible.
+
+    A move between two nodes of the same band would otherwise run straight down
+    the column through every box between them, so it is bowed out through the
+    corridor instead (``control``).
+    """
     (x1, y1), (x2, y2) = start, end
     color = COLOR_SELECTED if selected else COLOR_PLANNED
     width = 3.4 if selected else 1.9
     dash = ' stroke-dasharray="10 7"' if via_dc else ""
     marker = "ws-arrow-selected" if selected else "ws-arrow-planned"
+    shape = (
+        f'<line x1="{x1:.2f}" y1="{y1:.2f}" x2="{x2:.2f}" y2="{y2:.2f}"'
+        if control is None else
+        f'<path fill="none" d="M {x1:.2f} {y1:.2f} Q {control[0]:.2f} '
+        f'{control[1]:.2f} {x2:.2f} {y2:.2f}"'
+    )
     return (
-        f'<line x1="{x1:.2f}" y1="{y1:.2f}" x2="{x2:.2f}" y2="{y2:.2f}" stroke="{color}" '
-        f'stroke-width="{width}" stroke-linecap="round" stroke-opacity="{0.95 if selected else 0.6}"'
-        f'{dash} marker-end="url(#{marker})" />'
+        f'{shape} stroke="{color}" stroke-width="{width}" stroke-linecap="round" '
+        f'stroke-opacity="{0.95 if selected else 0.55}"{dash} marker-end="url(#{marker})" />'
+    )
+
+
+def _ribbon_svg(points: Sequence[tuple[float, float]]) -> str:
+    """A single soft band behind a two-segment DC 경유 move.
+
+    Two separate lines through a DC read as two unrelated plans; one ribbon
+    running 출발 → DC → 도착 says they are one move without adding a colour.
+    """
+    if len(points) < 3:
+        return ""
+    path = " L ".join(f"{x:.2f} {y:.2f}" for x, y in points)
+    return (
+        f'<path class="ws-edge-ribbon" d="M {path}" fill="none" stroke="{COLOR_SELECTED}" '
+        f'stroke-width="11" stroke-opacity="0.16" stroke-linecap="round" stroke-linejoin="round" />'
     )
 
 
@@ -460,44 +459,119 @@ Box = tuple[float, float, float, float]  # centre x, centre y, half width, half 
 
 
 def _chip_box(
-    start: tuple[float, float], end: tuple[float, float], label: str, position: float,
+    start: tuple[float, float], end: tuple[float, float], label: str,
+    position: float, offset: float = 0.0,
+    control: tuple[float, float] | None = None,
 ) -> Box:
-    """Chip centre and half-extents at ``position`` along the segment."""
+    """Chip centre and half-extents at ``position`` along the drawn edge, pushed
+    ``offset`` units to the side of it.
+
+    ``control`` is the bow of a same-band edge. The chip has to ride the line the
+    reader actually sees: measured against the straight chord instead, a bowed
+    edge puts its number back inside the column of boxes it was bowed out of.
+    """
     (x1, y1), (x2, y2) = start, end
     half = max(22.0, _glyph_width(label, EDGE_FONT) / 2 + 9.0)
+    if control is None:
+        centre = (x1 + (x2 - x1) * position, y1 + (y2 - y1) * position)
+        tangent = (x2 - x1, y2 - y1)
+    else:
+        rest = 1.0 - position
+        centre = (
+            rest * rest * x1 + 2 * rest * position * control[0] + position * position * x2,
+            rest * rest * y1 + 2 * rest * position * control[1] + position * position * y2,
+        )
+        tangent = (
+            2 * rest * (control[0] - x1) + 2 * position * (x2 - control[0]),
+            2 * rest * (control[1] - y1) + 2 * position * (y2 - control[1]),
+        )
+    length = math.hypot(*tangent) or 1.0
+    normal_x, normal_y = -tangent[1] / length, tangent[0] / length
     return (
-        x1 + (x2 - x1) * position, y1 + (y2 - y1) * position, half, EDGE_CHIP_HEIGHT / 2,
+        centre[0] + normal_x * offset,
+        centre[1] + normal_y * offset,
+        half,
+        EDGE_CHIP_HEIGHT / 2,
     )
 
 
-def _overlaps(box: Box, placed: Sequence[Box]) -> bool:
+def _overlap_area(box: Box, placed: Sequence[Box]) -> float:
+    """How much of ``box`` a already-drawn box would cover, with a little clearance.
+
+    Zero means the chip is free-standing. The value is used twice: any candidate
+    scoring zero is taken immediately, and when a plan is dense enough that no
+    position is free, the selected move's chip takes the least-covered one rather
+    than landing blindly in the middle of a node.
+    """
     x, y, half_w, half_h = box
+    total = 0.0
     for other_x, other_y, other_half_w, other_half_h in placed:
-        if abs(x - other_x) < half_w + other_half_w + 4 and abs(y - other_y) < half_h + other_half_h + 3:
-            return True
-    return False
+        overlap_x = half_w + other_half_w + 4 - abs(x - other_x)
+        overlap_y = half_h + other_half_h + 3 - abs(y - other_y)
+        if overlap_x > 0 and overlap_y > 0:
+            total += overlap_x * overlap_y
+    return total
+
+
+def _overlaps(box: Box, placed: Sequence[Box]) -> bool:
+    return _overlap_area(box, placed) > 0.0
+
+
+_CHIP_POSITIONS = (0.5, 0.38, 0.62, 0.3, 0.7, 0.24, 0.76, 0.44, 0.56, 0.18, 0.82)
+_CHIP_OFFSETS = (0.0, 28.0, -28.0, 54.0, -54.0, 82.0, -82.0)
+
+
+def _inside(box: Box, bounds: tuple[float, float]) -> bool:
+    x, y, half_w, half_h = box
+    return (
+        x - half_w >= 0 and x + half_w <= bounds[0]
+        and y - half_h >= 0 and y + half_h <= bounds[1]
+    )
+
+
+def _clamp_inside(box: Box, bounds: tuple[float, float]) -> Box:
+    x, y, half_w, half_h = box
+    return (
+        min(max(x, half_w), bounds[0] - half_w),
+        min(max(y, half_h), bounds[1] - half_h),
+        half_w, half_h,
+    )
 
 
 def _edge_label_svg(
     start: tuple[float, float], end: tuple[float, float], label: str, *,
-    selected: bool, placed: list[Box],
+    selected: bool, placed: list[Box], bounds: tuple[float, float],
+    control: tuple[float, float] | None = None,
 ) -> str:
-    """Place one ``planned_qty`` chip, sliding it along the edge to clear the node
-    boxes and the chips already on screen. A non-selected chip that finds no free
-    spot is dropped rather than printed on top of another number; the selected
-    move always keeps its own number.
+    """Place one ``planned_qty`` chip, sliding it along the edge — and, when the
+    edge is too short to hold it, just beside the edge — to clear the node boxes,
+    the chips already on screen and the edge of the canvas. A non-selected chip
+    that finds no free spot is dropped rather than printed on top of another
+    number; the selected move always keeps its own number.
     """
     color = COLOR_SELECTED if selected else COLOR_PLANNED
-    box = None
-    for position in (0.5, 0.38, 0.62, 0.3, 0.7, 0.24, 0.76):
-        candidate = _chip_box(start, end, label, position)
-        if not _overlaps(candidate, placed):
-            box = candidate
-            break
-    if box is None:
-        if not selected:
-            return ""
-        box = _chip_box(start, end, label, 0.5)
+    # Of every spot that is actually free, take the one nearest the middle of the
+    # edge — a number that has drifted to the far end of its line reads as if it
+    # belonged to the node it ended up beside.
+    middle = _chip_box(start, end, label, 0.5, 0.0, control)
+    free: tuple[float, Box] | None = None
+    crowded: tuple[float, Box] | None = None
+    for offset in _CHIP_OFFSETS:
+        for position in _CHIP_POSITIONS:
+            candidate = _chip_box(start, end, label, position, offset, control)
+            distance = math.dist(candidate[:2], middle[:2])
+            covered = _overlap_area(candidate, placed)
+            if covered <= 0.0 and _inside(candidate, bounds):
+                if free is None or distance < free[0]:
+                    free = (distance, candidate)
+            elif crowded is None or covered < crowded[0]:
+                crowded = (covered, candidate)
+    if free is not None:
+        box = free[1]
+    elif selected and crowded is not None:
+        box = _clamp_inside(crowded[1], bounds)
+    else:
+        return ""
     placed.append(box)
     x, y, half, _half_h = box
     return (
@@ -520,7 +594,7 @@ def _defs() -> str:
     return "<defs>" + marker("ws-arrow-selected", COLOR_SELECTED) + marker("ws-arrow-planned", COLOR_PLANNED) + "</defs>"
 
 
-def _legend(has_via_dc: bool) -> str:
+def _legend(has_via_dc: bool, marker_states: bool) -> str:
     parts = [
         '<span class="ws-legend-item"><span class="ws-legend-line ws-legend-line-selected"></span>선택한 이동</span>',
         '<span class="ws-legend-item"><span class="ws-legend-line"></span>계획된 다른 이동</span>',
@@ -529,13 +603,58 @@ def _legend(has_via_dc: bool) -> str:
         parts.append(
             '<span class="ws-legend-item"><span class="ws-legend-line ws-legend-line-dashed"></span>DC 경유</span>'
         )
-    parts.extend(
-        f'<span class="ws-legend-item"><span class="ws-legend-dot" '
-        f'style="background:{fill};border-color:{color};"></span>{state}</span>'
-        for state, (color, fill) in STATE_STYLES.items()
-        if state != "이동 대상"
-    )
+    for state, (color, fill) in STATE_STYLES.items():
+        if state == "이동 대상":
+            continue
+        if marker_states:
+            parts.append(
+                '<span class="ws-legend-item">'
+                '<svg class="ws-legend-shape" viewBox="-8 -8 16 16" aria-hidden="true">'
+                f'<path d="{STATE_MARKERS[state]}" fill="{fill}" stroke="{color}" '
+                'stroke-width="1.5" stroke-linejoin="round" /></svg>'
+                f"{state}</span>"
+            )
+        else:
+            parts.append(
+                f'<span class="ws-legend-item"><span class="ws-legend-dot" '
+                f'style="background:{fill};border-color:{color};"></span>{state}</span>'
+            )
     return '<div class="ws-network-legend">' + "".join(parts) + "</div>"
+
+
+# --------------------------------------------------------------------------- #
+# The picture
+# --------------------------------------------------------------------------- #
+def _drawn_segments(
+    drawn: Sequence[Mapping[str, Any]], nodes: Sequence[Mapping[str, Any]], selected_id: str,
+) -> list[dict[str, Any]]:
+    """Resolve every drawn move once: its node pairs, its type, its quantity."""
+    resolved: list[dict[str, Any]] = []
+    for item in drawn:
+        pairs = _route_pairs(item, nodes)
+        if not pairs:
+            continue
+        resolved.append({
+            "route_id": _text(item.get("route_id")),
+            "pairs": pairs,
+            "via_dc": normalize_route_type(item) == "VIA_DC",
+            "selected": _text(item.get("route_id")) == selected_id,
+            "label": _qty_label(item),
+            "source_id": _text(item.get("source_id")),
+            "target_id": _text(item.get("target_id")),
+        })
+    return resolved
+
+
+def _half_extents(
+    node_id: str, layout: FlowLayout, focus_ids: set[str],
+) -> tuple[float, float]:
+    is_dc = layout.bands.get(node_id) == DC_BAND
+    width = layout.dc_size[0] if is_dc else layout.store_size[0]
+    height = layout.dc_size[1] if is_dc else layout.store_size[1]
+    if node_id in focus_ids and not is_dc:
+        width = layout.focus_width(node_id)
+    return width / 2, height / 2
 
 
 def build_workspace_network(
@@ -552,10 +671,7 @@ def build_workspace_network(
     selected_id = _text(selected_route_id)
     selected = next((item for item in items if _text(item.get("route_id")) == selected_id), None)
 
-    if scope == SCOPE_SELECTED and selected is not None:
-        drawn = [selected]
-    else:
-        drawn = items
+    drawn = [selected] if (scope == SCOPE_SELECTED and selected is not None) else items
 
     all_nodes = build_network_nodes(data, items)
     if not all_nodes:
@@ -570,38 +686,33 @@ def build_workspace_network(
     if not stores and not dcs:
         return {"ok": False, "html": "", "message": "표시할 점포 정보가 없습니다."}
 
-    store_w, store_h = _dimensions(len(stores))
-    dc_w, dc_h = _dc_size((store_w, store_h))
-    # A picture that cannot fit every store legibly shows the ones involved in the
-    # plan and says how many it left out — it never draws them on top of each other.
-    capacity = ring_capacity((store_w, store_h), len(dcs))
-    dropped = 0
-    if len(stores) > capacity:
-        related = _related_node_ids(drawn, nodes)
-        ordered = sorted(stores, key=lambda node: (
-            _text(node.get("node_id")) not in related, _text(node.get("node_id")),
-        ))
-        dropped = len(stores) - capacity
-        stores = ordered[:capacity]
-        kept = {_text(node.get("node_id")) for node in stores} | {
-            _text(node.get("node_id")) for node in dcs
-        }
-        nodes = [node for node in nodes if _text(node.get("node_id")) in kept]
-    # The shared radial layout is tuned for a handful of stores around one or two
-    # DCs; past that it starts to overlap, so the workspace lays those cases out
-    # itself instead of shipping a crowded picture.
-    if len(stores) > _SINGLE_RING_LIMIT or len(dcs) >= _CENTRAL_ROW_DC_LIMIT:
-        coordinates = _ring_positions(stores, dcs, (store_w, store_h))
-    else:
-        positions = compute_network_layout(
-            stores, dcs, CANVAS_WIDTH, CANVAS_HEIGHT, CANVAS_MARGIN,
-            recommended=set(), store_size=(store_w, store_h),
-        )
-        coordinates = {
-            node_id: (value[0], value[1]) for node_id, value in positions.items()
-        }
-    roles = _node_roles(selected, nodes)
+    segments = _drawn_segments(drawn, nodes, selected_id)
+    edge_pairs = [pair for segment in segments for pair in segment["pairs"]]
+    related = _related_node_ids(drawn, nodes)
 
+    layout = compute_flow_layout(
+        [node.get("node_id") for node in stores],
+        [node.get("node_id") for node in dcs],
+        edge_pairs,
+        keep=related,
+    )
+    coordinates = layout.positions
+    dropped = set(layout.dropped)
+    if dropped:
+        stores = [node for node in stores if _text(node.get("node_id")) not in dropped]
+
+    roles = _node_roles(selected, nodes)
+    focus_ids = set(roles)
+    store_w, store_h = layout.store_size
+    dc_w, dc_h = layout.dc_size
+    badge_text = len(coordinates) <= _BADGE_TEXT_LIMIT
+
+    def level(node_id: str) -> str:
+        if node_id in focus_ids:
+            return LEVEL_FOCUS
+        return LEVEL_PLAN if node_id in related else LEVEL_CONTEXT
+
+    # --- background (전체 네트워크 only) ---------------------------------------
     background: list[str] = []
     if scope == SCOPE_ALL:
         seen: set[tuple[str, str]] = set()
@@ -619,96 +730,155 @@ def build_workspace_network(
                     f'stroke="{COLOR_BACKGROUND}" stroke-width="1" stroke-opacity="0.55" />'
                 )
 
-    edges: list[str] = []
-    pending_labels: list[tuple[tuple[float, float], tuple[float, float], str, bool]] = []
+    # --- edges -----------------------------------------------------------------
+    ribbons: list[str] = []
+    plan_edges: list[str] = []
+    focus_edges: list[str] = []
+    pending: list[dict[str, Any]] = []
     has_via_dc = False
-    label_all = len(drawn) <= _MAX_LABELLED_EDGES
-    for item in drawn:
-        try:
-            segments = build_route_segments(item, nodes)
-        except ValueError:
-            continue
-        is_selected = _text(item.get("route_id")) == selected_id
-        via_dc = normalize_route_type(item) == "VIA_DC"
-        has_via_dc = has_via_dc or via_dc
-        label = _qty_label(item) if (is_selected or label_all) else ""
-        for index, segment in enumerate(segments):
-            start = coordinates.get(_text(segment["from_node_id"]))
-            end = coordinates.get(_text(segment["to_node_id"]))
+    label_all = len(segments) <= _MAX_LABELLED_EDGES
+    selected_ends = {
+        _text((selected or {}).get("source_id")), _text((selected or {}).get("target_id")),
+    } - {""}
+
+    for segment in segments:
+        has_via_dc = has_via_dc or segment["via_dc"]
+        is_selected = segment["selected"]
+        # 선택 이동은 언제나, 선택과 출발/도착을 공유하는 대안은 그 다음, 나머지 수량은
+        # 계획이 작을 때만 적는다.
+        competing = bool({segment["source_id"], segment["target_id"]} & selected_ends)
+        priority = 0 if is_selected else 1 if competing else 2
+        show_label = segment["label"] and (is_selected or competing or label_all)
+
+        drawn_points: list[tuple[float, float]] = []
+        clipped: list[tuple[tuple[float, float], tuple[float, float], tuple[float, float] | None]] = []
+        for index, (from_id, to_id) in enumerate(segment["pairs"]):
+            start, end = coordinates.get(from_id), coordinates.get(to_id)
             if not start or not end:
                 continue
-            edges.append(_edge_line_svg(start, end, selected=is_selected, via_dc=via_dc))
-            # 두 구간짜리 DC 경유는 두 번째 구간에만 수량을 적어 화면이 겹치지 않게 한다.
-            if label and index == len(segments) - 1:
-                pending_labels.append((start, end, label, is_selected))
+            from_half = _half_extents(from_id, layout, focus_ids)
+            to_half = _half_extents(to_id, layout, focus_ids)
+            clipped_start = clip_to_box(start, end, *from_half)
+            clipped_end = clip_to_box(end, start, *to_half)
+            band = layout.bands.get(from_id, "")
+            control = (
+                _bow_control(clipped_start, clipped_end, layout.corridor_x(band))
+                if band and band == layout.bands.get(to_id) else None
+            )
+            shape = _edge_line_svg(
+                clipped_start, clipped_end, selected=is_selected,
+                via_dc=segment["via_dc"], control=control,
+            )
+            (focus_edges if is_selected else plan_edges).append(shape)
+            clipped.append((clipped_start, clipped_end, control))
+            if not drawn_points:
+                drawn_points.append(clipped_start)
+            drawn_points.append(end if index < len(segment["pairs"]) - 1 else clipped_end)
+        # 한 이동에는 수량 하나. 두 구간짜리 DC 경유는 둘 중 더 긴 구간에 적는다 —
+        # 짧은 구간에는 수량 칩이 통째로 들어가지 않아 옆 점포 위로 밀려난다.
+        if show_label and clipped:
+            longest = max(clipped, key=lambda part: math.dist(part[0], part[1]))
+            pending.append({
+                "start": longest[0], "end": longest[1], "control": longest[2],
+                "label": segment["label"], "priority": priority,
+            })
+        if is_selected and segment["via_dc"] and len(drawn_points) >= 3:
+            ribbons.append(_ribbon_svg(drawn_points))
 
+    # --- quantity chips --------------------------------------------------------
     # Chips are placed after every line so a number is never drawn under a node
     # box or another edge's number; the selected move always keeps its own chip.
     placed: list[Box] = []
-    for group, (box_w, box_h) in ((dcs, (dc_w, dc_h)), (stores, (store_w, store_h))):
-        for node in group:
-            position = coordinates.get(_text(node.get("node_id")))
-            if position:
-                placed.append((position[0], position[1], box_w / 2 + 3.0, box_h / 2 + 3.0))
-    labels = [
-        _edge_label_svg(start, end, label, selected=True, placed=placed)
-        for start, end, label, is_selected in pending_labels if is_selected
-    ]
-    labels += [
-        _edge_label_svg(start, end, label, selected=False, placed=placed)
-        for start, end, label, is_selected in pending_labels if not is_selected
-    ]
-    edges.extend(part for part in labels if part)
+    for node in dcs + stores:
+        node_id = _text(node.get("node_id"))
+        position = coordinates.get(node_id)
+        if position:
+            half_w, half_h = _half_extents(node_id, layout, focus_ids)
+            placed.append((position[0], position[1], half_w + 3.0, half_h + 3.0))
+    chips: list[str] = []
+    for chip in sorted(pending, key=lambda row: row["priority"]):
+        chips.append(_edge_label_svg(
+            chip["start"], chip["end"], chip["label"],
+            selected=chip["priority"] == 0, placed=placed, control=chip["control"],
+            bounds=(layout.width, layout.height),
+        ))
 
-    if not edges and drawn:
+    # --- nodes -----------------------------------------------------------------
+    context_shapes: list[str] = []
+    plan_shapes: list[str] = []
+    focus_shapes: list[str] = []
+    for node in dcs:
+        node_id = _text(node.get("node_id"))
+        if node_id not in coordinates:
+            continue
+        x, y = coordinates[node_id]
+        name = _text(node.get("node_name")) or node_id
+        shape = _dc_svg(
+            {**node, "x": x, "y": y, "width": dc_w, "height": dc_h},
+            roles.get(node_id, ""),
+            sub_label=_dc_sub_label(name, node_id, len(dcs)),
+        )
+        (focus_shapes if node_id in focus_ids else plan_shapes).append(shape)
+    for node in stores:
+        node_id = _text(node.get("node_id"))
+        if node_id not in coordinates:
+            continue
+        x, y = coordinates[node_id]
+        node_level = level(node_id)
+        width = layout.focus_width(node_id) if node_level == LEVEL_FOCUS else store_w
+        shape = _store_svg(
+            {**node, "x": x, "y": y, "width": width, "height": store_h},
+            roles.get(node_id, ""), node_level,
+            badge_text=badge_text or node_level == LEVEL_FOCUS,
+        )
+        bucket = (
+            focus_shapes if node_level == LEVEL_FOCUS
+            else plan_shapes if node_level == LEVEL_PLAN else context_shapes
+        )
+        bucket.append(shape)
+
+    if not (plan_edges or focus_edges) and drawn:
         message = "선택한 조건에서 표시할 이동 경로가 없습니다."
     elif dropped:
-        message = f"점포가 많아 이동과 관련된 {len(stores)}곳만 표시했습니다 (표시하지 않은 점포 {dropped}곳)."
+        message = (
+            f"점포가 많아 이동과 관련된 {len(stores)}곳만 표시했습니다 "
+            f"(표시하지 않은 점포 {len(dropped)}곳)."
+        )
     else:
         message = ""
 
-    # Node names are fitted to their own box by _fit_label, so no character
-    # budget is guessed here any more.
-    shapes = [
-        _dc_svg(
-            {**node, "x": coordinates[_text(node["node_id"])][0], "y": coordinates[_text(node["node_id"])][1],
-             "width": dc_w, "height": dc_h},
-            roles.get(_text(node.get("node_id")), ""),
-        )
-        for node in dcs if _text(node.get("node_id")) in coordinates
-    ]
-    shapes += [
-        _store_svg(
-            {**node, "x": coordinates[_text(node["node_id"])][0], "y": coordinates[_text(node["node_id"])][1],
-             "width": store_w, "height": store_h},
-            roles.get(_text(node.get("node_id")), ""),
-        )
-        for node in stores if _text(node.get("node_id")) in coordinates
-    ]
-
     svg = (
-        f'<svg class="ws-network-svg" viewBox="0 0 {CANVAS_WIDTH:.0f} {CANVAS_HEIGHT:.0f}" '
+        f'<svg class="ws-network-svg" viewBox="0 0 {layout.width:.0f} {layout.height:.0f}" '
+        f'style="aspect-ratio: {layout.width:.0f} / {layout.height:.0f};" '
         'xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" role="img" '
         'aria-label="점포와 DC 사이의 오늘 이동 계획">'
         + _defs()
         + "".join(background)
-        + "".join(edges)
-        + "".join(shapes)
+        + "".join(ribbons)
+        + "".join(plan_edges)
+        + "".join(focus_edges)
+        + "".join(context_shapes)
+        + "".join(plan_shapes)
+        + "".join(focus_shapes)
+        + "".join(part for part in chips if part)
         + "</svg>"
     )
     return {
         "ok": True,
         "message": message,
-        "html": f'<div class="v2-wrap ws-network-shell">{_legend(has_via_dc)}{svg}</div>',
+        "html": (
+            f'<div class="v2-wrap ws-network-shell">'
+            f'{_legend(has_via_dc, not badge_text)}{svg}</div>'
+        ),
     }
 
 
 __all__ = [
-    "ring_capacity",
     "SCOPE_ALL",
     "SCOPE_OPTIONS",
     "SCOPE_PLAN",
     "SCOPE_SELECTED",
+    "STATE_MARKERS",
     "STATE_STYLES",
     "build_workspace_network",
     "plan_edge_options",

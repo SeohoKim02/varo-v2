@@ -399,24 +399,48 @@ class VisibleTerminologyTests(unittest.TestCase):
 
 
 class SidebarWidthTests(unittest.TestCase):
-    """§15 — 1366에서 사이드바를 펼쳐도 중앙 네트워크가 좁아지지 않는다."""
+    """§15 — 사이드바를 펼쳐도 중앙 네트워크가 좁아지지 않는다."""
+
+    def _narrow_block(self) -> tuple[int, str]:
+        """The narrow-desktop media block, found by its own rule, and its bound.
+
+        The breakpoint is looked up rather than written in, because it is a
+        measured value: it has to cover every window in which an expanded sidebar
+        would squeeze the centre column below what 1366 already gets.
+        """
+        styles = (ROOT / "styles.py").read_text(encoding="utf-8")
+        # Anchor on the declaration, not the bare number (a comment mentions it
+        # too), and never let the span run across an intervening @media — that
+        # would credit a narrower block with a rule living in a wider one.
+        match = re.search(
+            r"@media \(max-width: (\d+)px\) \{\{(?:(?!@media)[\s\S])*?196px !important",
+            styles,
+        )
+        self.assertIsNotNone(match, "펼친 사이드바를 좁히는 미디어 블록을 찾지 못했습니다")
+        bound = int(match.group(1))
+        body = styles.split(f"@media (max-width: {bound}px)", 1)[1]
+        return bound, body.split("@media", 1)[0]
 
     def test_narrow_desktops_get_a_narrower_sidebar_not_smaller_text(self):
-        styles = (ROOT / "styles.py").read_text(encoding="utf-8")
-        self.assertIn("@media (max-width: 1450px)", styles)
-        block = styles.split("@media (max-width: 1450px)", 1)[1][:2200]
+        _bound, block = self._narrow_block()
         # 접힌 사이드바는 건드리지 않는다: 펼친 상태만 좁힌다.
         self.assertIn('section[data-testid="stSidebar"][aria-expanded="true"]', block)
         self.assertIn("196px", block)
         # 글자를 줄이는 방식이 아니다.
         for banned in ("font-size: 9px", "font-size: 8px", "font-size: 10px"):
             self.assertNotIn(banned, block)
+        styles = (ROOT / "styles.py").read_text(encoding="utf-8")
         self.assertNotIn("overflow-x: scroll", styles)
+
+    def test_the_rule_reaches_every_window_an_open_sidebar_would_squeeze(self):
+        """1450은 잘못된 경계였다: 1600에서 사이드바를 펼치면 중앙 열이 569px까지
+        좁아져 1366(646px)보다 더 나빠지고 모든 라벨이 10px 아래로 떨어졌다."""
+        bound, _block = self._narrow_block()
+        self.assertGreaterEqual(bound, 1600)
 
     def test_the_three_columns_share_what_is_left_after_the_gaps(self):
         """퍼센트를 그대로 쓰면 열 간격만큼 넘쳐 우측 실행 패널이 화면 밖으로 나간다."""
-        styles = (ROOT / "styles.py").read_text(encoding="utf-8")
-        block = styles.split("@media (max-width: 1450px)", 1)[1][:2200]
+        _bound, block = self._narrow_block()
         for ratio in ("flex: 20 1 0%", "flex: 60 1 0%"):
             self.assertIn(ratio, block)
         self.assertNotIn("flex: 0 0 21%", block)

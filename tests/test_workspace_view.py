@@ -12,6 +12,7 @@ import unittest
 import pandas as pd
 
 from components import workspace_network as wsn
+from simulation.flow_layout import compute_flow_layout, dc_dimensions, store_dimensions
 from components.workspace_network import (
     SCOPE_ALL,
     SCOPE_PLAN,
@@ -462,57 +463,46 @@ class WorkspaceStateKeyTests(unittest.TestCase):
 class WorkspaceNetworkGeometryTests(unittest.TestCase):
     """H · the network never draws a node off-canvas or on top of another one."""
 
-    def _positions(self, store_count: int, dc_count: int):
-        from simulation.dynamic_network import compute_network_layout
+    def _layout(self, store_count: int, dc_count: int):
+        stores = [f"S{index:03d}" for index in range(store_count)]
+        dcs = [f"DC{index:02d}" for index in range(dc_count)]
+        edges: list[tuple[str, str]] = []
+        for index in range(0, max(0, store_count - 1), 2):
+            if dcs:
+                dc_id = dcs[index % len(dcs)]
+                edges += [(stores[index], dc_id), (dc_id, stores[index + 1])]
+            else:
+                edges.append((stores[index], stores[index + 1]))
+        return compute_flow_layout(stores, dcs, edges, keep=stores)
 
-        store_size = wsn._dimensions(store_count)
-        capacity = wsn.ring_capacity(store_size, dc_count)
-        uses_rings = store_count > wsn._SINGLE_RING_LIMIT or dc_count >= wsn._CENTRAL_ROW_DC_LIMIT
-        shown = min(store_count, capacity) if uses_rings else store_count
-        stores = [{"node_id": f"S{index:03d}"} for index in range(shown)]
-        dcs = [{"node_id": f"DC{index:02d}"} for index in range(dc_count)]
-        if uses_rings:
-            positions = wsn._ring_positions(stores, dcs, store_size)
-        else:
-            positions = {
-                key: (value[0], value[1])
-                for key, value in compute_network_layout(
-                    stores, dcs, wsn.CANVAS_WIDTH, wsn.CANVAS_HEIGHT, wsn.CANVAS_MARGIN,
-                    set(), store_size,
-                ).items()
-            }
-        return positions, store_size, shown
-
-    def _box(self, node_id: str, store_size: tuple[float, float]) -> tuple[float, float]:
-        if node_id.startswith("DC"):
-            return wsn._dc_size(store_size)
-        return store_size
+    def _box(self, layout, node_id: str) -> tuple[float, float]:
+        return layout.dc_size if node_id.startswith("DC") else layout.store_size
 
     def test_every_node_stays_inside_the_canvas(self):
         for store_count in (1, 2, 4, 8, 12, 16, 17, 24, 30, 40, 60):
             for dc_count in (0, 1, 2, 3, 4):
                 with self.subTest(stores=store_count, dcs=dc_count):
-                    positions, store_size, _shown = self._positions(store_count, dc_count)
-                    for node_id, (x, y) in positions.items():
-                        width, height = self._box(node_id, store_size)
+                    layout = self._layout(store_count, dc_count)
+                    for node_id, (x, y) in layout.positions.items():
+                        width, height = self._box(layout, node_id)
                         self.assertGreaterEqual(x - width / 2, -1)
-                        self.assertLessEqual(x + width / 2, wsn.CANVAS_WIDTH + 1)
+                        self.assertLessEqual(x + width / 2, layout.width + 1)
                         # The role label sits above the box; keep room for it too.
                         self.assertGreaterEqual(y - height / 2 - 18, -1)
-                        self.assertLessEqual(y + height / 2, wsn.CANVAS_HEIGHT + 1)
+                        self.assertLessEqual(y + height / 2, layout.height + 1)
 
     def test_no_two_nodes_are_drawn_on_top_of_each_other(self):
         for store_count in (2, 6, 12, 16, 20, 28, 40, 60):
             for dc_count in (0, 1, 2, 3, 4):
                 with self.subTest(stores=store_count, dcs=dc_count):
-                    positions, store_size, _shown = self._positions(store_count, dc_count)
-                    ids = list(positions)
+                    layout = self._layout(store_count, dc_count)
+                    ids = list(layout.positions)
                     for i in range(len(ids)):
                         for j in range(i + 1, len(ids)):
-                            xi, yi = positions[ids[i]]
-                            xj, yj = positions[ids[j]]
-                            wi, hi = self._box(ids[i], store_size)
-                            wj, hj = self._box(ids[j], store_size)
+                            xi, yi = layout.positions[ids[i]]
+                            xj, yj = layout.positions[ids[j]]
+                            wi, hi = self._box(layout, ids[i])
+                            wj, hj = self._box(layout, ids[j])
                             overlapping = (
                                 abs(xi - xj) < (wi + wj) / 2 * 0.94
                                 and abs(yi - yj) < (hi + hj) / 2 * 0.94
@@ -520,9 +510,11 @@ class WorkspaceNetworkGeometryTests(unittest.TestCase):
                             self.assertFalse(overlapping, f"{ids[i]} overlaps {ids[j]}")
 
     def test_a_network_larger_than_the_canvas_says_what_it_left_out(self):
+        # 60 stores now fit; this is about the size past which they cannot, and
+        # about the picture staying honest rather than crowded when that happens.
         stores = pd.DataFrame(
             [{"node_id": f"S{index:03d}", "node_name": f"점포{index}", "node_type": "STORE"}
-             for index in range(60)]
+             for index in range(80)]
             + [{"node_id": "DC01", "node_name": "중앙DC", "node_type": "DC"}]
         )
         items = [{
@@ -597,9 +589,9 @@ class WorkspaceNetworkLegibilityTests(unittest.TestCase):
 
     def test_every_fitted_name_stays_inside_its_box(self):
         names = ("연신내점", "서울 서북권 물류센터", "A", "가나다라마바사아자차카타파하")
-        for count in (4, 10, 16, 26, 40):
-            width, _height = wsn._dimensions(count)
-            dc_width, _dc_height = wsn._dc_size(wsn._dimensions(count))
+        for count in (4, 10, 16, 26, 40, 60):
+            width, _height = store_dimensions(count)
+            dc_width, _dc_height = dc_dimensions(store_dimensions(count))
             for name in names:
                 with self.subTest(count=count, name=name):
                     label, font = wsn._fit_label(name, width, wsn.NAME_FONT, wsn.NAME_FONT_MIN)
@@ -612,7 +604,7 @@ class WorkspaceNetworkLegibilityTests(unittest.TestCase):
                         )
 
     def _pill(self, count: int) -> tuple[float, float, float, float]:
-        width, height = wsn._dimensions(count)
+        width, height = store_dimensions(count)
         pill_h = max(13.0, min(20.0, height * 0.35))
         pill_font = round(min(wsn.STATE_PILL_FONT_MAX, pill_h * 0.84), 1)
         pill_w = max(46.0, min(width - 8.0, wsn._glyph_width("이동 대상", pill_font) + 16.0))
@@ -621,19 +613,19 @@ class WorkspaceNetworkLegibilityTests(unittest.TestCase):
     def test_the_state_pill_reads_at_the_narrowest_expanded_sidebar_width(self):
         """1366 + 사이드바 펼침에서 과잉/부족/정상 배지가 10px 아래로 내려가지 않는다.
 
-        The pill is sized from the node, and a node shrinks as the network grows,
-        so this floor holds for the plan sizes the screen actually draws large
-        nodes for (up to ~12 nodes). Denser networks shrink every node and are a
-        separate layout question — asserting a floor they cannot meet would only
-        make this test lie.
+        The pill is sized from the node, so this used to hold only up to ~12
+        nodes: past that every box shrank and the badge went with it, down to
+        8.2px at 40 nodes. The flow layout answers density with height and lanes
+        instead, and floors the box at 52 units, so the floor now holds at every
+        size the picture draws — including 60 nodes.
         """
-        for count in (4, 8, 12):
+        for count in (4, 8, 12, 16, 24, 40, 60):
             _width, _height, pill_font, _pill_w = self._pill(count)
             with self.subTest(count=count):
                 self.assertGreater(pill_font * self._scale(), 10.0)
 
     def test_the_state_pill_never_leaves_its_node_box(self):
-        for count in (4, 10, 16, 26, 40):
+        for count in (4, 10, 16, 26, 40, 60):
             width, height, _pill_font, pill_w = self._pill(count)
             pill_h = max(13.0, min(20.0, height * 0.35))
             with self.subTest(count=count):
@@ -641,9 +633,15 @@ class WorkspaceNetworkLegibilityTests(unittest.TestCase):
                 self.assertLessEqual(pill_h, height / 2)
 
     def test_a_long_dc_name_wraps_instead_of_being_cut(self):
-        dc_width, _ = wsn._dc_size(wsn._dimensions(10))
+        dc_width, _ = dc_dimensions(store_dimensions(10))
+        # The flow layout gives a 물류센터 its own middle band, so a name this long
+        # now fits on one line where it used to have to wrap.
         lines, font = wsn._fit_dc_label("서울 서북권 물류센터", dc_width)
-        self.assertEqual(lines, ["서울 서북권", "물류센터"])
+        self.assertEqual(lines, ["서울 서북권 물류센터"])
+        self.assertGreaterEqual(font * self._scale(), self.MIN_SCREEN_PX)
+        # A name that still cannot fit wraps onto a second line — it is never cut.
+        lines, font = wsn._fit_dc_label("서울 서북권 통합 물류센터", dc_width)
+        self.assertEqual(lines, ["서울 서북권", "통합 물류센터"])
         self.assertGreaterEqual(font * self._scale(), self.MIN_SCREEN_PX)
 
     def test_edge_quantity_chips_never_overlap_a_node_or_each_other(self):
