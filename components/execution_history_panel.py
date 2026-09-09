@@ -186,10 +186,55 @@ def _render_item_editor(loaded: Mapping[str, Any]) -> None:
     _render_comparison(item)
 
 
-def render_execution_history_panel(current_plan: Mapping[str, Any] | None) -> None:
-    """Render the record action and compact history editor on the recommendation page."""
+def _plan_is_recordable(plan: Mapping[str, Any]) -> bool:
+    return bool(
+        plan.get("plan_id") and plan.get("items") and (plan.get("validation") or {}).get("valid")
+    )
+
+
+def render_record_plan_action(
+    current_plan: Mapping[str, Any] | None, key: str = "record_execution_plan",
+) -> bool:
+    """The single 이 계획 기록 button, without the outcome form around it.
+
+    Used from the 오늘 권장 이동 panel so the record action sits where the decision
+    is made, while the (much larger) 실제 실행 결과 form stays in the 실행 이력 tab.
+    Returns True when this call recorded the plan.
+    """
     plan = dict(current_plan or {})
-    has_current_plan = bool(plan.get("plan_id") and plan.get("items") and (plan.get("validation") or {}).get("valid"))
+    if not _plan_is_recordable(plan):
+        return False
+    already_recorded = bool(get_recorded_plan(str(plan["plan_id"])).get("ok"))
+    clicked = st.button(
+        "이 계획 기록", key=key, width="stretch", disabled=already_recorded,
+    )
+    if already_recorded:
+        st.caption("이미 기록된 계획입니다. 실행 결과는 실행 이력 탭에서 입력합니다.")
+        return False
+    if not clicked:
+        st.caption("버튼을 누를 때만 기록됩니다. 실행 결과는 실행 이력 탭에서 입력합니다.")
+        return False
+    result = record_execution_plan(plan)
+    if result.get("ok"):
+        st.success(result["message"])
+        return True
+    st.error(result["message"])
+    return False
+
+
+def render_execution_history_panel(
+    current_plan: Mapping[str, Any] | None, show_record_action: bool = True,
+) -> None:
+    """Record action + compact history editor.
+
+    ``show_record_action=False`` drops only the 이 계획 기록 button: the 재고 운영
+    화면 offers that action next to the decision itself (see
+    :func:`render_record_plan_action`) and one screen must not carry two of them.
+    """
+    plan = dict(current_plan or {})
+    # The panel itself still shows (backend, metrics, outcome editor) — only the
+    # duplicate record button is dropped.
+    has_current_plan = _plan_is_recordable(plan)
     # Only the most recent page is loaded; older records are read on request.
     page_size = RECENT_PLAN_PAGE_SIZE * 10 if st.session_state.get("history_show_older") else RECENT_PLAN_PAGE_SIZE
     history = list_recorded_plans(limit=page_size)
@@ -203,7 +248,7 @@ def render_execution_history_panel(current_plan: Mapping[str, Any] | None) -> No
     if not history.get("ok"):
         st.warning(history.get("message") or "실행 기록을 불러오지 못했습니다.")
 
-    if has_current_plan:
+    if has_current_plan and show_record_action:
         recorded = get_recorded_plan(str(plan["plan_id"]))
         already_recorded = bool(recorded.get("ok"))
         cols = st.columns([1.2, 3], gap="small")

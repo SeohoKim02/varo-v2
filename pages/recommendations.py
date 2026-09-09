@@ -245,7 +245,7 @@ def _render_plan_exclusions(pipeline: dict) -> None:
             "제외 이유": entry.get("reason") or "전체 이동계획에서 다른 이동을 우선했습니다.",
         })
     if rows:
-        with st.expander(f"실행계획에 포함되지 않은 후보 ({len(rows)}건)", expanded=False):
+        with st.expander(f"실행 계획에 포함되지 않은 이동 ({len(rows)}건)", expanded=False):
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
@@ -261,7 +261,9 @@ def render_recommendations_page() -> None:
     data = st.session_state.get("varo_data")
     recommendations = _all_recommendations()
     data_available = has_app_data(data, recommendations)
-    render_page_header(st, "오늘 권장 이동", "서로 충돌하지 않는 실제 실행 수량과 순서를 확인합니다.")
+    # 일상 작업은 재고 운영 화면에서 끝난다. 이 화면은 전체 목록·점수 비교를 한 번에
+    # 보는 연구용 보조 화면이므로 제목도 그렇게 읽혀야 한다(같은 개념에 두 이름 금지).
+    render_page_header(st, "연구용 목록", "전체 목록과 점수 비교를 한 화면에서 확인합니다. 실행 수량은 재고 운영과 동일합니다.")
     # Shown once, on the first render after a successful run, then dropped so it
     # cannot pile up across reruns.
     if st.session_state.pop("analysis_completed_notice", None):
@@ -274,7 +276,7 @@ def render_recommendations_page() -> None:
             st.caption(f"문제 행 {excluded}개를 제외한 적용 데이터로 추천을 계산합니다.")
         running = bool(st.session_state.get("analysis_running"))
         if st.button(
-            "추천 실행", key="run_applied_analysis", type="primary",
+            "분석 실행", key="run_applied_analysis", type="primary",
             width="stretch", disabled=running,
         ):
             # The progress view streams each real stage while the (blocking) run
@@ -286,7 +288,7 @@ def render_recommendations_page() -> None:
         error = st.session_state.get("analysis_run_error")
         if error:
             st.error(error)
-        st.info("추천 실행 전입니다. 적용된 데이터는 준비되어 있습니다.")
+        st.info("분석 실행 전입니다. 적용된 데이터는 준비되어 있습니다.")
         return
     if not data_available:
         # Data applied but no feasible move (모두 제외): show the excluded candidates
@@ -296,7 +298,7 @@ def render_recommendations_page() -> None:
             summary = pipeline.get("ledger_summary") or {}
             generated = int(summary.get("generated") or 0)
             plan = pipeline.get("execution_plan") or {}
-            st.warning(str(plan.get("user_message") or f"현재 조건에서 추천 가능한 이동이 없습니다. 생성된 후보 {generated}건의 제외 이유를 확인하세요."))
+            st.warning(str(plan.get("user_message") or f"현재 조건에서 추천 가능한 이동이 없습니다. 검토한 이동 {generated}건의 제외 이유를 확인하세요."))
             _render_plan_exclusions(pipeline)
             render_excluded_candidates(st, pipeline)
         else:
@@ -311,12 +313,12 @@ def render_recommendations_page() -> None:
 
     filtered = _apply_filters(recommendations, _render_filters(recommendations))
     if not filtered:
-        render_empty_state(st, "필터 조건에 맞는 추천 결과가 없습니다", compact=True)
+        render_empty_state(st, "필터 조건에 맞는 이동이 없습니다", compact=True)
         return
 
     _render_decision_summary()
     _render_best_recommendation(filtered[0])
-    render_section_header(st, "오늘 실행할 이동 · 추천 후보", "")
+    render_section_header(st, "오늘 실행할 이동", "")
     render_capped_table(
         build_recommendation_rows(
             filtered, include_route_id=False, include_status=False,
@@ -331,7 +333,7 @@ def render_recommendations_page() -> None:
         st.caption("넓은 표는 가로로 스크롤하세요.")
     _render_downloads(filtered)
 
-    with st.expander("전체 추천 후보 분석", expanded=False):
+    with st.expander("전체 검토 목록", expanded=False):
         candidate_rows = build_recommendation_rows(
             st.session_state.get("varo_recommendations") or [],
             include_route_id=False, include_status=False, include_vhs=True,
@@ -344,12 +346,12 @@ def render_recommendations_page() -> None:
 
     render_excluded_candidates(st, _pipeline_result())
 
-    render_section_header(st, "선택 후보 상세", "")
+    render_section_header(st, "선택한 이동 상세", "")
     selected = _render_selection(filtered)
     render_recommendation_summary(st, selected)
 
     record = ledger_record(_pipeline_result(), (selected or {}).get("route_id"))
-    render_section_header(st, "추천 판단 근거", "")
+    render_section_header(st, "이 이동을 권장하는 이유", "")
     detail = _reason_detail(selected)
     sentences = (record.get("recommendation_reasons") if record else None) or detail.get("sentences") or [
         str((selected or {}).get("reason") or "추천 사유가 없습니다.")
@@ -359,7 +361,7 @@ def render_recommendations_page() -> None:
     render_quantity_basis(st, record)
     if (selected or {}).get("quantity_adjusted"):
         st.caption(
-            f"후보 권장 {(selected or {}).get('recommended_qty'):,.0f}개 중 실제 실행 수량은 "
+            f"원래 권장 {(selected or {}).get('recommended_qty'):,.0f}개 중 실제 실행 수량은 "
             f"{(selected or {}).get('planned_qty'):,.0f}개입니다."
         )
     render_source_locations(st, record)

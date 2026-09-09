@@ -443,7 +443,7 @@ class WorkspaceIntegrationRenderTests(unittest.TestCase):
         app = self._app()
         labels = [b.label for b in app.sidebar.button]
         self.assertEqual(labels[:4], [menu_label(item) for item in PRIMARY_MENU_ITEMS])
-        self.assertIn("예전 화면", {item.label for item in app.sidebar.expander})
+        self.assertIn("보조 화면", {item.label for item in app.sidebar.expander})
         # 기술 용어는 메뉴에 노출하지 않는다.
         for banned in ("Workspace", "Optimizer", "VHS", "MILP", "DQN", "Execution Plan"):
             self.assertNotIn(banned, " ".join(labels))
@@ -550,7 +550,7 @@ class WorkspaceIntegrationRenderTests(unittest.TestCase):
 
     def test_the_execution_history_flow_stays_on_the_workspace(self):
         app = self._app()
-        self.assertIn("record_execution_plan", {b.key for b in app.button})
+        self.assertIn("ws_record_plan", {b.key for b in app.button})
         self.assertIn("실행 기록", self._blob(app))
 
     # -------------------------------------------------------- J. algorithm

@@ -7,11 +7,12 @@ The menu a user reads is four entries, named after the work rather than the code
     분석 및 검증         research-grade validation detail
     운영 시뮬레이션      the moving-truck picture, a different job to the Workspace
 
-``추천 실행`` and ``경로 상세`` are now fully covered by the Workspace, so they are
-demoted: the routes still exist and still render (internal links, bookmarks and
-tests keep working), but they sit behind a folded 예전 화면 group instead of
-competing with the four screens above. Route keys stay in Korean and unchanged —
-only the *label* differs from the key, via :data:`MENU_LABELS`.
+``추천 실행`` and ``경로 상세`` are now fully covered by the 재고 운영 screen, so they
+are demoted: the routes still exist and still render (internal links and tests
+keep working), but they sit behind a folded 보조 화면 group instead of competing
+with the four screens above. Route keys stay in Korean and unchanged — only the
+*label* differs from the key, via :data:`MENU_LABELS`, so the menu reads in the
+current product vocabulary while the routes stay compatible.
 """
 from __future__ import annotations
 
@@ -33,19 +34,21 @@ MENU_ITEMS = [*PRIMARY_MENU_ITEMS, *LEGACY_MENU_ITEMS]
 # Route key → what the user reads. Only entries that differ are listed.
 MENU_LABELS = {
     SIMULATION_MENU: "운영 시뮬레이션",
+    "추천 실행": "연구용 목록",
+    "경로 상세": "경로 지도",
 }
 
 MENU_HINTS = {
-    WORKSPACE_MENU: "오늘 권장 이동을 확인하고 실행계획을 기록합니다.",
+    WORKSPACE_MENU: "오늘 권장 이동을 확인하고 실행 계획을 기록·내보냅니다.",
     "데이터 관리": "파일 업로드 · 검사 · 적용",
     "분석 및 검증": "연구용 상세 검증 지표",
-    SIMULATION_MENU: "추천 경로의 이동 흐름을 애니메이션으로 확인합니다.",
-    "추천 실행": "재고 운영 화면으로 대체된 예전 목록 화면입니다.",
-    "경로 상세": "재고 운영 세부 정보로 대체된 예전 상세 화면입니다.",
+    SIMULATION_MENU: "권장 이동의 흐름을 애니메이션으로 확인합니다.",
+    "추천 실행": "전체 목록과 점수 비교를 함께 보는 연구용 화면입니다.",
+    "경로 상세": "지도와 이동 단계를 확인하는 화면입니다.",
 }
 
-LEGACY_GROUP_LABEL = "예전 화면"
-LEGACY_GROUP_NOTE = "재고 운영 화면이 대신하는 화면입니다. 기존 링크 호환을 위해 남겨둡니다."
+LEGACY_GROUP_LABEL = "보조 화면"
+LEGACY_GROUP_NOTE = "일상 작업은 재고 운영에서 끝납니다. 지도와 연구용 목록이 필요할 때만 엽니다."
 
 
 def menu_label(menu: str) -> str:

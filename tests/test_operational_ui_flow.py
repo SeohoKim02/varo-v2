@@ -114,7 +114,7 @@ class OperationalUiFlowTests(unittest.TestCase):
     # --- 추천 실행 ---------------------------------------------------------- #
     def test_analysis_does_not_start_on_its_own(self):
         self.assertEqual(self.before_run_snapshot["recommendation_count"], 0)
-        self.assertIn("추천 실행", self.before_run_snapshot["button_labels"])
+        self.assertIn("분석 실행", self.before_run_snapshot["button_labels"])
 
     def test_clicking_run_produces_recommendations(self):
         self.assertGreater(self.after_run_snapshot["recommendation_count"], 0)

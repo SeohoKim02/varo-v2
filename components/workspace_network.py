@@ -74,6 +74,10 @@ DC_NAME_FONT = 18.5
 DC_NAME_FONT_MIN = 15.0
 EDGE_FONT = 17.0
 EDGE_CHIP_HEIGHT = 23.0
+#: Upper bound for the 과잉/부족/정상 pill inside a store node. The pill height
+#: (node height × 0.35) usually decides the size; this only stops it growing on
+#: very tall nodes.
+STATE_PILL_FONT_MAX = 16.5
 
 
 def _safe(value: Any) -> str:
@@ -413,8 +417,12 @@ def _store_svg(node: Mapping[str, Any], role: str) -> str:
     )
     # The state pill scales with the node so its text stays readable instead of
     # sitting at a fixed 9px that vanished once the SVG was scaled to a column.
-    pill_h = max(13.0, min(19.0, height * 0.35))
-    pill_font = round(min(15.0, pill_h * 0.84), 1)
+    # The cap was measured, not guessed: at 1366 with the sidebar expanded the
+    # centre column is ~654px, a 0.70x downscale, and the old 15.0 cap landed the
+    # pill at 10.4px on screen. The pill box grows with the font (pill_w reads the
+    # same value and is still clamped to the node), so nothing overflows.
+    pill_h = max(13.0, min(20.0, height * 0.35))
+    pill_font = round(min(STATE_PILL_FONT_MAX, pill_h * 0.84), 1)
     pill_w = max(46.0, min(width - 8.0, _glyph_width(state, pill_font) + 16.0))
     pill_top = height / 2 - pill_h - 3.0
     return (

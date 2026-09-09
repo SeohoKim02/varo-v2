@@ -34,7 +34,10 @@ from components.candidate_detail import (
     render_quantity_basis,
     render_source_locations,
 )
-from components.execution_history_panel import render_execution_history_panel
+from components.execution_history_panel import (
+    render_execution_history_panel,
+    render_record_plan_action,
+)
 from components.state_banner import render_state_action_card, render_state_summary_card
 from components.tables import render_html_table
 from components.workspace_network import (
@@ -42,6 +45,8 @@ from components.workspace_network import (
     SCOPE_OPTIONS,
     build_workspace_network,
 )
+from services import export_service
+from styles import WORKSPACE_MAIN_ROW_KEY
 from services.data_application import run_applied_analysis
 from services.execution_history import execution_history_metrics
 from services.workspace_view import (
@@ -69,7 +74,10 @@ from services.workspace_view import (
 
 DATA_PAGE = "데이터 관리"
 VALIDATION_PAGE = "분석 및 검증"
-ROUTE_DETAIL_PAGE = "경로 상세"
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+# Streamlit turns this into a `st-key-…` class on the three-column row; styles.py
+# owns the constant and the matching narrow-desktop rules.
+MAIN_ROW_KEY = WORKSPACE_MAIN_ROW_KEY
 
 # The plan list is one scrolling radio group, so the row budget below caps its
 # *height*, not the number of selectable moves: 50 moves stay one click away.
@@ -120,7 +128,7 @@ def _render_header(view: Mapping[str, Any]) -> None:
     # 첫 화면에서 네트워크가 그만큼 아래로 밀려나므로 제목 줄만 남긴다.
     st.markdown(
         '<div class="v2-wrap ws-header">'
-        '<div class="ws-header-title">재고 운영 Workspace</div>'
+        '<div class="ws-header-title">재고 운영</div>'
         "</div>",
         unsafe_allow_html=True,
     )
@@ -196,7 +204,7 @@ def _render_filters(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         1 for key in ("ws_filter_source", "ws_filter_target", "ws_filter_route_type")
         if str(st.session_state.get(key) or ALL) != ALL
     ) + (1 if st.session_state.get("ws_only_attention") else 0)
-    label = "조건 더 좁히기" + (f" ({narrowed}개 적용 중)" if narrowed else "")
+    label = "추가 조건" + (f" ({narrowed}개 적용 중)" if narrowed else "")
     with st.expander(label, expanded=bool(narrowed)):
         filters["source"] = st.selectbox("출발 점포", options["source"], key="ws_filter_source")
         filters["target"] = st.selectbox("도착 점포", options["target"], key="ws_filter_target")
@@ -258,6 +266,43 @@ def _render_plan_list(items: Sequence[Mapping[str, Any]], selected_id: Any) -> N
             on_change=_pick_from_list,
         )
     st.caption("선택한 이동이 네트워크·오른쪽 패널·아래 탭에 함께 반영됩니다.")
+
+
+def _render_export(items: Sequence[Mapping[str, Any]]) -> None:
+    """실행 계획 내보내기 — folded away, right where the list it exports lives.
+
+    A download must never cost a page change, but it is also not the everyday
+    action, so it sits under the plan list in a folded 내보내기 area rather than
+    in the 오늘 권장 이동 panel (that panel carries the decision, not tools).
+
+    What leaves here is the *execution plan* as the list currently shows it —
+    현재 필터가 적용된 순서 그대로, 실행 수량은 planned_qty. Nothing is re-sorted
+    and nothing is recomputed.
+    """
+    if not items:
+        return
+    with st.expander(f"내보내기 ({len(items)}건)", expanded=False):
+        left, right = st.columns(2, gap="small")
+        left.download_button(
+            "CSV",
+            data=export_service.execution_plan_csv_bytes(items),
+            file_name=export_service.execution_plan_filename("csv"),
+            mime="text/csv",
+            width="stretch",
+            key="ws_export_plan_csv",
+        )
+        right.download_button(
+            "Excel",
+            data=export_service.execution_plan_excel_bytes(items),
+            file_name=export_service.execution_plan_filename("xlsx"),
+            mime=XLSX_MIME,
+            width="stretch",
+            key="ws_export_plan_xlsx",
+        )
+        st.caption(
+            "화면에 보이는 실행 계획을 그대로 내려받습니다. 수량은 실행 수량 기준이며, "
+            "아직 수집 중인 운송 정보는 빈칸 또는 미확보로 남습니다."
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -355,7 +400,7 @@ def _render_execution_panel(view: Mapping[str, Any], items: Sequence[Mapping[str
     )
     if selected.get("quantity_adjusted"):
         st.caption(
-            f"후보 권장 {qty_text(selected.get('recommended_qty'))} 중 "
+            f"원래 권장 {qty_text(selected.get('recommended_qty'))} 중 "
             f"{qty_text(quantity)}로, 다른 이동과 재고를 함께 고려해 조정했습니다."
         )
 
@@ -379,6 +424,10 @@ def _render_execution_panel(view: Mapping[str, Any], items: Sequence[Mapping[str
     # 세부 재고·비용 값은 아래 '세부 정보' 탭에 모아 둔다. 오른쪽 패널은 실행 판단에
     # 필요한 것만 크게 보여주는 자리다.
     st.caption("재고·비용 세부 값은 아래 세부 정보 탭에서 확인합니다.")
+
+    # 결정을 내린 자리에서 바로 남길 수 있어야 하므로 기록 버튼 하나만 둔다. 실제
+    # 실행 결과를 채우는 form은 아래 실행 이력 탭에 그대로 있다.
+    render_record_plan_action(view.get("plan"), key="ws_record_plan")
 
 
 # --------------------------------------------------------------------------- #
@@ -440,7 +489,7 @@ def _render_validation_tab(view: Mapping[str, Any]) -> None:
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         comparison = (view.get("pipeline") or {}).get("plan_comparison") or {}
         labels = {
-            "independent_candidates": "후보를 따로 더한 값",
+            "independent_candidates": "이동을 따로 더한 값",
             "constrained_greedy": "단순 이익 순 계획",
             "vhs_optimized_plan": "현재 실행계획",
         }
@@ -523,12 +572,6 @@ def _render_details_tab(view: Mapping[str, Any]) -> None:
         with st.expander(f"실행계획에 포함되지 않은 이동 ({len(rows)}건)", expanded=False):
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     render_excluded_candidates(st, view.get("pipeline"))
-    # 경로 상세는 재고 운영 화면이 대신하지만, 지도와 이동 단계 화면은 그대로 남아
-    # 있으므로 여기서 열 수 있게 둔다.
-    st.button(
-        "예전 경로 상세 화면 열기", key="ws_open_route_detail",
-        on_click=_navigate, args=(ROUTE_DETAIL_PAGE,),
-    )
 
 
 # 실행 판단 → 세부 → 검증 → 기록 순서. 판단에 쓰는 대안 비교가 먼저, 기록은 마지막.
@@ -544,7 +587,11 @@ def _render_detail_tabs(view: Mapping[str, Any]) -> None:
     with tabs[2]:
         _render_validation_tab(view)
     with tabs[3]:
-        render_execution_history_panel(view.get("plan") or {})
+        # 기록 버튼은 오른쪽 패널에 있으므로 여기서는 실제 실행 결과 입력만 맡는다.
+        st.caption(
+            "오른쪽 오늘 권장 이동의 '이 계획 기록'을 누르면 이 탭에서 실제 실행 결과를 입력할 수 있습니다."
+        )
+        render_execution_history_panel(view.get("plan") or {}, show_record_action=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -631,7 +678,12 @@ def render_workspace_page() -> None:
     # Measured on real 1366 / 1600 / 1920 screens: the centre still needs ~48% of
     # the row for the network text to stay above ~10px once the SVG is scaled to
     # the column, and the left column needs ~25% to hold a readable plan list.
-    left, centre, right = st.columns([1.25, 2.9, 1.45], gap="medium")
+    #
+    # The keyed container is the CSS hook styles.py uses to re-balance these three
+    # columns below ~1450px, where an expanded sidebar would otherwise squeeze the
+    # network until its labels drop under 10px (see MAIN_ROW_KEY there).
+    with st.container(key=MAIN_ROW_KEY):
+        left, centre, right = st.columns([1.25, 2.9, 1.45], gap="medium")
     with left:
         _render_status_block(view)
         filters = _render_filters(items)
@@ -657,6 +709,7 @@ def render_workspace_page() -> None:
     # the filters — the list, the network and the right panel are one selection.
     with left:
         _render_plan_list(visible, resolved if visible else None)
+        _render_export(visible)
 
     with centre:
         if visible:

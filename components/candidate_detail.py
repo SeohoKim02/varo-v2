@@ -79,7 +79,7 @@ def render_excluded_candidates(st, pipeline: Mapping[str, Any] | None, limit: in
     excluded = [r for r in records if r.get("blocks_recommendation") or r.get("status") == "확인 필요"]
     if not excluded:
         return
-    with st.expander(f"추천에서 제외된 후보 {len(excluded)}건", expanded=False):
+    with st.expander(f"실행 계획에서 제외된 이동 {len(excluded)}건", expanded=False):
         rows = []
         for record in excluded[:limit]:
             reference = _first_traceable(record.get("source_references") or [])
@@ -95,7 +95,7 @@ def render_excluded_candidates(st, pipeline: Mapping[str, Any] | None, limit: in
         if len(excluded) > limit:
             st.caption(f"전체 {len(excluded)}건 중 상위 {limit}건을 표시했습니다. 전체는 CSV로 확인하세요.")
         st.download_button(
-            "제외 후보 검토 CSV",
+            "제외된 이동 검토 CSV",
             data=review_candidates_csv_bytes(records),
             file_name="varo_v2_후보검토.csv",
             mime="text/csv",

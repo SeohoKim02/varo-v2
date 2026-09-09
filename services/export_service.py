@@ -138,6 +138,140 @@ def recommendations_export_frame(
     return pd.DataFrame(rows, columns=columns)
 
 
+# --------------------------------------------------------------------------- #
+# 사용자 실행 계획 내보내기 (재고 운영 화면)
+# --------------------------------------------------------------------------- #
+# The operator export. Deliberately *not* the research export above: it carries
+# only the fields a person needs to hand a move to the floor, and its quantity is
+# the execution quantity (planned_qty), never the candidate's recommended_qty.
+#
+# Internal identifiers (route_id · candidate_id · data_signature), score
+# components, solver values and session keys are not part of this frame. The
+# research export (:func:`recommendations_export_frame`) keeps them.
+EXECUTION_PLAN_SHEET = "실행계획"
+EXECUTION_PLAN_FILE_STEM = "varo_execution_plan"
+
+# 실제 물류 사실이 아직 수집 중일 때 쓰는 표기. 0/0.0으로 내보내지 않는다.
+NOT_COLLECTED = "미확보"
+
+_EXECUTION_PLAN_COLUMNS: tuple[str, ...] = (
+    "순위",
+    "출발 점포",
+    "도착 점포",
+    "상품",
+    "실행 수량",
+    "경로",
+    "경유 DC",
+    "예상 비용",
+    "예상 절감",
+    "예상 순효과",
+    "안정성",
+    "주요 주의",
+    "데이터 기준",
+)
+
+
+def _plan_text(value: Any) -> str:
+    text = str(value if value is not None else "").strip()
+    return text
+
+
+def _plan_number(item: Mapping[str, Any], *keys: str) -> Any:
+    """First real number among ``keys``; missing stays empty, never 0."""
+    for key in keys:
+        value = item.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number != number or number in (float("inf"), float("-inf")):  # NaN / inf
+            continue
+        return int(round(number)) if float(number).is_integer() else number
+    return ""
+
+
+def _plan_route(item: Mapping[str, Any]) -> str:
+    return {"DIRECT": "직접 이동", "VIA_DC": "DC 경유"}.get(
+        _plan_text(item.get("route_type")).upper(), "확인 필요"
+    )
+
+
+def _plan_basis(item: Mapping[str, Any]) -> str:
+    """The one user-facing provenance field (§데이터 기준).
+
+    Says what the row's numbers rest on, and — because real distance, travel
+    time, vehicle capacity and invoiced transport cost are still being
+    collected — whether those facts were available. It flips to 확보 on its own
+    once the ``actual_*`` fields carry values; nothing is assumed here.
+    """
+    from services.workspace_view import LOGISTICS_FIELDS
+
+    collected = any(
+        _plan_number(item, *actual_keys) != ""
+        for _, actual_keys, _, _ in LOGISTICS_FIELDS
+    )
+    suffix = "실제 운송정보 확보" if collected else f"실제 운송정보 {NOT_COLLECTED}"
+    return f"적용 데이터 기준 실행 계획 · {suffix}"
+
+
+def _plan_cautions(item: Mapping[str, Any]) -> str:
+    from services.workspace_view import move_risks
+
+    return " · ".join(move_risks(item)[:2])
+
+
+def execution_plan_export_frame(
+    items: Sequence[Mapping[str, Any]],
+) -> pd.DataFrame:
+    """The 실행 계획 a user acts on, in plan order, with 실행 수량 = planned_qty.
+
+    Plan order is Varo's execution priority, so this function never re-sorts:
+    ``순위`` is the position in the list it was handed. Values the data cannot
+    supply stay blank — an empty cell, not a zero.
+    """
+    from services.workspace_view import action_qty
+
+    rows: list[dict[str, Any]] = []
+    for index, item in enumerate(items or [], start=1):
+        quantity = action_qty(item)
+        rows.append({
+            "순위": index,
+            "출발 점포": _plan_text(item.get("source_name")) or _plan_text(item.get("source_id")) or "-",
+            "도착 점포": _plan_text(item.get("target_name")) or _plan_text(item.get("target_id")) or "-",
+            "상품": _plan_text(item.get("product_name")) or _plan_text(item.get("product_id")) or "-",
+            "실행 수량": "" if quantity is None else int(round(quantity)),
+            "경로": _plan_route(item),
+            "경유 DC": _plan_text(item.get("dc_name")) or _plan_text(item.get("dc_id")) or "경유 없음",
+            "예상 비용": _plan_number(item, "planned_cost", "estimated_cost"),
+            "예상 절감": _plan_number(item, "planned_expected_saving", "expected_saving"),
+            "예상 순효과": _plan_number(item, "planned_net_benefit", "net_benefit"),
+            "안정성": _plan_text(item.get("robustness_status")) or "확인 필요",
+            "주요 주의": _plan_cautions(item),
+            "데이터 기준": _plan_basis(item),
+        })
+    return pd.DataFrame(rows, columns=list(_EXECUTION_PLAN_COLUMNS))
+
+
+def execution_plan_filename(extension: str, today: Any = None) -> str:
+    """``varo_execution_plan_YYYYMMDD.csv`` — a name, not a candidate dump."""
+    from datetime import date
+
+    stamp = today or date.today()
+    return f"{EXECUTION_PLAN_FILE_STEM}_{stamp.strftime('%Y%m%d')}.{extension.lstrip('.')}"
+
+
+def execution_plan_csv_bytes(items: Sequence[Mapping[str, Any]]) -> bytes:
+    """UTF-8 BOM CSV — the same Excel-compatible encoding the app already uses."""
+    frame = _assert_dqn_free(execution_plan_export_frame(items))
+    return frame.to_csv(index=False).encode("utf-8-sig")
+
+
+def execution_plan_excel_bytes(items: Sequence[Mapping[str, Any]]) -> bytes:
+    return _write_excel({EXECUTION_PLAN_SHEET: execution_plan_export_frame(items)})
+
+
 def _frame(rows: Any, columns: Sequence[str] | None = None) -> pd.DataFrame:
     if isinstance(rows, pd.DataFrame):
         frame = rows.copy()

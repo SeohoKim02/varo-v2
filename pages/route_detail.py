@@ -127,7 +127,7 @@ def _render_core_kpis(route: dict) -> None:
     )
     if route.get("quantity_adjusted"):
         st.caption(
-            f"후보 권장 {format_number(route.get('recommended_qty'), '개')}에서 "
+            f"원래 권장 {format_number(route.get('recommended_qty'), '개')}에서 "
             f"실행 수량 {format_number(route.get('planned_qty'), '개')}로 조정되었습니다. "
             "다른 추천과 출발 재고·도착 필요 수량을 함께 배분한 결과입니다."
         )
@@ -225,7 +225,7 @@ def _pipeline_result() -> dict:
 
 
 def _render_reasons(route: dict) -> None:
-    render_section_header(st, "추천 판단 근거", "")
+    render_section_header(st, "이 이동을 권장하는 이유", "")
     record = ledger_record(_pipeline_result(), route.get("route_id"))
     detail = _reason_detail(route)
     sentences = (record.get("recommendation_reasons") if record else None) or detail.get("sentences") or [
@@ -270,7 +270,7 @@ def render_route_detail_page() -> None:
     data = st.session_state.get("varo_data")
     recommendations = _recommendations()
     data_available = has_app_data(data, recommendations)
-    render_page_header(st, "경로 상세", "선택한 권장 이동의 실제 실행 수량과 경로를 확인합니다.")
+    render_page_header(st, "경로 지도", "선택한 권장 이동의 지도와 이동 단계를 확인합니다.")
     if not data_available:
         render_empty_state(st, "추천 경로가 선택되면 지도가 표시됩니다.")
         return

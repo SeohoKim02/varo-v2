@@ -117,9 +117,9 @@ class PageRenderTests(unittest.TestCase):
         )
         for menu in MENUS:
             self.assertIn(f"nav_{menu}", set(sidebar_nav.values()))
-        self.assertIn("예전 화면", {item.label for item in app.sidebar.expander})
+        self.assertIn("보조 화면", {item.label for item in app.sidebar.expander})
         button_labels = {b.label for b in app.button}
-        for removed_btn in ("추천 실행 보기", "경로 상세 보기", "추천 상세 보기"):
+        for removed_btn in ("추천 실행 보기", "경로 상세 보기", "추천 상세 보기", "예전 경로 상세 화면 열기"):
             self.assertNotIn(removed_btn, button_labels)
         # the top toolbar keeps only the data-replace toggle
         self.assertIn("데이터 교체", button_labels)
@@ -212,7 +212,7 @@ class PageRenderTests(unittest.TestCase):
         self.assertFalse(app.exception)
         blob = self._markdown_blob(app)
         self.assertIn("추천할 이동이 없습니다", blob)
-        self.assertIn("후보", blob)                 # a plain cause sentence
+        self.assertRegex(blob, r"\d+건을 함께 검토")   # a plain cause sentence
         self.assertNotIn("예상 순효과", blob)
         for internal in ("candidate_id", "data_signature", "reason_code", "Traceback"):
             self.assertNotIn(internal, blob)
@@ -225,7 +225,7 @@ class PageRenderTests(unittest.TestCase):
         workspace_blob = self._markdown_blob(app)
         self.assertNotIn("분석 결과가 없습니다", workspace_blob)
         labels = {item.label for item in app.expander}
-        self.assertTrue(any("추천에서 제외된 후보" in label for label in labels))
+        self.assertTrue(any("실행 계획에서 제외된 이동" in label for label in labels))
 
     def test_validation_no_data_shows_state_card_not_empty_tabs(self):
         app = AppTest.from_file(APP_PATH, default_timeout=90)
@@ -262,7 +262,7 @@ class PageRenderTests(unittest.TestCase):
         for internal in ("candidate_id", "data_signature", "reason_code", "Traceback", "status_code"):
             self.assertNotIn(internal, blob)
         expander_labels = {e.label for e in app.expander}
-        self.assertTrue(any("추천에서 제외된 후보" in label for label in expander_labels))
+        self.assertTrue(any("실행 계획에서 제외된 이동" in label for label in expander_labels))
         button = next(b for b in app.button if b.key == "validation_primary_action")
         self.assertEqual(button.label, "제외 이유 확인")
 
@@ -356,7 +356,7 @@ class PageRenderTests(unittest.TestCase):
         app.session_state["current_menu"] = "추천 실행"
         app.run()
         self.assertFalse(app.exception)
-        self.assertIn("추천 후보", self._markdown_blob(app))
+        self.assertIn("오늘 실행할 이동", self._markdown_blob(app))
         source = (Path(APP_PATH).parent / "pages" / "recommendations.py").read_text(encoding="utf-8")
         self.assertIn('"현재 추천 CSV"', source)
         self.assertIn('"현재 추천 Excel"', source)
@@ -433,7 +433,7 @@ class PageRenderTests(unittest.TestCase):
         app.run()
         self.assertFalse(app.exception)
         labels = {item.label for item in app.expander}
-        self.assertIn("추천에서 제외된 후보 1건", labels)
+        self.assertIn("실행 계획에서 제외된 이동 1건", labels)
         blob = self._markdown_blob(app)
         self.assertNotIn("C-secret99-deadbeef", blob)  # internal id never on screen
         self.assertNotIn("blocked_move", blob)          # internal status code hidden
@@ -471,7 +471,7 @@ class PageRenderTests(unittest.TestCase):
             app.run()
             self.assertFalse(app.exception, msg=f"{menu}: {list(app.exception)}")
             blob = self._markdown_blob(app)
-            self.assertIn("추천 판단 근거", blob)
+            self.assertIn("이 이동을 권장하는 이유", blob)
 
     def _generated_state(self):
         from services.data_application import load_and_apply
@@ -508,7 +508,7 @@ class PageRenderTests(unittest.TestCase):
         app.run()
         self.assertFalse(app.exception)
         labels = {item.label for item in app.expander}
-        self.assertTrue(any("추천에서 제외된 후보" in label for label in labels))
+        self.assertTrue(any("실행 계획에서 제외된 이동" in label for label in labels))
         # the excluded candidate's source stock row is traceable to the original file
         excluded = pipeline["excluded_candidates"][0]
         stock_ref = next(r for r in excluded["source_references"] if r["role"] == "출발 재고")
@@ -740,7 +740,7 @@ class PageRenderTests(unittest.TestCase):
         app.session_state["current_menu"] = "추천 실행"
         app.run()
         self.assertFalse(app.exception)
-        self.assertIn("추천 실행 전입니다", " ".join(item.value for item in app.info))
+        self.assertIn("분석 실행 전입니다", " ".join(item.value for item in app.info))
         self.assertIn("run_applied_analysis", {button.key for button in app.button})
 
     def test_data_management_warning_pending_shows_exclude_button(self):

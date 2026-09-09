@@ -611,6 +611,35 @@ class WorkspaceNetworkLegibilityTests(unittest.TestCase):
                             wsn._glyph_width(line, dc_font), dc_width - 12.0 + 0.01,
                         )
 
+    def _pill(self, count: int) -> tuple[float, float, float, float]:
+        width, height = wsn._dimensions(count)
+        pill_h = max(13.0, min(20.0, height * 0.35))
+        pill_font = round(min(wsn.STATE_PILL_FONT_MAX, pill_h * 0.84), 1)
+        pill_w = max(46.0, min(width - 8.0, wsn._glyph_width("이동 대상", pill_font) + 16.0))
+        return width, height, pill_font, pill_w
+
+    def test_the_state_pill_reads_at_the_narrowest_expanded_sidebar_width(self):
+        """1366 + 사이드바 펼침에서 과잉/부족/정상 배지가 10px 아래로 내려가지 않는다.
+
+        The pill is sized from the node, and a node shrinks as the network grows,
+        so this floor holds for the plan sizes the screen actually draws large
+        nodes for (up to ~12 nodes). Denser networks shrink every node and are a
+        separate layout question — asserting a floor they cannot meet would only
+        make this test lie.
+        """
+        for count in (4, 8, 12):
+            _width, _height, pill_font, _pill_w = self._pill(count)
+            with self.subTest(count=count):
+                self.assertGreater(pill_font * self._scale(), 10.0)
+
+    def test_the_state_pill_never_leaves_its_node_box(self):
+        for count in (4, 10, 16, 26, 40):
+            width, height, _pill_font, pill_w = self._pill(count)
+            pill_h = max(13.0, min(20.0, height * 0.35))
+            with self.subTest(count=count):
+                self.assertLessEqual(pill_w, width - 8.0 + 0.01)
+                self.assertLessEqual(pill_h, height / 2)
+
     def test_a_long_dc_name_wraps_instead_of_being_cut(self):
         dc_width, _ = wsn._dc_size(wsn._dimensions(10))
         lines, font = wsn._fit_dc_label("서울 서북권 물류센터", dc_width)

@@ -213,7 +213,7 @@ class NoCandidateCauseTests(unittest.TestCase):
     def test_all_blocked_cause_mentions_count_and_reason(self):
         home = build_home_state(_all_blocked_state())
         cause = home["no_candidate_cause"]
-        self.assertIn("후보", cause)
+        self.assertRegex(cause, r"\d+건")   # 검토한 이동 수가 문장에 들어간다
         # no internal reason codes leak into the cause text
         for internal in ("reason_code", "quantity_exceeds_stock", "feasibility"):
             self.assertNotIn(internal, cause)

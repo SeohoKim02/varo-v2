@@ -37,6 +37,10 @@ BANNED_TOKENS = (
     "candidate_id", "data_signature", "scipy", "milp", "replay buffer", "epsilon",
     "Traceback", "session_state", "reason_code", "status_code", "PostgreSQL",
     "SQLite", "schema version", "varo_hybrid_score", "execution-plan-1.0",
+    # §용어 통일: 알고리즘 이름과 옛 표현은 사용자 화면에 나오지 않는다. 이 목록은
+    # 실제 브라우저에서 오늘 권장 이동 패널의 이유 문장이 "재계산 VHS…후보"를
+    # 그대로 보여준 뒤에 넓혔다.
+    "VHS", "Greedy", "Pareto", "DQN", "추천 후보", "candidate", "Workspace",
 )
 
 
@@ -81,7 +85,7 @@ class WorkspaceRenderTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state["current_menu"], WORKSPACE)
         blob = self._blob(app)
-        self.assertIn("재고 운영 Workspace", blob)
+        self.assertIn("재고 운영", blob)
         self.assertIn("현재 적용된 데이터가 없습니다", blob)
         # No result numbers are fabricated for an empty workspace.
         for hidden in ("오늘 실행 이동", "예상 순효과", "오늘 권장 이동"):
@@ -167,7 +171,7 @@ class WorkspaceRenderTests(unittest.TestCase):
         self.assertIn("추천할 이동이 없습니다", blob)
         self.assertNotIn("오늘 권장 이동", blob)
         labels = {item.label for item in app.expander}
-        self.assertTrue(any("추천에서 제외된 후보" in label for label in labels))
+        self.assertTrue(any("실행 계획에서 제외된 이동" in label for label in labels))
 
     # ------------------------------------------------------------ ready state
     def test_ready_workspace_shows_kpis_network_and_execution_panel(self):
@@ -175,7 +179,7 @@ class WorkspaceRenderTests(unittest.TestCase):
         self.assertFalse(app.exception)
         blob = self._blob(app)
         for required in (
-            "재고 운영 Workspace",
+            "재고 운영",
             "오늘 실행 이동", "총 이동 수량", "예상 순효과", "주의 필요",
             "재고 이동 네트워크",
             "오늘 권장 이동",
@@ -325,7 +329,8 @@ class WorkspaceRenderTests(unittest.TestCase):
         self.assertIn("조건이 달라지면", blob)          # what-if, under 대안 비교
         self.assertIn("데이터 상태", blob)              # 세부정보
         self.assertIn("실행 기록", blob)                # 실행 이력 (reused panel)
-        self.assertIn("record_execution_plan", {b.key for b in app.button})
+        # 기록 버튼은 오른쪽 오늘 권장 이동 패널에 있고, 실행 이력 탭은 결과 입력을 맡는다.
+        self.assertIn("ws_record_plan", {b.key for b in app.button})
         columns = set()
         for element in app.dataframe:
             try:
@@ -353,27 +358,35 @@ class WorkspaceRenderTests(unittest.TestCase):
         self.assertNotIn("0km", self._blob(app))
 
     # ------------------------------------------------------------- navigation
-    def test_workspace_links_out_to_the_detail_screens(self):
+    def test_workspace_links_out_only_to_screens_with_a_separate_job(self):
+        """데이터 관리 · 분석 및 검증만 남는다: 재고 운영에서 할 수 있는 일은
+        페이지 이동 버튼으로 만들지 않는다."""
         for key, expected in (
             ("ws_go_data", "데이터 관리"),
-            ("ws_open_route_detail", "경로 상세"),
             ("ws_go_validation", "분석 및 검증"),
         ):
             app = self._ready_app()
             next(b for b in app.button if b.key == key).click().run()
             self.assertFalse(app.exception, msg=f"{key}: {list(app.exception)}")
             self.assertEqual(app.session_state["current_menu"], expected)
+        app = self._ready_app()
+        keys = {b.key for b in app.button}
+        self.assertNotIn("ws_open_route_detail", keys)
+        for label in (b.label for b in app.button):
+            self.assertNotIn("경로 상세", label)
+            self.assertNotIn("추천 실행", label)
 
-    def test_selection_made_in_the_workspace_survives_into_route_detail(self):
+    def test_selection_made_in_the_workspace_survives_into_the_detail_route(self):
         app = self._ready_app()
         first = str(app.session_state["selected_route_id"])
         other = next(item for item in self.plan_items if str(item["route_id"]) != first)
         self._plan_list(app).set_value(str(other["route_id"])).run()
         chosen = str(app.session_state["selected_route_id"])
         self.assertNotEqual(chosen, first)
-        next(b for b in app.button if b.key == "ws_open_route_detail").click().run()
+        # 호환용 route는 그대로 열리고, 선택도 그대로 따라간다.
+        app.session_state["current_menu"] = "경로 상세"
+        app.run()
         self.assertFalse(app.exception)
-        self.assertEqual(app.session_state["current_menu"], "경로 상세")
         self.assertEqual(app.session_state["selected_route_id"], chosen)
 
     # -------------------------------------------------------------- hygiene
@@ -397,7 +410,7 @@ class WorkspaceRenderTests(unittest.TestCase):
         them. The duplicate chip also read '분석 분석 완료' on screen."""
         app = self._ready_app()
         blob = self._blob(app)
-        self.assertIn('class="ws-header-title">재고 운영 Workspace<', blob)
+        self.assertIn('class="ws-header-title">재고 운영<', blob)
         self.assertNotIn('class="ws-header-meta"', blob)
         self.assertNotIn("분석 분석", blob)
         self.assertEqual(blob.count("데이터 적용 완료"), 1)

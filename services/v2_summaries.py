@@ -184,9 +184,9 @@ def recommendation_reason(
     if vhs is not None and vhs_values:
         median = vhs_values[len(vhs_values) // 2]
         if vhs >= median:
-            sentences.append("재계산 VHS가 상위권이라 우선 검토할 수 있는 후보입니다.")
+            sentences.append("종합 판단 점수가 상위권이라 먼저 실행할 만한 이동입니다.")
         else:
-            sentences.append("재계산 VHS는 중하위권이지만 절감액·경로 조건을 함께 검토할 수 있습니다.")
+            sentences.append("종합 판단 점수는 중하위권이지만 절감액과 경로 조건을 함께 볼 수 있습니다.")
     if saving and saving > 0:
         sentences.append(f"예상 절감액이 약 {saving:,.0f}원으로 재배치 효과가 기대됩니다.")
     if route_type == "VIA_DC":
@@ -200,7 +200,7 @@ def recommendation_reason(
     if "재배치" in promotion:
         sentences.append("프로모션 처리보다 재배치 비용이 낮아 재배치가 유리합니다.")
     if rec.get("strategy_match"):
-        sentences.append("Greedy 비교 결과와도 전략이 일치합니다.")
+        sentences.append("다른 판단 기준으로 계산해도 같은 결론입니다.")
     grade = rec.get("recommendation_grade")
     if grade and quantity:
         sentences.append(f"추천 신뢰도 등급은 '{grade}'이며 이동 수량은 {quantity:,.0f}개입니다.")

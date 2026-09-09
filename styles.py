@@ -23,9 +23,15 @@ DESIGN_TOKENS = {
     "shadow": "0 6px 18px rgba(17, 24, 39, 0.05)",
 }
 
+# Streamlit renders ``st.container(key=X)`` with a ``st-key-X`` class. The 재고 운영
+# three-column row carries this key so the narrow-desktop rules below can find it;
+# pages/workspace.py imports the same constant, so the hook cannot drift.
+WORKSPACE_MAIN_ROW_KEY = "ws_main_row"
+
 
 def apply_global_styles() -> None:
     """Apply scoped V2 styles."""
+    main_row = WORKSPACE_MAIN_ROW_KEY
     st.markdown(
         f"""
         <style>
@@ -568,7 +574,7 @@ def apply_global_styles() -> None:
             white-space: normal;
         }}
         /* ------------------------------------------------------------------ */
-        /* 재고 운영 Workspace — one screen: 작업 · 네트워크 · 실행 결정          */
+        /* The one operations screen: status, network, decision                  */
         /* Heights are content-driven everywhere so Korean text never clips.    */
         /* ------------------------------------------------------------------ */
         /* A slim title strip: 데이터 상태 and 분석 상태 are already in the top bar,
@@ -749,6 +755,51 @@ def apply_global_styles() -> None:
             .ws-action-qty {{ font-size: 1.8rem; }}
             .ws-kpi-value {{ font-size: 1.5rem; }}
             .ws-header-title {{ font-size: 1.14rem; }}
+        }}
+        /* ---- 1366 with the sidebar open --------------------------------------
+           On a 1366-wide screen the expanded sidebar took 300px out of the window,
+           which left the centre network ~547px wide. Because the SVG scales to its
+           column (column width / 940), that pushed its smallest labels to 8.7-9.9px
+           on screen -- measured in Chrome, not estimated.
+
+           Three changes, none of which shrinks anything on screen:
+             . the expanded sidebar is narrowed to 196px (it holds four short
+               labels); the *collapsed* sidebar is untouched, hence [aria-expanded],
+             . the page gutters shrink from 2rem to 0.9rem,
+             . the three columns of the main row re-balance toward the centre
+               (20 / 60 / 20) instead of 22 / 52 / 26.
+           Together the network keeps ~646px at 1366 with the sidebar open, so the
+           smallest SVG label lands above 10.5px. Above 1450px nothing here applies.
+
+           The :has() guard restricts the ratio change to the one three-column row;
+           the two-column rows nested inside it keep their own widths. */
+        @media (max-width: 1450px) {{
+            section[data-testid="stSidebar"][aria-expanded="true"] {{
+                width: 196px !important;
+                min-width: 196px !important;
+                max-width: 196px !important;
+            }}
+            section[data-testid="stSidebar"][aria-expanded="true"] [data-testid="stSidebarContent"] {{
+                padding-left: 0.55rem;
+                padding-right: 0.55rem;
+            }}
+            .block-container {{ padding-left: 0.9rem !important; padding-right: 0.9rem !important; }}
+            .st-key-{main_row} [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3))
+                > [data-testid="stColumn"] {{ min-width: 0 !important; }}
+            /* Grow factors, not percentages: the browser shares out what is left
+               *after* the two column gaps, so the third (decision) column can never
+               be pushed past the right edge and the row never wraps. */
+            .st-key-{main_row} [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3))
+                > [data-testid="stColumn"]:nth-child(1) {{ flex: 20 1 0% !important; width: auto !important; }}
+            .st-key-{main_row} [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3))
+                > [data-testid="stColumn"]:nth-child(2) {{ flex: 60 1 0% !important; width: auto !important; }}
+            .st-key-{main_row} [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"]:nth-child(3))
+                > [data-testid="stColumn"]:nth-child(3) {{ flex: 20 1 0% !important; width: auto !important; }}
+            /* Only on narrow desktops: the two smallest SVG labels grow a little.
+               One sits outside its box and the other is a single centred word, so
+               neither can collide with anything. */
+            .ws-network-svg .ws-node-sub {{ font-size: 16.5px; }}
+            .ws-network-svg .ws-node-role {{ font-size: 17.5px; }}
         }}
         @media (max-width: 1150px) {{
             .ws-action-grid {{ grid-template-columns: 1fr; }}

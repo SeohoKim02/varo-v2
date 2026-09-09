@@ -144,7 +144,7 @@ def _no_candidate_cause(pipeline: Mapping[str, Any], state: Mapping[str, Any]) -
         reasons = summary.get("top_exclusion_reasons") or []
         top_reason = str(reasons[0].get("reason") or "").strip() if reasons else ""
         detail = f" 주요 원인: {top_reason}" if top_reason else ""
-        return f"추천 후보 {candidate_count}건을 함께 검토했습니다. {plan.get('user_message')}{detail}"
+        return f"이동 {candidate_count}건을 함께 검토했습니다. {plan.get('user_message')}{detail}"
     generated = int(summary.get("generated") or 0)
     if generated == 0:
         info = state.get("upload_report") or {}

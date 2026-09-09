@@ -516,7 +516,7 @@ class RecommendationPageProgressTests(unittest.TestCase):
         app.run()  # a plain rerun must not repeat the notice
         second = self._text(app)
         self.assertNotIn("추천 계산이 완료됐습니다", second)
-        self.assertNotIn("추천 실행 전입니다", second)
+        self.assertNotIn("분석 실행 전입니다", second)
 
     def test_finished_page_keeps_no_progress_widget_and_no_internal_terms(self):
         app = self._app()
