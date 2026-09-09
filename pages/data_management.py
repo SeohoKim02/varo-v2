@@ -229,8 +229,12 @@ def _render_current_data_card(view: dict) -> None:
         f'<strong>{_safe(value)}</strong></div>'
         for label, value in rows
     )
+    # Six facts on a three-column grid make two even rows. On the four-column
+    # default the last two dropped under columns 1–2 and left the right half of
+    # the card empty.
     st.markdown(
-        f'<div class="v2-wrap v2-card"><div class="v2-recommendation-info">{grid}</div></div>',
+        f'<div class="v2-wrap v2-card">'
+        f'<div class="v2-recommendation-info v2-info-grid-3">{grid}</div></div>',
         unsafe_allow_html=True,
     )
     if current["excluded_rows"]:
@@ -259,7 +263,10 @@ def _render_sample_selector() -> None:
     selected_label = st.selectbox("샘플 선택", list(options), key="simulation_sample_select")
     selected = options[selected_label]
     st.caption(f"점포 {selected.store_count}개 · DC {selected.dc_count}개")
-    if st.button("선택한 샘플 적용", key="load_simulation_sample", type="primary", width="stretch"):
+    # Sized to its label, not to the page. Stretched across 1500px these two apply
+    # buttons were the largest objects on the screen and made every real primary
+    # action look the same weight as loading a demo sample.
+    if st.button("선택한 샘플 적용", key="load_simulation_sample", type="primary"):
         path = sample_path(selected)
         if not path.exists():
             st.session_state["pending_load_error"] = f"샘플 파일이 없습니다: {selected.filename}"
@@ -302,7 +309,7 @@ def _render_dqn_sample_selector() -> None:
             ]),
             hide_index=True, width="stretch",
         )
-    if st.button("선택한 DQN 샘플 적용", key="load_dqn_sample", type="primary", width="stretch"):
+    if st.button("선택한 DQN 샘플 적용", key="load_dqn_sample", type="primary"):
         path = Path(selected.file_path)
         if not path.exists():
             st.session_state["pending_load_error"] = f"샘플 파일이 없습니다: {selected.file_name}"
@@ -315,16 +322,32 @@ def _render_dqn_sample_selector() -> None:
 # --------------------------------------------------------------------------- #
 # 5) 적용 데이터 상세 (품질·점검·미리보기·다운로드)
 # --------------------------------------------------------------------------- #
+def _count(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _render_upload_quality() -> None:
     report = st.session_state.get("upload_report") or {}
     if not report:
         return
     render_section_header(st, "업로드 품질 점검", "")
-    cols = st.columns(4, gap="small")
-    cols[0].metric("자동 매핑 컬럼", report.get("mapped_column_count", 0))
-    cols[1].metric("누락 필수 컬럼", report.get("missing_required_count", 0))
-    cols[2].metric("숫자 변환 실패", report.get("numeric_failed_total", 0))
-    cols[3].metric("빈 행 제거", report.get("blank_removed_total", 0))
+    counts = [
+        ("자동 매핑 컬럼", report.get("mapped_column_count", 0)),
+        ("누락 필수 컬럼", report.get("missing_required_count", 0)),
+        ("숫자 변환 실패", report.get("numeric_failed_total", 0)),
+        ("빈 행 제거", report.get("blank_removed_total", 0)),
+    ]
+    # A clean file has nothing to report, and four cards reading 0 shouted it. The
+    # counts come back the moment any of them is non-zero.
+    if any(_count(value) for _label, value in counts):
+        cols = st.columns(4, gap="small")
+        for column, (label, value) in zip(cols, counts):
+            column.metric(label, value)
+    else:
+        st.caption("파일을 읽는 동안 수정하거나 제외한 항목이 없습니다.")
 
     source = report.get("recommendation_source")
     if source == "generated":

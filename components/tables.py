@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import math
+import re
 from typing import Iterable, Mapping, Sequence
 
 import pandas as pd
@@ -127,6 +128,18 @@ def _cell_text(value) -> str:
     return str(value)
 
 
+# A cell reads as a number when the digits are the whole of it, ignoring the
+# grouping comma, a leading sign, and the unit the UI formatters append
+# (256,441원 · 58개 · 8건 · 12.5% · -20.8). Anything else — a name, a status
+# word, 미확보 — stays left-aligned.
+_NUMERIC_CELL = re.compile(r"^[-+]?[\d,]+(?:\.\d+)?\s*(?:원|개|건|%|점|km|분|시간|회)?$")
+
+
+def _is_numeric_cell(text: str) -> bool:
+    stripped = text.strip()
+    return bool(stripped) and bool(_NUMERIC_CELL.match(stripped))
+
+
 def render_html_table(rows: Sequence[Mapping[str, object]], columns: Sequence[str] | None = None) -> None:
     """Render a compact, fully-in-DOM table (no horizontal virtualization).
 
@@ -137,10 +150,27 @@ def render_html_table(rows: Sequence[Mapping[str, object]], columns: Sequence[st
         st.info("표시할 결과가 없습니다.")
         return
     columns = list(columns or rows[0].keys())
-    head = "".join(f"<th>{html.escape(str(column))}</th>" for column in columns)
+    # A column is numeric when every value it actually carries is a number, so a
+    # 미확보 in one row never right-aligns the names beside it.
+    numeric_columns = {
+        column
+        for column in columns
+        if any(_is_numeric_cell(_cell_text(row.get(column))) for row in rows)
+        and all(
+            _is_numeric_cell(text) or text == "-"
+            for text in (_cell_text(row.get(column)) for row in rows)
+        )
+    }
+    attr = {column: ' class="v2-num"' if column in numeric_columns else "" for column in columns}
+    head = "".join(
+        f"<th{attr[column]}>{html.escape(str(column))}</th>" for column in columns
+    )
     body_rows = []
     for row in rows:
-        cells = "".join(f"<td>{html.escape(_cell_text(row.get(column)))}</td>" for column in columns)
+        cells = "".join(
+            f"<td{attr[column]}>{html.escape(_cell_text(row.get(column)))}</td>"
+            for column in columns
+        )
         body_rows.append(f"<tr>{cells}</tr>")
     st.markdown(
         '<div class="v2-wrap v2-html-table-wrap"><table class="v2-html-table">'

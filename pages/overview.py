@@ -13,6 +13,7 @@ controls, and the short list of routes the animation is showing.
 from __future__ import annotations
 
 import html
+import math
 from typing import Mapping, Sequence
 
 import pandas as pd
@@ -36,7 +37,10 @@ from simulation.dynamic_network import (
 
 WORKSPACE_PAGE = "재고 운영"
 
-_ROUTE_COLORS = ["#1f766d", "#2d5f9a", "#b28700"]
+# Three route identities, none of which borrows a status hue. The amber that used
+# to sit here read as 과잉 (and as the 물류센터 fill) rather than as "the third
+# route", which is the one thing a colour on a line has to say on this screen.
+_ROUTE_COLORS = ["#1f766d", "#2d5f9a", "#5b6b7d"]
 # Slower, calmer motion than before: one loop of the path in this many seconds.
 _SPEED_SECONDS = {"느림": 24.0, "보통": 15.0, "빠름": 9.5}
 _MAX_BACKGROUND_ROUTES = 12
@@ -175,6 +179,74 @@ def _wrap_two_lines(value: object, limit: int) -> list[str]:
     return [first, second]
 
 
+#: How far along its route a stopped truck parks, in SVG units. Enough to clear
+#: a store node's box (half its width is ~52) without losing the link between the
+#: truck and the node it starts from.
+_PARK_OFFSET = 78.0
+#: Half the room the truck drawing needs around its centre (body, wheels, the mode
+#: chip above it and the TOPn label below it), measured off ``_truck_icon``.
+_TRUCK_HALF = (23.0, 26.0)
+#: How far along the route the search for a clear parking spot may walk, and in
+#: what increments.
+_PARK_STEP = 8.0
+_PARK_LIMIT = 0.5  # fraction of the whole route
+
+
+def _clear_of_nodes(point: tuple[float, float], boxes: Sequence[tuple[float, float, float, float]]) -> bool:
+    """True when a truck drawn at ``point`` touches no node box."""
+    px, py = point
+    half_w, half_h = _TRUCK_HALF
+    return not any(
+        abs(px - cx) < bw / 2 + half_w and abs(py - cy) < bh / 2 + half_h
+        for cx, cy, bw, bh in boxes
+    )
+
+
+def _walk(points: Sequence[tuple[float, float]], distance: float) -> tuple[float, float]:
+    """The point ``distance`` units along the polyline from its start."""
+    remaining = distance
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        dx, dy = x1 - x0, y1 - y0
+        length = math.hypot(dx, dy)
+        if length <= 1e-6:
+            continue
+        if remaining <= length:
+            return x0 + dx / length * remaining, y0 + dy / length * remaining
+        remaining -= length
+    return points[-1]
+
+
+def _parked_point(
+    points: Sequence[tuple[float, float]],
+    boxes: Sequence[tuple[float, float, float, float]] = (),
+) -> tuple[float, float]:
+    """The spot a stopped truck sits at: the first clear point along its route.
+
+    Parked on the source node itself the truck covered that store's name and its
+    state pill. Walking a little way down its own route keeps the association and
+    hands the label back; ``boxes`` lets the walk continue past any *other* node
+    the straight 78-unit offset would have landed on.
+    """
+    start = points[0]
+    if len(points) < 2:
+        return start
+    total = sum(
+        math.hypot(x1 - x0, y1 - y0) for (x0, y0), (x1, y1) in zip(points, points[1:])
+    )
+    if total <= 1e-6:
+        return start
+    # Never travel past the midpoint of the route, however crowded it is.
+    ceiling = max(min(_PARK_OFFSET, total / 2), total * _PARK_LIMIT)
+    default = _walk(points, min(_PARK_OFFSET, total / 2))
+    distance = min(_PARK_OFFSET, total / 2)
+    while distance <= ceiling:
+        candidate = _walk(points, distance)
+        if _clear_of_nodes(candidate, boxes):
+            return candidate
+        distance += _PARK_STEP
+    return default
+
+
 def _dc_node_svg(node: Mapping[str, object]) -> str:
     x, y = float(node["x"]), float(node["y"])
     width, height = float(node["width"]), float(node["height"])
@@ -186,8 +258,10 @@ def _dc_node_svg(node: Mapping[str, object]) -> str:
         f'<title>{_safe(name)} · 물류 허브</title>'
         f'<rect x="{left:.2f}" y="{top + 13:.2f}" width="{width:.2f}" height="{height - 13:.2f}" rx="7" fill="#fff8df" stroke="{stroke}" stroke-width="{3 if node.get("is_recommended") else 2.2}" />'
         f'<path d="M {left - 4:.2f} {top + 15:.2f} L 0 {top - 4:.2f} L {-left + 4:.2f} {top + 15:.2f} Z" fill="#f5df98" stroke="{stroke}" stroke-width="2" />'
-        '<rect x="-27" y="4" width="20" height="28" rx="2" fill="#ffffff" stroke="#b28700" />'
-        '<rect x="7" y="4" width="20" height="28" rx="2" fill="#ffffff" stroke="#b28700" />'
+        # The two "shutter" rectangles that used to sit here were pure decoration,
+        # and they were drawn straight across the 물류센터 · DC line below the name —
+        # the label was legible only where it missed them. The roof already tells a
+        # 물류센터 apart from a 점포.
         f'<text class="node-label dc-label" x="0" y="{-height / 2 + 29:.2f}" text-anchor="middle">{_safe(_short_label(name, 20))}</text>'
         f'<text class="node-type" x="0" y="{height / 2 - 8:.2f}" text-anchor="middle">물류센터 · DC</text>'
         '</g>'
@@ -203,7 +277,10 @@ def _store_node_svg(node: Mapping[str, object], total_stores: int) -> str:
     state = str(node.get("inventory_state") or "정상")
     text_color, fill_tint = _STATE_STYLES.get(state, _STATE_STYLES["정상"])
     stroke = "#d88378" if emphasized else (text_color if state != "정상" else "#cbd5df")
-    body_fill = "#fff7f5" if emphasized else fill_tint
+    # The state colour lives in the border and the pill, not in a full-node wash.
+    # Flooding the body with the tint made this screen read as a different product
+    # from the workspace network, whose nodes are white with a small state chip.
+    body_fill = "#fffaf9" if emphasized else "#ffffff"
     limit = 12 if total_stores <= 16 else 9
     left, top = -width / 2, -height / 2
     source = name if show_label else str(node.get("node_id") or "")
@@ -225,7 +302,9 @@ def _store_node_svg(node: Mapping[str, object], total_stores: int) -> str:
         f'<g class="network-node store-node" transform="translate({x:.2f} {y:.2f})">'
         f'<title>{_safe(name)} · 점포 · 재고 {_safe(state)}</title>'
         f'<rect x="{left:.2f}" y="{top + 10:.2f}" width="{width:.2f}" height="{height - 10:.2f}" rx="7" fill="{body_fill}" stroke="{stroke}" stroke-width="{2.6 if emphasized else 1.3}" />'
-        f'<path d="M {left + 8:.2f} {top + 10:.2f} L {left + 16:.2f} {top - 2:.2f} L {-left - 16:.2f} {top - 2:.2f} L {-left - 8:.2f} {top + 10:.2f} Z" fill="{stroke}" opacity="0.82" />'
+        # The roof keeps 점포 distinguishable from DC, but as a quiet band rather
+        # than a saturated slab across the top of every node.
+        f'<path d="M {left + 8:.2f} {top + 10:.2f} L {left + 16:.2f} {top - 2:.2f} L {-left - 16:.2f} {top - 2:.2f} L {-left - 8:.2f} {top + 10:.2f} Z" fill="{stroke}" opacity="0.34" />'
         f'{label_svg}'
         f'<rect x="{-pill_w / 2:.2f}" y="{height / 2 - 21:.2f}" width="{pill_w:.2f}" height="15.5" rx="7.75" fill="{fill_tint}" stroke="{text_color}" stroke-width="0.9" />'
         f'<text x="0" y="{height / 2 - 9.6:.2f}" text-anchor="middle" fill="{text_color}" font-size="9.5" font-weight="700">{_safe(state)}</text>'
@@ -274,6 +353,10 @@ def _network_markup_cached(
 
     all_nodes = list(layout.dcs) + list(layout.stores)
     positions = {str(node["node_id"]): (float(node["x"]), float(node["y"])) for node in all_nodes if node}
+    node_boxes = [
+        (float(node["x"]), float(node["y"]), float(node["width"]), float(node["height"]))
+        for node in all_nodes if node
+    ]
     canvas = layout.canvas
 
     background: list[str] = []
@@ -328,7 +411,7 @@ def _network_markup_cached(
                 f'<mpath xlink:href="#{path_id}"/></animateMotion></g>'
             )
         else:
-            sx, sy = points[0]
+            sx, sy = _parked_point(points, node_boxes)
             vehicles.append(f'<g class="v2-vehicle" transform="translate({sx:.2f} {sy:.2f})">{truck}</g>')
 
     node_shapes = [_dc_node_svg(node) for node in layout.dcs]
@@ -419,7 +502,9 @@ def _set_sim_playing(value: bool) -> None:
 def _render_controls() -> None:
     playing = bool(st.session_state.get("home_sim_playing", False))
     c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1.2, 1.5], gap="small")
-    c1.button("시작", width="stretch", key="sim_start", disabled=playing,
+    # 시작 is the one action this screen exists for, so it is the only primary
+    # control in the row; 일시정지 and 다시 시작 stay secondary.
+    c1.button("시작", width="stretch", key="sim_start", disabled=playing, type="primary",
               on_click=_set_sim_playing, args=(True,))
     c2.button("일시정지", width="stretch", key="sim_pause", disabled=not playing,
               on_click=_set_sim_playing, args=(False,))
@@ -445,6 +530,10 @@ def _render_home_top(top_routes: list[dict]) -> None:
     if not top_routes:
         render_empty_state(st, "추천 결과가 없습니다", compact=True)
         return
+    # Deliberately still the virtualised grid, not the in-DOM table the workspace
+    # tabs use: this screen must not restate 재고 운영's decision numbers in the
+    # page markup (test_simulation_page_is_the_moving_picture_not_a_second_dashboard
+    # guards that), and the price is that its two numeric columns stay left-aligned.
     render_recommendation_table(build_home_top_rows(top_routes), key="overview_home_top", height=225)
 
 

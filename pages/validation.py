@@ -969,9 +969,13 @@ def _render_conclusion(pipeline: dict) -> None:
     _conclusion_card(verdict)
     headline = [rows[name] for name in _HEADLINE_CHECKS if name in rows]
     if headline:
-        columns = st.columns(len(headline), gap="medium")
-        for column, row in zip(columns, headline):
-            column.metric(str(row.get("검증 항목")), str(row.get("결과")))
+        # The keyed container is the CSS hook styles.py uses to put these verdicts
+        # on the same level the 재고 운영 검증 탭 prints them at. They stay
+        # st.metric widgets so the cross-screen agreement test can still read them.
+        with st.container(key="validation_conclusion"):
+            columns = st.columns(len(headline), gap="medium")
+            for column, row in zip(columns, headline):
+                column.metric(str(row.get("검증 항목")), str(row.get("결과")))
     st.caption("아래 탭은 연구·검증용 상세 지표입니다. 실행 판단은 재고 운영 화면에서 합니다.")
 
 

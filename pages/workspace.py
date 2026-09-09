@@ -86,7 +86,10 @@ MAIN_ROW_KEY = WORKSPACE_MAIN_ROW_KEY
 
 # The plan list is one scrolling radio group, so the row budget below caps its
 # *height*, not the number of selectable moves: 50 moves stay one click away.
-_LIST_ROW_PX = 62
+# 52 is the measured height of one row (name + caption) in Chrome, not a guess:
+# at 62 a five-move plan reserved ~75px of empty scroller under the last row and
+# pushed the 내보내기 control that far down the column.
+_LIST_ROW_PX = 52
 _LIST_MIN_PX = 108
 _LIST_MAX_PX = 330
 STALE_MESSAGE = "현재 결과가 최신 데이터 기준이 아닙니다. 다시 분석하세요."
@@ -398,7 +401,9 @@ def _render_execution_panel(view: Mapping[str, Any], items: Sequence[Mapping[str
         f'<div class="ws-action-qty">{_safe(qty_text(quantity))}</div>'
         '<div class="ws-action-grid">'
         f'<div><span>경로</span><strong>{_safe(route_label(selected))}</strong></div>'
-        f'<div><span>예상 순효과</span><strong>{_safe(money_text(net))}</strong></div>'
+        # 예상 순효과 carries one step of emphasis under 실행 수량 (styles.py).
+        f'<div class="ws-action-effect"><span>예상 순효과</span>'
+        f'<strong>{_safe(money_text(net))}</strong></div>'
         f'<div><span>안정성</span><strong>{_safe(selected.get("robustness_status") or CHECK_NEEDED)}</strong></div>'
         f'<div><span>실행 상태</span><strong>{_safe(selected.get("feasibility_status") or "추천 가능")}</strong></div>'
         "</div></div>",
@@ -462,11 +467,15 @@ def _render_alternatives_tab(view: Mapping[str, Any]) -> None:
              if key not in ("route_id", "선택", "예상 효과")}
             for row in rows
         ]
-        st.dataframe(pd.DataFrame(display), hide_index=True, width="stretch")
+        # The in-DOM table, like 세부 정보 next to it: 수량 · 예상 비용 · 예상 순효과
+        # line up on their last digit, the header matches every other table in the
+        # product, and the row height is the app's rather than the grid's. The
+        # virtualised grid stays where a table is genuinely long (연구용 상세).
+        render_html_table(display)
     else:
         st.caption("현재 데이터에는 비교할 다른 이동이 없습니다.")
     st.markdown('<div class="ws-block-title">조건이 달라지면</div>', unsafe_allow_html=True)
-    st.dataframe(pd.DataFrame(whatif_rows(view.get("pipeline"), selected)), hide_index=True, width="stretch")
+    render_html_table(whatif_rows(view.get("pipeline"), selected))
 
 
 _VALIDATION_HEADLINES = ("계획 제약", "안전재고", "도착 필요 수량", "안정성")

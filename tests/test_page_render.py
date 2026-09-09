@@ -9,6 +9,7 @@ pages, and that each screen keeps only the downloads it owns (실행계획 = 재
 """
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -376,10 +377,13 @@ class PageRenderTests(unittest.TestCase):
         # header is present in the markdown (no dataframe virtualization).
         blob = self._markdown_blob(app)
         self.assertIn('class="v2-html-table"', blob)
+        # Numeric columns carry a right-alignment class, so a header cell is
+        # `<th>` or `<th class="v2-num">` — both count as present and in the DOM.
+        headers = set(re.findall(r"<th(?:\s[^>]*)?>(.*?)</th>", blob))
         for required in ("순위", "상품", "출발 점포", "도착 점포", "경로 유형", "수량", "예상 순효과", "안정성", "추천 등급"):
-            self.assertIn(f"<th>{required}</th>", blob)
+            self.assertIn(required, headers)
         for hidden in ("route_id", "VHS 점수", "Greedy 순위"):
-            self.assertNotIn(f"<th>{hidden}</th>", blob)
+            self.assertNotIn(hidden, headers)
         # VHS/Greedy/DQN/Pareto live only in the detailed comparison (expander),
         # with friendly column names (route_id → 추천 ID, Pareto → Pareto 상태).
         column_sets = []

@@ -72,6 +72,23 @@ class WorkspaceRenderTests(unittest.TestCase):
         texts += [element.value for element in app.caption]
         return " ".join(str(item) for item in texts)
 
+    def _table_columns(self, app) -> set[str]:
+        """Every column header on screen, from both table renderers.
+
+        대안 비교 and 조건이 달라지면 moved from the virtualised grid to the in-DOM
+        table so their numbers right-align with the rest of the product; the
+        columns they expose are the same, they simply arrive as ``<th>`` now.
+        """
+        columns: set[str] = set()
+        for element in app.dataframe:
+            try:
+                columns |= set(element.value.columns)
+            except Exception:
+                continue
+        for header in re.findall(r"<th(?:\s[^>]*)?>(.*?)</th>", self._blob(app)):
+            columns.add(html.unescape(header))
+        return columns
+
     def _alerts(self, app) -> str:
         parts = []
         for attribute in ("info", "success", "warning", "error"):
@@ -331,12 +348,7 @@ class WorkspaceRenderTests(unittest.TestCase):
         self.assertIn("실행 기록", blob)                # 실행 이력 (reused panel)
         # 기록 버튼은 오른쪽 오늘 권장 이동 패널에 있고, 실행 이력 탭은 결과 입력을 맡는다.
         self.assertIn("ws_record_plan", {b.key for b in app.button})
-        columns = set()
-        for element in app.dataframe:
-            try:
-                columns |= set(element.value.columns)
-            except Exception:
-                pass
+        columns = self._table_columns(app)
         self.assertIn("검증 항목", columns)
         self.assertIn("구분", columns)                  # alternatives comparison
         self.assertIn("항목", columns)                  # data readiness
@@ -460,17 +472,27 @@ class WorkspaceRenderTests(unittest.TestCase):
 
     def test_alternatives_table_hides_internal_columns(self):
         app = self._ready_app()
-        columns: set[str] = set()
-        for element in app.dataframe:
-            try:
-                columns |= set(element.value.columns)
-            except Exception:
-                continue
+        columns = self._table_columns(app)
         self.assertIn("구분", columns)
         for shown in ("경로", "수량", "예상 비용", "예상 순효과", "안정성"):
             self.assertIn(shown, columns)
         for hidden in ("route_id", "선택", "예상 효과"):
             self.assertNotIn(hidden, columns)
+
+    def test_the_comparison_numbers_are_right_aligned_columns(self):
+        """§숫자 정렬: a column of amounts is compared on its last digit.
+
+        The alternatives table is the one place a user reads three money columns
+        side by side, so it is also where a left-aligned string column costs the
+        most. ``components.tables`` tags a column numeric only when every value in
+        it is a number, which is what keeps 상품/경로 from drifting right.
+        """
+        app = self._ready_app()
+        blob = self._blob(app)
+        for numeric in ("수량", "예상 비용", "예상 순효과"):
+            self.assertIn(f'<th class="v2-num">{numeric}</th>', blob)
+        for textual in ("구분", "출발 점포", "도착 점포", "경로", "안정성"):
+            self.assertIn(f"<th>{textual}</th>", blob)
 
     # ------------------------------------------------------------ layout guard
     def test_workspace_cards_are_content_driven_not_fixed_height(self):
