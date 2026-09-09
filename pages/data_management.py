@@ -1,7 +1,12 @@
 """Data management page for Varo V2.
 
+이 화면의 책임은 **입력 데이터**다: 등록 · 검사 · 오류 확인 · 적용 · 원본 확인.
+추천 결과 · 실행계획 · 연구 분석 결과를 내보내는 화면이 아니다. 여기서 나가는
+파일은 사용자가 원본 데이터를 고치기 위한 **데이터 오류 목록 CSV** 뿐이고,
+실행계획은 재고 운영, 연구·검증 결과는 분석 및 검증이 가져간다.
+
 Linear flow: 현재 상태 → 현재 사용 중 데이터 → 데이터 불러오기 → 검사 중인 데이터
-(검사 결과·미리보기·적용/취소) → 적용 데이터 상세(품질·점검·미리보기·다운로드).
+(검사 결과·미리보기·적용/취소) → 적용 데이터 상세(품질·점검·미리보기).
 
 The upload is a two-phase intake: a file is *inspected* into pending state
 (``prepare_pending_data``) and only replaces the applied data when the user clicks
@@ -19,17 +24,19 @@ import pandas as pd
 import streamlit as st
 
 from components.cards import render_empty_state, render_error_card, render_page_header, render_section_header
+from components.exports import CSV_MIME, render_download
 from components.navigation import WORKSPACE_MENU
 from components.state_banner import render_state_summary_card
 from components.status import badge_html
-from services import export_service
 from services.app_state import clear_applied_data
 from services.data_application import cancel_pending_data, commit_pending_data, load_and_apply
 from services.data_issues import collect_data_issues, detail_rows, display_rows, issues_to_csv_bytes
 from services.data_management_view import build_data_management_view
 from services.sample_catalog import discover_dqn_samples, sample_options, sample_path
 
-XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+# 추천·분석 결과 파일은 이 화면이 아니라 분석 및 검증이 맡는다. 데이터 담당자가
+# 결과 다운로드에 방해받지 않도록 안내 한 줄만 남긴다.
+RESULT_EXPORT_NOTE = "추천·분석 결과 파일은 분석 및 검증 화면의 내보내기에서 내려받습니다."
 
 # 적용이 끝난 데이터의 다음 행동은 재고 운영 화면이다. 분석 실행도, 결과 확인도
 # 그 한 화면에서 이어진다.
@@ -165,14 +172,13 @@ def _render_pending_check(view: dict) -> None:
                 if pending["issue_count"] > len(problem_rows):
                     st.caption(
                         f"{len(problem_rows)}건까지 표시했습니다. "
-                        f"전체 {pending['issue_count']}건은 아래 CSV로 내려받으세요."
+                        f"전체 {pending['issue_count']}건은 아래 데이터 오류 목록 CSV로 내려받으세요."
                     )
-        st.download_button(
-            "문제 목록 CSV 내려받기",
-            data=issues_to_csv_bytes(pending["issues"]),
-            file_name="varo_v2_데이터점검.csv",
-            mime="text/csv",
-            key="dl_pending_issues_csv",
+        # 오류가 있을 때만 나온다. 0건이면 빈 CSV를 만들지 않는다.
+        render_download(
+            st, "검사 중 데이터 오류 목록 CSV",
+            lambda: issues_to_csv_bytes(pending["issues"]),
+            "varo_v2_데이터오류_검사중.csv", CSV_MIME, "dl_pending_issues_csv",
         )
     elif not pending["apply_allowed"] and pending["error_messages"]:
         st.caption("확인이 필요한 항목")
@@ -374,14 +380,14 @@ def _render_data_issues() -> None:
             st.dataframe(pd.DataFrame(detail_rows(shown)), hide_index=True, width="stretch")
             if len(issues) > len(shown):
                 st.caption(
-                    f"{len(shown)}건까지 표시했습니다. 전체 {len(issues)}건은 아래 CSV로 내려받으세요."
+                    f"{len(shown)}건까지 표시했습니다. "
+                    f"전체 {len(issues)}건은 아래 데이터 오류 목록 CSV로 내려받으세요."
                 )
-    st.download_button(
-        "문제 목록 CSV 내려받기",
-        data=issues_to_csv_bytes(issues),
-        file_name="varo_v2_데이터점검.csv",
-        mime="text/csv",
-        key="dl_data_issues_csv",
+    # 오류가 0건이면 이 구역 자체가 나오지 않으므로 빈 CSV는 생기지 않는다.
+    render_download(
+        st, "적용 데이터 오류 목록 CSV",
+        lambda: issues_to_csv_bytes(issues),
+        "varo_v2_데이터오류.csv", CSV_MIME, "dl_data_issues_csv",
     )
 
 
@@ -408,57 +414,10 @@ def _render_preview() -> None:
             st.dataframe(_display_df(quality.head(_PREVIEW_ROW_LIMIT)), hide_index=True, width="stretch")
 
 
-def _render_downloads() -> None:
-    render_section_header(st, "분석 결과 다운로드", "")
-    recommendations = st.session_state.get("varo_recommendations") or []
-    if not recommendations:
-        render_empty_state(
-            st, "다운로드할 분석 결과가 없습니다",
-            "데이터를 적용하면 추천·분석 결과 다운로드가 활성화됩니다.", compact=True,
-        )
-        return
-    pipeline = st.session_state.get("analysis_result") or st.session_state.get("varo_pipeline_result") or {}
-    validation = st.session_state.get("varo_validation")
-    upload_report = st.session_state.get("upload_report") or {}
-    cols = st.columns(4, gap="small")
-    cols[0].download_button(
-        "추천 결과 CSV",
-        data=export_service.recommendations_csv_bytes(recommendations),
-        file_name="varo_v2_추천결과.csv",
-        mime="text/csv",
-        width="stretch",
-        key="dl_rec_csv",
-    )
-    cols[1].download_button(
-        "추천 결과 Excel",
-        data=export_service.recommendations_excel_bytes(recommendations),
-        file_name="varo_v2_추천결과.xlsx",
-        mime=XLSX_MIME,
-        width="stretch",
-        key="dl_rec_xlsx",
-    )
-    cols[2].download_button(
-        "분석 결과 전체 Excel",
-        data=export_service.analysis_result_excel_bytes(pipeline, recommendations, upload_report),
-        file_name="varo_v2_분석결과.xlsx",
-        mime=XLSX_MIME,
-        width="stretch",
-        key="dl_analysis_xlsx",
-    )
-    cols[3].download_button(
-        "검증 리포트 Excel",
-        data=export_service.validation_report_excel_bytes(validation, pipeline, recommendations, upload_report),
-        file_name="varo_v2_검증리포트.xlsx",
-        mime=XLSX_MIME,
-        width="stretch",
-        key="dl_validation_report_xlsx",
-    )
-
-
 def render_data_management_page() -> None:
     render_page_header(
         st, "데이터 관리",
-        "데이터를 불러오고 검사한 뒤 적용합니다. 파일 업로드·교체는 상단 데이터 바에서 합니다.",
+        "입력 데이터를 등록하고 검사한 뒤 적용합니다. 파일 업로드·교체는 상단 데이터 바에서 합니다.",
     )
     view = build_data_management_view(st.session_state)
 
@@ -485,9 +444,9 @@ def render_data_management_page() -> None:
     if view["pending"]:
         _render_pending_check(view)
 
-    # 5) 적용 데이터 상세
+    # 5) 적용 데이터 상세 (품질 · 오류 · 원본). 결과 파일은 이 화면의 일이 아니다.
     if view["has_current"]:
         _render_upload_quality()
         _render_data_issues()
         _render_preview()
-        _render_downloads()
+        st.caption(RESULT_EXPORT_NOTE)

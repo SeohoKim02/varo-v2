@@ -1,4 +1,10 @@
-"""Analysis and validation page for Varo V2."""
+"""Analysis and validation page for Varo V2.
+
+이 화면의 질문은 "왜 이 결과를 신뢰할 수 있는가"다. 실행 판단(오늘 무엇을 옮길
+것인가)은 재고 운영이 맡는다. 따라서 여기서 나가는 파일은 모두 **연구·검증용**
+상세 결과이고, 현장에서 실행할 실행계획은 여기서 내보내지 않는다. 결론 → 상세
+지표가 먼저이고, 내보내기는 검증 결과 탭 끝의 접힌 보조 영역이다.
+"""
 from __future__ import annotations
 
 import html
@@ -11,6 +17,7 @@ import streamlit as st
 
 from components.cards import render_empty_state, render_page_header, render_section_header
 from components.candidate_detail import render_excluded_candidates
+from components.exports import JSON_MIME, XLSX_MIME, render_download
 from components.state_banner import render_state_action_card
 from components.tables import render_capped_table, render_html_table
 from components.status import badge_html
@@ -55,8 +62,6 @@ from services.vhs_score_engine import (
     build_strategy_core,
     build_strategy_detail,
 )
-
-XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 TABS = ["추천 점수", "점수 구성", "비교 분석", "민감도", "DQN 학습", "검증 결과"]
 
@@ -647,13 +652,10 @@ def _render_dqn() -> None:
             _render_metric_line(reward_history, container=chart_cols[0], x_title="후보", value_title="reward")
             chart_cols[1].caption("loss 흐름")
             _render_metric_line(raw_result.get("loss_history") or [], container=chart_cols[1], x_title="episode", value_title="loss")
-        st.download_button(
-            "학습 결과 다운로드",
-            data=json.dumps(raw_result, ensure_ascii=False, indent=2, default=str).encode("utf-8"),
-            file_name="varo_v2_dqn_학습결과.json",
-            mime="application/json",
-            width="stretch",
-            key="dl_dqn_training_result",
+        render_download(
+            st, "학습 결과 다운로드",
+            lambda: json.dumps(raw_result, ensure_ascii=False, indent=2, default=str).encode("utf-8"),
+            "varo_v2_dqn_학습결과.json", JSON_MIME, "dl_dqn_training_result", width="stretch",
         )
 
     # 5+6) 진단 · 원본/균형형 비교 (한 expander)
@@ -788,7 +790,8 @@ def _render_candidate_status(pipeline: dict) -> None:
     reasons = summary.get("top_exclusion_reasons") or []
     if reasons:
         st.caption("주요 제외 이유: " + " · ".join(f"{item['reason']} {item['count']}건" for item in reasons))
-    render_excluded_candidates(st, pipeline)
+    # 제외된 이동 검토 CSV의 단 하나뿐인 진입점(다른 화면은 목록만 보여준다).
+    render_excluded_candidates(st, pipeline, allow_export=True)
 
 
 def _render_execution_plan_status(pipeline: dict) -> None:
@@ -892,26 +895,25 @@ def _render_verification(pipeline: dict) -> None:
         if deferred:
             st.caption("보류 항목은 추가 입력이 필요한 보조 기능이며 핵심 추천 결과에는 영향을 주지 않습니다.")
 
-    render_section_header(st, "검증 결과 다운로드", "검증·분석 결과를 파일로 내려받습니다.")
+    # 내보내기는 이 화면의 주인공이 아니다: 결론과 지표를 다 본 뒤의 접힌 보조 영역.
     upload_report = st.session_state.get("upload_report") or {}
-    dcols = st.columns([1, 1, 2], gap="small")
-    dcols[0].download_button(
-        "검증 결과 다운로드",
-        data=export_service.validation_report_excel_bytes(report, pipeline, recommendations, upload_report),
-        file_name="varo_v2_검증결과.xlsx",
-        mime=XLSX_MIME,
-        width="stretch",
-        key="dl_validation_report_tab_xlsx",
-    )
-    dcols[1].download_button(
-        "분석 결과 전체 Excel",
-        data=export_service.analysis_result_excel_bytes(pipeline, recommendations, upload_report),
-        file_name="varo_v2_분석결과.xlsx",
-        mime=XLSX_MIME,
-        width="stretch",
-        key="dl_analysis_tab_xlsx",
-    )
-    dcols[2].caption("검증 메시지·알고리즘 연결·최적해 차이·업로드 품질이 포함됩니다.")
+    with st.expander("내보내기", expanded=False):
+        left, right = st.columns(2, gap="small")
+        render_download(
+            left, "상세 분석 결과 Excel",
+            lambda: export_service.analysis_result_excel_bytes(pipeline, recommendations, upload_report),
+            "varo_v2_상세분석결과.xlsx", XLSX_MIME, "dl_analysis_tab_xlsx", width="stretch",
+        )
+        render_download(
+            right, "검증 결과 Excel",
+            lambda: export_service.validation_report_excel_bytes(report, pipeline, recommendations, upload_report),
+            "varo_v2_검증결과.xlsx", XLSX_MIME, "dl_validation_report_tab_xlsx", width="stretch",
+        )
+        st.caption(
+            "연구·검증용 상세 결과입니다. 상세 분석 결과에는 추천 결과·VHS 비교·민감도·"
+            "업로드 품질이, 검증 결과에는 검증 메시지·알고리즘 연결·최적해 차이가 들어갑니다. "
+            "현장에서 실행할 실행계획은 재고 운영 화면에서 내려받습니다."
+        )
 
 
 def _render_report_summary(pipeline: dict) -> None:

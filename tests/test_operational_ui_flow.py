@@ -62,6 +62,13 @@ class OperationalUiFlowTests(unittest.TestCase):
         app.button(key="apply_pending").click().run()
         cls.applied_snapshot = _snapshot(app)
 
+        # AppTest 아티팩트(제품 동작 아님): element tree는 한 runner가 쌓아 온 메시지
+        # 전체로 만들어지므로, 다음 run이 더 짧으면 앞 run의 마지막 위젯 노드가 트리에
+        # 유령으로 남는다. 적용 후 화면에는 검사 중 미리보기가 없는데도 그 selectbox
+        # 노드가 남아, 다음 run의 get_widget_states()가 값을 찾다가 KeyError를 낸다.
+        # 실제 브라우저에는 없는 문제라 값 하나를 채워 무해하게 만든다.
+        app.session_state["pending_sheet_select"] = None
+
         app.session_state["current_menu"] = "추천 실행"
         app.run()
         cls.before_run_snapshot = _snapshot(app)

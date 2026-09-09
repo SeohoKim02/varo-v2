@@ -38,6 +38,12 @@ from components.execution_history_panel import (
     render_execution_history_panel,
     render_record_plan_action,
 )
+from components.exports import (
+    CSV_MIME,
+    EMPTY_PLAN_MESSAGE,
+    XLSX_MIME,
+    render_download,
+)
 from components.state_banner import render_state_action_card, render_state_summary_card
 from components.tables import render_html_table
 from components.workspace_network import (
@@ -74,7 +80,6 @@ from services.workspace_view import (
 
 DATA_PAGE = "데이터 관리"
 VALIDATION_PAGE = "분석 및 검증"
-XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 # Streamlit turns this into a `st-key-…` class on the three-column row; styles.py
 # owns the constant and the matching narrow-desktop rules.
 MAIN_ROW_KEY = WORKSPACE_MAIN_ROW_KEY
@@ -278,26 +283,27 @@ def _render_export(items: Sequence[Mapping[str, Any]]) -> None:
     What leaves here is the *execution plan* as the list currently shows it —
     현재 필터가 적용된 순서 그대로, 실행 수량은 planned_qty. Nothing is re-sorted
     and nothing is recomputed.
+
+    이 화면의 유일한 실행계획 내보내기 진입점이다. 연구용 상세 결과는 분석 및 검증,
+    입력 데이터 문제 목록은 데이터 관리가 맡는다.
     """
     if not items:
+        # 빈 파일을 내려주지 않고 이유를 말한다.
+        st.caption(EMPTY_PLAN_MESSAGE)
         return
     with st.expander(f"내보내기 ({len(items)}건)", expanded=False):
         left, right = st.columns(2, gap="small")
-        left.download_button(
-            "CSV",
-            data=export_service.execution_plan_csv_bytes(items),
-            file_name=export_service.execution_plan_filename("csv"),
-            mime="text/csv",
-            width="stretch",
-            key="ws_export_plan_csv",
+        render_download(
+            left, "CSV",
+            lambda: export_service.execution_plan_csv_bytes(items),
+            export_service.execution_plan_filename("csv"),
+            CSV_MIME, "ws_export_plan_csv", width="stretch",
         )
-        right.download_button(
-            "Excel",
-            data=export_service.execution_plan_excel_bytes(items),
-            file_name=export_service.execution_plan_filename("xlsx"),
-            mime=XLSX_MIME,
-            width="stretch",
-            key="ws_export_plan_xlsx",
+        render_download(
+            right, "Excel",
+            lambda: export_service.execution_plan_excel_bytes(items),
+            export_service.execution_plan_filename("xlsx"),
+            XLSX_MIME, "ws_export_plan_xlsx", width="stretch",
         )
         st.caption(
             "화면에 보이는 실행 계획을 그대로 내려받습니다. 수량은 실행 수량 기준이며, "

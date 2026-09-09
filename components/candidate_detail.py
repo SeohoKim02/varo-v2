@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
+from components.exports import CSV_MIME, render_download
 from services.candidate_lineage import source_reference_rows
 from services.candidate_ledger import review_candidates_csv_bytes
 
@@ -69,11 +70,21 @@ def render_source_locations(st, record: Mapping[str, Any] | None, expanded: bool
         st.caption("표시된 행 번호는 데이터 관리의 문제 목록과 같은 원본 위치입니다.")
 
 
-def render_excluded_candidates(st, pipeline: Mapping[str, Any] | None, limit: int = 10) -> None:
-    """Folded list of candidates that did not make the recommendation set.
+def render_excluded_candidates(
+    st,
+    pipeline: Mapping[str, Any] | None,
+    limit: int = 10,
+    allow_export: bool = False,
+) -> None:
+    """Folded list of moves that did not make the recommendation set.
 
     Shows only what a user needs to review the original data — never the full
-    internal calculation. A UTF-8-BOM CSV is offered for real data fixing.
+    internal calculation.
+
+    The list is context and belongs on every screen that explains "왜 이 이동이
+    빠졌는가". The **file** is a research/review artefact, so exactly one screen
+    (분석 및 검증) passes ``allow_export=True``; everywhere else the panel points
+    at that one entry point instead of offering a second copy of the same CSV.
     """
     records = ledger_records(pipeline)
     excluded = [r for r in records if r.get("blocks_recommendation") or r.get("status") == "확인 필요"]
@@ -93,15 +104,16 @@ def render_excluded_candidates(st, pipeline: Mapping[str, Any] | None, limit: in
             })
         st.dataframe(_frame(rows), hide_index=True, width="stretch")
         if len(excluded) > limit:
-            st.caption(f"전체 {len(excluded)}건 중 상위 {limit}건을 표시했습니다. 전체는 CSV로 확인하세요.")
-        st.download_button(
-            "제외된 이동 검토 CSV",
-            data=review_candidates_csv_bytes(records),
-            file_name="varo_v2_후보검토.csv",
-            mime="text/csv",
-            width="stretch",
-            key="dl_excluded_candidates_csv",
-        )
+            st.caption(f"전체 {len(excluded)}건 중 상위 {limit}건을 표시했습니다.")
+        if allow_export:
+            render_download(
+                st, "제외된 이동 검토 CSV",
+                lambda: review_candidates_csv_bytes(records),
+                "varo_v2_제외이동검토.csv", CSV_MIME,
+                "dl_excluded_candidates_csv", width="stretch",
+            )
+        else:
+            st.caption("전체 목록은 분석 및 검증 화면의 내보내기에서 내려받습니다.")
 
 
 def _first_traceable(references: Sequence[Mapping[str, Any]]) -> dict[str, Any]:

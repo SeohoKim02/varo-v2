@@ -4,7 +4,8 @@ Self-contained within varo_v2: the session payload is built from the pure
 in-package adapter with no pipeline result, so no legacy/backup module is
 imported. The tests assert each page renders without raising (which also proves
 the download buttons build their bytes), that selected_route_id is shared across
-pages, and that the data-management download stub was replaced.
+pages, and that each screen keeps only the downloads it owns (실행계획 = 재고 운영,
+데이터 오류 목록 = 데이터 관리, 연구 결과 = 분석 및 검증).
 """
 from __future__ import annotations
 
@@ -72,14 +73,19 @@ class PageRenderTests(unittest.TestCase):
         app.run()
         self.assertFalse(app.exception)
 
-    def test_data_management_download_section_replaces_stub(self):
+    def test_data_management_points_at_the_analysis_screen_for_result_files(self):
         app = self._new_app()
         app.session_state["current_menu"] = "데이터 관리"
         app.run()
         self.assertFalse(app.exception)
         blob = self._markdown_blob(app)
-        self.assertIn("분석 결과 다운로드", blob)
+        captions = " ".join(str(item.value) for item in app.caption)
+        self.assertNotIn("분석 결과 다운로드", blob)
         self.assertNotIn("다운로드 미연결", blob)
+        self.assertIn("분석 및 검증 화면의 내보내기", captions)
+        labels = {element.label for element in app.get("download_button")}
+        for banned in ("추천 결과 CSV", "추천 결과 Excel", "분석 결과 전체 Excel", "검증 리포트 Excel"):
+            self.assertNotIn(banned, labels)
 
     def test_route_detail_renders_kakao_key_fallback(self):
         app = self._new_app()
@@ -358,9 +364,14 @@ class PageRenderTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertIn("오늘 실행할 이동", self._markdown_blob(app))
         source = (Path(APP_PATH).parent / "pages" / "recommendations.py").read_text(encoding="utf-8")
-        self.assertIn('"현재 추천 CSV"', source)
-        self.assertIn('"현재 추천 Excel"', source)
-        self.assertIn("download_button", source)
+        # 보조 화면의 파일은 연구용 목록이고, 실행계획 이름/파일명과 겹치지 않는다.
+        self.assertIn('"상세 추천 목록 CSV"', source)
+        self.assertIn('"상세 추천 목록 Excel"', source)
+        self.assertIn("render_download", source)
+        self.assertNotIn("varo_v2_실행계획", source)
+        labels = {element.label for element in app.get("download_button")}
+        self.assertIn("상세 추천 목록 CSV", labels)
+        self.assertNotIn("제외된 이동 검토 CSV", labels)
         # The compact operational table is an in-DOM HTML table, so every basic
         # header is present in the markdown (no dataframe virtualization).
         blob = self._markdown_blob(app)
@@ -533,7 +544,7 @@ class PageRenderTests(unittest.TestCase):
         alerts = " ".join(el.value for el in list(app.info) + list(app.warning) + list(app.success))
         self.assertIn("후보를 자동 생성", self._markdown_blob(app) + " " + alerts)
 
-    def test_data_management_owns_quality_raw_data_and_downloads(self):
+    def test_data_management_owns_quality_and_raw_data_not_result_files(self):
         app = AppTest.from_file(APP_PATH, default_timeout=120)
         app.run()
         sample_button = next(button for button in app.button if button.key == "quick_empty_sample")
@@ -543,7 +554,7 @@ class PageRenderTests(unittest.TestCase):
         self.assertFalse(app.exception)
         blob = self._markdown_blob(app)
         self.assertIn("업로드 품질 점검", blob)
-        self.assertIn("분석 결과 다운로드", blob)
+        self.assertNotIn("분석 결과 다운로드", blob)
         # DQN history/settings duplicates were consolidated into 분석 및 검증.
         self.assertNotIn("DQN 학습 이력", blob)
         self.assertNotIn("지도는 이후 연결 예정", blob)
@@ -555,9 +566,11 @@ class PageRenderTests(unittest.TestCase):
         self.assertEqual(button_labels.count("선택한 샘플 적용"), 1)
         self.assertEqual(button_labels.count("선택한 DQN 샘플 적용"), 1)
         source = (Path(APP_PATH).parent / "pages" / "data_management.py").read_text(encoding="utf-8")
-        self.assertIn('"추천 결과 CSV"', source)
-        self.assertIn('"분석 결과 전체 Excel"', source)
-        self.assertIn("download_button", source)
+        # 이 화면이 내보내는 것은 입력 데이터 오류 목록뿐이다.
+        self.assertNotIn('"추천 결과 CSV"', source)
+        self.assertNotIn('"분석 결과 전체 Excel"', source)
+        self.assertNotIn("export_service", source)
+        self.assertIn("데이터 오류 목록 CSV", source)
 
     def test_validation_page_imports_interactive_helpers(self):
         # Guards the missing-import class of NameError that only fires on button

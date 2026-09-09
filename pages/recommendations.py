@@ -16,6 +16,7 @@ from components.candidate_detail import (
     render_source_locations,
 )
 from components.execution_history_panel import render_execution_history_panel
+from components.exports import CSV_MIME, XLSX_MIME, render_download
 from components.status import route_type_badge
 from components.tables import build_recommendation_rows, format_currency, format_number, render_capped_table
 from services import export_service, upload_quality, v2_summaries
@@ -45,8 +46,6 @@ def _reason_detail(recommendation: dict | None) -> dict:
     return v2_summaries.recommendation_reason(
         recommendation, st.session_state.get("varo_recommendations") or []
     )
-
-XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def _all_recommendations() -> list[dict]:
@@ -202,30 +201,30 @@ def _render_selection(filtered: list[dict]) -> dict | None:
 
 
 def _render_downloads(filtered: list[dict]) -> None:
+    """이 보조 화면의 연구용 목록 파일.
+
+    현장에서 실행할 **실행계획**은 재고 운영 화면이 내보낸다. 여기서 나가는 것은
+    점수·근거 열이 붙은 연구용 상세 목록이므로 이름과 파일명을 실행계획과 분리한다
+    (내용·수량 기준은 종전 그대로: 실행 수량이 있으면 실행 수량).
+    """
     export_rows = [
         {**row, "recommended_qty": row.get("planned_qty") if row.get("planned_qty") is not None else row.get("recommended_qty")}
         for row in filtered
     ]
     cols = st.columns([1, 1, 2.2], gap="small")
-    csv_label = "현재 추천 CSV"
-    excel_label = "현재 추천 Excel"
-    cols[0].download_button(
-        csv_label,
-        data=export_service.recommendations_csv_bytes(export_rows),
-        file_name="varo_v2_실행계획.csv",
-        mime="text/csv",
-        width="stretch",
-        key="dl_rec_page_csv",
+    render_download(
+        cols[0], "상세 추천 목록 CSV",
+        lambda: export_service.recommendations_csv_bytes(export_rows),
+        "varo_v2_추천목록.csv", CSV_MIME, "dl_rec_page_csv", width="stretch",
     )
-    cols[1].download_button(
-        excel_label,
-        data=export_service.recommendations_excel_bytes(export_rows),
-        file_name="varo_v2_실행계획.xlsx",
-        mime=XLSX_MIME,
-        width="stretch",
-        key="dl_rec_page_xlsx",
+    render_download(
+        cols[1], "상세 추천 목록 Excel",
+        lambda: export_service.recommendations_excel_bytes(export_rows),
+        "varo_v2_추천목록.xlsx", XLSX_MIME, "dl_rec_page_xlsx", width="stretch",
     )
-    cols[2].caption("현재 필터가 적용된 실제 실행 수량을 내려받습니다.")
+    cols[2].caption(
+        "현재 필터가 적용된 연구용 상세 목록입니다. 실행계획 CSV/Excel은 재고 운영 화면에 있습니다."
+    )
 
 
 def _render_plan_exclusions(pipeline: dict) -> None:

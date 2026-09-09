@@ -8,6 +8,7 @@ from typing import Any, Mapping
 import streamlit as st
 
 from components.cards import render_section_header
+from components.exports import CSV_MIME, render_download
 from components.tables import format_currency, format_number
 from services.execution_history import (
     REASON_LABELS,
@@ -291,11 +292,13 @@ def render_execution_history_panel(
         else:
             st.warning(loaded.get("message") or "실행 기록을 불러오지 못했습니다.")
 
+        # 계획 대비 실제 결과를 누적하는 이력 파일. 실행계획 내보내기와 목적이 다르므로
+        # 합치지 않는다. 기록이 0건이면 빈 파일을 만들지 않는다.
         exported = export_execution_history_csv()
         if exported.get("ok") and int(exported.get("row_count") or 0) > 0:
-            st.download_button(
-                "실행 기록 CSV", data=exported["data"],
-                file_name="varo_v2_실행이력.csv", mime="text/csv",
-                key="download_execution_history", width="stretch",
+            render_download(
+                st, "실행 기록 CSV", lambda: exported["data"],
+                "varo_v2_실행이력.csv", CSV_MIME,
+                "download_execution_history", width="stretch",
             )
             st.caption("사용자가 내려받을 때만 파일이 생성됩니다. 실제값이 없는 칸은 비어 있습니다.")
