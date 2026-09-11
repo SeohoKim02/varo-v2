@@ -28,6 +28,7 @@ from services.legacy_adapters.loader import (
     load_legacy_module,
 )
 from services.recommendation_adapter import normalize_action, recommendations_from_dataframe
+from services.real_transport_enrichment import enrich_real_transport
 from services.v2_summaries import (
     V2_SUMMARY_FUNCTIONS,
     recommendation_reasons,
@@ -575,6 +576,17 @@ def run_analysis_pipeline(
         route_analysis.pop("cutline_frame", pd.DataFrame()),
         route_analysis.pop("time_window_frame", pd.DataFrame()),
     )
+
+    candidates = enrich_real_transport(candidates)
+    if (
+        "real_transport_applied" in candidates.columns
+        and candidates["real_transport_applied"].fillna(False).astype(bool).any()
+        and "services.real_transport_enrichment.enrich_real_transport"
+        not in result.connected_algorithms
+    ):
+        result.connected_algorithms.append(
+            "services.real_transport_enrichment.enrich_real_transport"
+        )
 
     transfer_for_promotion = (
         transfer_frame.copy() if isinstance(transfer_frame, pd.DataFrame) else pd.DataFrame()
