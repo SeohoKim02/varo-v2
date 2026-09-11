@@ -255,12 +255,56 @@ def _component_scores(df: pd.DataFrame, dqn_enabled: bool) -> tuple[dict[str, pd
     if inventory_balance.eq(50).all():
         inventory_balance = _normalize_high(_series(df, ("recommended_qty", "suggested_qty"), 0), neutral=50)
 
-    route_cost_raw = (
-        _series(df, ("estimated_cost", "move_cost", "transport_cost"), 0).fillna(0) * 0.60
-        + _series(df, ("distance_km",), 0).fillna(0) * 1000.0 * 0.25
-        + _series(df, ("travel_time_min", "expected_time_min"), 0).fillna(0) * 150.0 * 0.15
+    transport_cost_value = _series(
+        df,
+        ("estimated_cost", "move_cost", "transport_cost"),
+        0,
+    ).fillna(0)
+
+    distance_value = _series(
+        df,
+        ("distance_km",),
+        0,
+    ).fillna(0)
+
+    travel_time_value = _series(
+        df,
+        ("travel_time_min", "expected_time_min"),
+        0,
+    ).fillna(0)
+
+    legacy_route_cost_raw = (
+        transport_cost_value * 0.60
+        + distance_value * 1000.0 * 0.25
+        + travel_time_value * 150.0 * 0.15
     )
-    route_cost = _normalize_low(route_cost_raw, neutral=55)
+
+    # Verified real transport cost is already distance-based:
+    # transfer cost = routed road distance x official KRW/km vehicle mix.
+    # Adding distance again would double-count the same economic factor.
+    #
+    # Travel-time feasibility is handled separately by the feasibility
+    # component, so the real-data route-cost component remains a pure
+    # economic-cost measure.
+    if "real_transport_applied" in df.columns:
+        real_mask = (
+            df["real_transport_applied"]
+            .fillna(False)
+            .astype(bool)
+        )
+
+        route_cost_raw = legacy_route_cost_raw.copy()
+
+        route_cost_raw.loc[real_mask] = (
+            transport_cost_value.loc[real_mask]
+        )
+    else:
+        route_cost_raw = legacy_route_cost_raw
+
+    route_cost = _normalize_low(
+        route_cost_raw,
+        neutral=55,
+    )
 
     feasibility = pd.Series(78.0, index=df.index, dtype="float64")
     if "cutline_passed" in df.columns:
