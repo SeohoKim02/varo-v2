@@ -90,7 +90,18 @@ def _validate_stores(data: dict[str, pd.DataFrame], messages: list[ValidationMes
         messages.append(ValidationMessage(ERROR, "stores", f"node_type은 DC 또는 STORE만 허용합니다: {invalid}"))
     dc_count = int((node_type == "DC").sum())
     store_count = int((node_type == "STORE").sum())
-    if dc_count < 1:
+    direct_network_mode = (
+        not stores.empty
+        and "network_mode" in stores.columns
+        and stores["network_mode"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .eq("DIRECT_NETWORK")
+        .all()
+    )
+    if dc_count < 1 and not direct_network_mode:
         messages.append(ValidationMessage(ERROR, "stores", "DC가 1개 이상 필요합니다."))
     if store_count < 1:
         messages.append(ValidationMessage(ERROR, "stores", "STORE가 1개 이상 필요합니다."))
