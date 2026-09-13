@@ -536,6 +536,19 @@ def run_analysis_pipeline(
     candidates = _drop_empty_auto_vhs_columns(candidates)
     candidates = add_cluster_context(candidates, cluster_map)
 
+    # Apply verified real transport before Greedy / VHS scoring so all
+    # downstream decision methods see the same quantity-specific cost.
+    candidates = enrich_real_transport(candidates)
+    if (
+        "real_transport_applied" in candidates.columns
+        and candidates["real_transport_applied"].fillna(False).astype(bool).any()
+        and "services.real_transport_enrichment.enrich_real_transport"
+        not in result.connected_algorithms
+    ):
+        result.connected_algorithms.append(
+            "services.real_transport_enrichment.enrich_real_transport"
+        )
+
     greedy_input = strip_dqn_columns(candidates)
     greedy = runner.call("heuristic_optimizer", "add_heuristic_scores", greedy_input)
     if isinstance(greedy, pd.DataFrame) and not greedy.empty:
@@ -576,17 +589,6 @@ def run_analysis_pipeline(
         route_analysis.pop("cutline_frame", pd.DataFrame()),
         route_analysis.pop("time_window_frame", pd.DataFrame()),
     )
-
-    candidates = enrich_real_transport(candidates)
-    if (
-        "real_transport_applied" in candidates.columns
-        and candidates["real_transport_applied"].fillna(False).astype(bool).any()
-        and "services.real_transport_enrichment.enrich_real_transport"
-        not in result.connected_algorithms
-    ):
-        result.connected_algorithms.append(
-            "services.real_transport_enrichment.enrich_real_transport"
-        )
 
     transfer_for_promotion = (
         transfer_frame.copy() if isinstance(transfer_frame, pd.DataFrame) else pd.DataFrame()

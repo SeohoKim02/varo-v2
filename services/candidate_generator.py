@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import os
 import pandas as pd
 
 from services.column_aliases import clean_numeric_value
@@ -152,6 +153,29 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
     try:
         stores = data["stores"]
         inventory = data["inventory"].copy()
+
+        direct_network_mode = (
+            not stores.empty
+            and "network_mode" in stores.columns
+            and stores["network_mode"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .eq("DIRECT_NETWORK")
+            .all()
+        )
+        real_transport_mode = (
+            direct_network_mode
+            and bool(os.environ.get("VARO_REAL_DATA_ROOT", "").strip())
+        )
+
+        base_stats["real_transport_candidate_mode"] = real_transport_mode
+        if real_transport_mode:
+            base_stats["method"] = (
+                "??? ??? ?? ?? ?? ? ??? ??? ?? ??? ?? ? ??"
+            )
+
         store_ids, dc_id = _store_ids_by_type(stores)
         names = _name_lookup(stores)
         product_info = _product_info(data["products"])
@@ -208,7 +232,18 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
                     continue
                 target_stock = stock_by.get((target, product), median)
                 need = max(0.0, median - target_stock) + demand_by.get((target, product), 0.0) * 7
-                targets.append((need, -resolved["route"]["estimated_cost"], target, resolved))
+
+                if real_transport_mode:
+                    # Candidate quantity is not known until this stage, so a
+                    # quantity-specific actual transport cost cannot be used yet.
+                    # Use verified road distance only as a tie-breaker.
+                    target_sort_value = -float(
+                        resolved["route"].get("distance_km") or 0.0
+                    )
+                else:
+                    target_sort_value = -resolved["route"]["estimated_cost"]
+
+                targets.append((need, target_sort_value, target, resolved))
             if not targets:
                 stats["route_deferred"] += 1
                 continue
@@ -229,13 +264,22 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
                 stats["qty_excluded"] += 1
                 continue
 
-            unit_price = product_info[product]["unit_price"]
             route = resolved["route"]
-            cost = route["estimated_cost"] or (route["distance_km"] * 100.0)
-            saving = moved * unit_price * _DISPOSAL_FRACTION - cost
-            if saving <= 0:
-                stats["negative_saving_excluded"] += 1
-                continue
+
+            if real_transport_mode:
+                # Actual sales price / disposal loss is not available in the
+                # Suhyup source. Do not apply the legacy 1,000 KRW default price
+                # or the 50% disposal-loss assumption to real-data candidates.
+                unit_price = None
+                cost = 0.0
+                saving = 0.0
+            else:
+                unit_price = product_info[product]["unit_price"]
+                cost = route["estimated_cost"] or (route["distance_km"] * 100.0)
+                saving = moved * unit_price * _DISPOSAL_FRACTION - cost
+                if saving <= 0:
+                    stats["negative_saving_excluded"] += 1
+                    continue
 
             expiry_score = _expiry_score(expiry)
             surplus_score = _clamp((surplus / surplus_range.get(product, 1.0)) * 100.0)
@@ -292,6 +336,16 @@ def generate_candidates(data: dict[str, Any]) -> tuple[pd.DataFrame | None, dict
                 "route_type": route_type, "transport_type": "일반 탑차",
                 "recommended_qty": r["moved"], "estimated_cost": r["cost"],
                 "expected_saving": round(r["saving"], 1),
+                "candidate_cost_status": (
+                    "deferred_real_transport"
+                    if real_transport_mode
+                    else "legacy_route_estimate"
+                ),
+                "candidate_economics_status": (
+                    "actual_price_unavailable"
+                    if real_transport_mode
+                    else "legacy_estimated_saving"
+                ),
                 "distance_km": r["resolved"]["route"]["distance_km"],
                 "travel_time_min": r["resolved"]["route"]["travel_time_min"],
                 "direct_cost": (direct_leg or {}).get("estimated_cost"),
