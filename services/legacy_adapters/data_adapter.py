@@ -20,6 +20,57 @@ def _alias(df: pd.DataFrame, target: str, candidates: Sequence[str]) -> pd.DataF
     return df
 
 
+def _fill_inventory_name(
+    frame: pd.DataFrame,
+    lookup: pd.DataFrame,
+    *,
+    key: str,
+    name: str,
+) -> pd.DataFrame:
+    """Fill legacy display-name columns from master data without overwriting existing values."""
+    if (
+        frame is None
+        or frame.empty
+        or lookup is None
+        or lookup.empty
+        or key not in frame.columns
+        or key not in lookup.columns
+        or name not in lookup.columns
+    ):
+        return frame
+
+    result = frame.copy()
+    master = lookup[[key, name]].copy()
+
+    result["_varo_lookup_key"] = result[key].astype(str).str.strip()
+    master["_varo_lookup_key"] = master[key].astype(str).str.strip()
+
+    master = (
+        master[["_varo_lookup_key", name]]
+        .drop_duplicates(subset=["_varo_lookup_key"])
+        .rename(columns={name: "_varo_lookup_name"})
+    )
+
+    result = result.merge(
+        master,
+        on="_varo_lookup_key",
+        how="left",
+        validate="many_to_one",
+    )
+
+    if name not in result.columns:
+        result[name] = result["_varo_lookup_name"]
+    else:
+        existing = result[name]
+        blank = existing.isna() | existing.astype(str).str.strip().eq("")
+        result.loc[blank, name] = result.loc[blank, "_varo_lookup_name"]
+
+    return result.drop(
+        columns=["_varo_lookup_key", "_varo_lookup_name"],
+        errors="ignore",
+    )
+
+
 def prepare_legacy_data(data: Mapping[str, Any]) -> dict[str, pd.DataFrame]:
     """Create legacy-compatible copies without mutating uploaded DataFrames."""
     stores = strip_dqn_columns(data.get("stores"))
@@ -57,6 +108,83 @@ def prepare_legacy_data(data: Mapping[str, Any]) -> dict[str, pd.DataFrame]:
     }
     for target, candidates in inventory_aliases.items():
         inventory = _alias(inventory, target, candidates)
+
+    # Real-data E2E may explicitly mark sales_qty as a daily demand proxy
+    # derived from actual outbound flow. In that narrow case, preserve the
+    # semantics instead of treating the one-day proxy as a 30-day sales value.
+    if {
+        "sales_qty",
+        "sales_qty_semantics",
+    }.issubset(inventory.columns):
+        semantics = (
+            inventory["sales_qty_semantics"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+        )
+        proxy_mask = semantics.eq("demand_proxy_not_retail_sales")
+
+        if proxy_mask.any():
+            daily_proxy = (
+                pd.to_numeric(
+                    inventory.loc[proxy_mask, "sales_qty"],
+                    errors="coerce",
+                )
+                .fillna(0.0)
+                .clip(lower=0.0)
+            )
+
+            if "avg_daily_sales" not in inventory.columns:
+                inventory["avg_daily_sales"] = pd.NA
+
+            inventory.loc[
+                proxy_mask,
+                "avg_daily_sales",
+            ] = daily_proxy
+
+            # Legacy modules use sales_30d as a 30-day demand horizon.
+            # This remains a model-derived projection, not actual retail sales.
+            inventory.loc[
+                proxy_mask,
+                "sales_30d",
+            ] = daily_proxy * 30.0
+
+            inventory.loc[
+                proxy_mask,
+                "sales_30",
+            ] = daily_proxy * 30.0
+
+            if "avg_daily_sales_provenance" not in inventory.columns:
+                inventory["avg_daily_sales_provenance"] = ""
+
+            inventory.loc[
+                proxy_mask,
+                "avg_daily_sales_provenance",
+            ] = "derived_daily_demand_proxy_from_actual_outbound"
+
+            if "sales_30d_provenance" not in inventory.columns:
+                inventory["sales_30d_provenance"] = ""
+
+            inventory.loc[
+                proxy_mask,
+                "sales_30d_provenance",
+            ] = "derived_30d_projection_from_daily_demand_proxy"
+
+    # Legacy inventory analyzers expect human-readable master names on
+    # inventory rows. Enrich only from verified master tables and preserve
+    # any names already supplied by the input workbook.
+    inventory = _fill_inventory_name(
+        inventory,
+        products,
+        key="product_id",
+        name="product_name",
+    )
+    inventory = _fill_inventory_name(
+        inventory,
+        stores,
+        key="store_id",
+        name="store_name",
+    )
 
     # Some DQN workbooks intentionally keep only operational stock/sales
     # columns. Legacy clustering and min-cost helpers need explicit supply and

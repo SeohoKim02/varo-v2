@@ -53,6 +53,10 @@ def _build_store_features(stores_df, inventory_df):
     stores["longitude"] = _safe(stores.get("longitude", pd.Series([127.0]*len(stores))), 127.0)
 
     inv = inventory_df.copy()
+
+    # Missing expiry stays missing. Do not invent expiry values.
+    if "days_to_expiry" not in inv.columns:
+        inv["days_to_expiry"] = np.nan
     inv_name = next((c for c in ["store_name"] if c in inv.columns), None)
     pname_col = "inventory_product_name" if "inventory_product_name" in inv.columns else (
         "product_name" if "product_name" in inv.columns else None)
@@ -67,14 +71,33 @@ def _build_store_features(stores_df, inventory_df):
         grp = inv.groupby(inv_name).agg(**agg).reset_index().rename(columns={inv_name:"store_name"})
         stores = stores.merge(grp, on="store_name", how="left")
     else:
-        for col in ["avg_daily_sales","stock_qty","dead_stock_qty","days_to_expiry","product_count"]:
+        for col in [
+            "avg_daily_sales",
+            "stock_qty",
+            "dead_stock_qty",
+            "product_count",
+        ]:
             stores[col] = 0.0
 
-    for col in ["avg_daily_sales","stock_qty","dead_stock_qty","days_to_expiry","product_count"]:
+        stores["days_to_expiry"] = np.nan
+
+    for col in [
+        "avg_daily_sales",
+        "stock_qty",
+        "dead_stock_qty",
+        "product_count",
+    ]:
         if col in stores.columns:
             stores[col] = _safe(stores[col], 0.0)
         else:
             stores[col] = 0.0
+
+    # Preserve unavailable expiry as NaN instead of converting it to zero.
+    if "days_to_expiry" in stores.columns:
+        stores["days_to_expiry"] = pd.to_numeric(
+            stores["days_to_expiry"],
+            errors="coerce",
+        )
 
     return stores.reset_index(drop=True)
 
@@ -123,7 +146,12 @@ def analyze_store_clustering(stores_df, inventory_df, n_clusters=None):
         return feat_df, pd.DataFrame(), {}
 
     feature_cols = ["latitude","longitude","avg_daily_sales","stock_qty","dead_stock_qty","days_to_expiry"]
-    avail = [c for c in feature_cols if c in feat_df.columns]
+    avail = [
+        c
+        for c in feature_cols
+        if c in feat_df.columns
+        and feat_df[c].notna().any()
+    ]
     X = feat_df[avail].fillna(0).values
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
