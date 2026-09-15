@@ -549,6 +549,117 @@ def build_strategy_comparison(recommendations: Sequence[Mapping[str, Any]]) -> l
     return rows
 
 
+
+def _rank_varo_operational(frame: pd.DataFrame) -> pd.Series:
+    """
+    Build the Varo operational execution rank without changing VHS itself.
+
+    Priority:
+    1. larger executable recommended quantity
+    2. lower transport/move cost
+    3. better VHS rank
+    4. deterministic route id
+    """
+    if frame is None:
+        return pd.Series(dtype="int64")
+
+    if frame.empty:
+        return pd.Series(dtype="int64", index=frame.index)
+
+    count = len(frame)
+
+    def numeric_first(names, default):
+        result = pd.Series(
+            [float("nan")] * count,
+            index=range(count),
+            dtype="float64",
+        )
+
+        for name in names:
+            if name not in frame.columns:
+                continue
+
+            values = pd.to_numeric(
+                frame[name].reset_index(drop=True),
+                errors="coerce",
+            )
+            result = result.fillna(values)
+
+        return result.fillna(default)
+
+    qty = numeric_first(
+        ("recommended_qty", "suggested_qty", "transfer_qty", "quantity"),
+        0.0,
+    )
+
+    cost = numeric_first(
+        ("move_cost", "estimated_cost", "transport_cost", "transfer_cost"),
+        float("inf"),
+    )
+
+    if "vhs_rank" in frame.columns:
+        vhs_rank = pd.to_numeric(
+            frame["vhs_rank"].reset_index(drop=True),
+            errors="coerce",
+        ).fillna(float("inf"))
+    else:
+        vhs_rank = pd.Series(
+            [float("inf")] * count,
+            index=range(count),
+            dtype="float64",
+        )
+
+    if "route_id" in frame.columns:
+        route_id = (
+            frame["route_id"]
+            .reset_index(drop=True)
+            .fillna("")
+            .astype(str)
+        )
+    else:
+        route_id = pd.Series([""] * count, index=range(count))
+
+    working = pd.DataFrame({
+        "_row_position": range(count),
+        "_qty": qty,
+        "_cost": cost,
+        "_vhs_rank": vhs_rank,
+        "_route_id": route_id,
+    })
+
+    ordered = working.sort_values(
+        by=[
+            "_qty",
+            "_cost",
+            "_vhs_rank",
+            "_route_id",
+            "_row_position",
+        ],
+        ascending=[
+            False,
+            True,
+            True,
+            True,
+            True,
+        ],
+        kind="mergesort",
+    )
+
+    rank_by_position = {
+        int(position): rank
+        for rank, position in enumerate(
+            ordered["_row_position"].tolist(),
+            start=1,
+        )
+    }
+
+    return pd.Series(
+        [rank_by_position[pos] for pos in range(count)],
+        index=frame.index,
+        dtype="int64",
+    )
+
+
 def apply_auto_vhs(
     candidates: pd.DataFrame,
     training_result: Mapping[str, Any] | None = None,
@@ -569,8 +680,8 @@ def apply_auto_vhs(
     frame["vhs_score"] = frame["auto_vhs_score"]
     frame["recalculated_vhs_score"] = frame["auto_vhs_score"]
     frame["vhs_rank"] = rank_vhs_scores(frame["auto_vhs_score"])
-    frame["varo_final_rank"] = frame["vhs_rank"]
-    frame["rank"] = frame["vhs_rank"]
+    frame["varo_final_rank"] = _rank_varo_operational(frame)
+    frame["rank"] = frame["varo_final_rank"]
     frame["recommendation_grade"] = frame["auto_vhs_score"].apply(_grade)
     frame["grade"] = frame["recommendation_grade"]
     frame["vhs_score_source"] = "VHS 자동 가중치 최적화"
@@ -580,7 +691,7 @@ def apply_auto_vhs(
     frame["greedy_strategy"] = frame.get("greedy_action", pd.Series("재고 이동", index=frame.index)).apply(normalize_action)
     if "greedy_action" not in frame.columns:
         frame["greedy_action"] = frame["greedy_strategy"]
-    frame["varo_final_decision"] = frame["vhs_rank"].map(lambda value: "최종 추천" if int(value) == 1 else "후보")
+    frame["varo_final_decision"] = frame["varo_final_rank"].map(lambda value: "최종 추천" if int(value) == 1 else "후보")
     frame["vhs_vs_greedy_match"] = frame["vhs_rank"].astype(int) == frame["greedy_rank"].fillna(999999).astype(float).astype(int)
     frame["pareto_rank"] = pareto_ranks(frame.where(pd.notna(frame), None).to_dict("records"))
     frame["pareto_status"] = frame["pareto_rank"].map(
@@ -622,7 +733,7 @@ def apply_auto_vhs(
         "component_columns": list(COMPONENTS),
         "dqn_included": dqn_enabled,
         "dqn_policy": "DQN 정상 학습/추론 결과가 있을 때만 낮은 비중으로 반영",
-        "final_top_route_id": str(frame.sort_values("vhs_rank").iloc[0].get("route_id")),
+        "final_top_route_id": str(frame.sort_values("varo_final_rank").iloc[0].get("route_id")),
         "vhs_average": round(float(frame["auto_vhs_score"].mean()), 3),
         "recalculated_average": round(float(frame["auto_vhs_score"].mean()), 3),
         "score_basis": "VHS 자동 가중치 최적화",

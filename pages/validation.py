@@ -684,7 +684,15 @@ def _refresh_recommendations_with_dqn(training_result: dict) -> None:
     summary["average_vhs_score"] = auto_vhs.analysis.get("vhs_average")
     summary["recommendation_count"] = len(clean)
     pipeline["summary"] = summary
-    pipeline["top5"] = sorted(clean, key=lambda row: float(row.get("vhs_rank") or row.get("rank") or 999999))[:5]
+    pipeline["top5"] = sorted(
+        clean,
+        key=lambda row: float(
+            row.get("varo_final_rank")
+            or row.get("vhs_rank")
+            or row.get("rank")
+            or 999999
+        ),
+    )[:5]
     connected = list(pipeline.get("connected_algorithms") or [])
     if "services.dqn_service.apply_dqn_reference_to_recommendations" not in connected:
         connected.append("services.dqn_service.apply_dqn_reference_to_recommendations")

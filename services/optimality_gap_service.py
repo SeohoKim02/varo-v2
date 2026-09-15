@@ -19,7 +19,7 @@ from typing import Any
 import pandas as pd
 
 
-OPTIMALITY_CALCULATION_VERSION = "saving-binary-v1"
+OPTIMALITY_CALCULATION_VERSION = "saving-binary-v2-varo-final-rank"
 CONSTRAINT_VERSION = "shared-feasibility-v1"
 DEFAULT_CANDIDATE_LIMIT = 20
 DEFAULT_MAX_ROUTES = 5
@@ -93,7 +93,7 @@ def _frame_records(value: Any) -> list[dict[str, Any]]:
 def _candidate_hash(recommendations: Sequence[Mapping[str, Any]]) -> str:
     fields = (
         "recommendation_id", "route_id", "product_id", "source_id", "target_id",
-        "route_type", "dc_id", "recommended_qty", "expected_saving", "vhs_rank",
+        "route_type", "dc_id", "recommended_qty", "expected_saving", "vhs_rank", "varo_final_rank",
         "greedy_rank", "feasible", "route_feasible", "cutline_passed", "time_window_status",
     )
     payload = [[item.get(field) for field in fields] for item in recommendations]
@@ -152,7 +152,7 @@ def prepare_optimality_problem(
 ) -> dict[str, Any]:
     """Prepare a ranked, immutable binary-candidate problem and exclusions."""
     copied = [copy.deepcopy(dict(item)) for item in recommendations or []]
-    ordered = sorted(enumerate(copied), key=lambda pair: _rank(pair[1], ("vhs_rank", "varo_final_rank", "rank"), pair[0]))
+    ordered = sorted(enumerate(copied), key=lambda pair: _rank(pair[1], ("varo_final_rank", "vhs_rank", "rank"), pair[0]))
     candidate_limit = settings.get("candidate_limit")
     if candidate_limit is not None:
         ordered = ordered[: int(candidate_limit)]
@@ -442,7 +442,7 @@ def build_ordered_feasible_combination(
     strategy: str,
 ) -> dict[str, Any]:
     """Select in existing VHS or Greedy rank order using the shared validator."""
-    rank_fields = ("vhs_rank", "varo_final_rank", "rank") if strategy == "varo" else ("greedy_rank",)
+    rank_fields = ("varo_final_rank", "vhs_rank", "rank") if strategy == "varo" else ("greedy_rank",)
     ordered = sorted(range(len(candidates)), key=lambda index: _rank(candidates[index], rank_fields, index))
     selected: list[int] = []
     skipped: list[dict[str, Any]] = []
