@@ -119,6 +119,8 @@ def apply_state_payload(state: MutableMapping[str, Any], payload: Mapping[str, A
     state["home_sim_display_mode"] = "단일 경로"
     state["home_sim_inventory_view"] = "전후 비교"
     state["home_sim_run_nonce"] = 0
+    state["simulation_history_last_key"] = None
+    state["strategy_dqn_view"] = None
     state["home_sim_route_rank_select"] = "1순위"
     state["home_sim_display_select"] = "단일 경로"
     state["home_inventory_view_select"] = "전후 비교"

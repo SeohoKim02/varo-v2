@@ -64,6 +64,8 @@ def initialize_session_state() -> None:
         "home_sim_display_mode": "단일 경로",
         "home_sim_inventory_view": "전후 비교",
         "home_sim_run_nonce": 0,
+        "simulation_history_last_key": None,
+        "strategy_dqn_view": None,
         "simulation_node_filter": "전체 센터/점포",
         "simulation_product_filter": "전체 상품",
         "strategy_product_filter": "전체 상품",

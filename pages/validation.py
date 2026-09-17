@@ -8,6 +8,7 @@ import copy
 import math
 from html import escape
 from datetime import datetime
+from pathlib import Path
 
 from components.cards import render_empty_state, render_page_header, render_section_header
 from components.status import badge_html, user_status_label
@@ -15,6 +16,7 @@ from services import export_service, v2_summaries
 from services.analysis_pipeline import run_analysis_pipeline
 from services.app_state import current_result_basis
 from services.dqn_service import (
+    ACTION_CONCENTRATION_LIMIT,
     apply_dqn_reference_to_recommendations,
     build_dqn_batch_comparison_report,
     can_apply_dqn_to_current_data,
@@ -22,6 +24,7 @@ from services.dqn_service import (
     dqn_result_summary,
     get_torch_runtime_info,
     load_latest_dqn_result,
+    read_training_comparison_rows,
     train_dqn,
     train_dqn_batch,
 )
@@ -975,6 +978,56 @@ def _render_dqn_secondary_tools(
         batch_actions_2[1].caption("두 배치 결과를 하나의 비교표로 정리합니다.")
 
 
+def _render_dqn_artifacts(display: dict | None, predictions: dict) -> None:
+    """Show what the finished training actually produced and saved."""
+    if not display:
+        return
+    diagnostics = dict(display.get("diagnostics") or {})
+    concentration = dict(diagnostics.get("action_concentration") or {})
+    reward = dict(display.get("reward_summary") or {})
+    model_path = display.get("model_path")
+    facts = [
+        ("모델 파일", Path(str(model_path)).name if model_path else "저장 안 함"),
+        ("저장 시각", str(display.get("timestamp") or "-")[:19].replace("T", " ")),
+        ("데이터 식별자", str(display.get("data_signature") or "-")[:16]),
+        ("에피소드", display.get("episodes", "-")),
+        ("Learning Rate", display.get("learning_rate", "-")),
+        ("후보 수", display.get("candidate_count", "-")),
+        ("평균 보상", reward.get("avg", "-")),
+        ("최종 보상", reward.get("last", "-")),
+        ("optimizer step 수", diagnostics.get("optimizer_steps", "-")),
+        ("파라미터 변화", "있음" if diagnostics.get("parameters_changed") else "확인 필요"),
+        ("학습/검증 후보", f"{diagnostics.get('train_candidate_count', '-')} / {diagnostics.get('holdout_candidate_count', '-')}"),
+        ("검증 평균 보상", diagnostics.get("holdout_mean_reward", "-")),
+    ]
+    with st.expander("저장된 모델과 학습 조건", expanded=False):
+        st.dataframe(
+            pd.DataFrame([{"항목": key, "값": "-" if value is None else str(value)} for key, value in facts]),
+            hide_index=True,
+            width="stretch",
+        )
+        if predictions:
+            st.dataframe(
+                pd.DataFrame(
+                    [{"action": key, "선택 건수": int(value or 0)} for key, value in predictions.items()]
+                ).sort_values("선택 건수", ascending=False),
+                hide_index=True,
+                width="stretch",
+            )
+        if model_path:
+            st.caption(f"모델 경로: {model_path}")
+        rows = read_training_comparison_rows()
+        if rows:
+            st.caption(f"누적 학습 비교 기록 {len(rows):,}건 · dqn_training_comparison.csv")
+            st.dataframe(pd.DataFrame(rows[-20:]), hide_index=True, width="stretch", height=220)
+    ratio = concentration.get("dominant_ratio")
+    if ratio is not None and float(ratio) >= ACTION_CONCENTRATION_LIMIT:
+        st.warning(
+            f"action이 '{concentration.get('dominant_action')}' 하나로 "
+            f"{float(ratio) * 100:.0f}% 쏠려 있습니다. 비교에서 제외하고 조건을 검토해주세요."
+        )
+
+
 def _render_dqn() -> None:
     recommendations = st.session_state.get("varo_recommendations") or []
     data_signature = st.session_state.get("data_signature")
@@ -1154,6 +1207,7 @@ def _render_dqn() -> None:
         result_cols_3[0].metric("action 최대 쏠림 비율", f"{dominance * 100:.1f}%" if display else "-")
         result_cols_3[1].metric("안정성 상태", user_status_label(summary["status"]) if display else "-")
         result_cols_3[2].metric("VHS 참고 반영 여부", "반영" if applicable else "반영 안 함")
+    _render_dqn_artifacts(display, predictions)
     if applicable:
         st.success("DQN 참고 점수가 최종 VHS에 낮은 비중으로 반영되었습니다.")
     elif display:

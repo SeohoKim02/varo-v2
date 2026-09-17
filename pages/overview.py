@@ -18,6 +18,13 @@ from services.inventory_transition_service import (
     cached_inventory_scenario,
     inventory_transition_cache_info,
 )
+from services.simulation_history import (
+    build_run_key,
+    build_run_records,
+    record_failed_run,
+    record_simulation_run,
+    resolve_snapshot_label,
+)
 from simulation.dynamic_network import (
     SIMULATION_LAYOUT_VERSION,
     build_network_nodes,
@@ -937,6 +944,65 @@ def _render_scenario_status(scenario: Mapping[str, Any], display_mode: str) -> N
         st.caption(f"{item.get('route_id') or '경로'}: {item.get('reason') or '현재 상태에서 실행 불가'}")
 
 
+def _persist_simulation_run(
+    data: Mapping[str, Any] | None,
+    recommendations: Sequence[Mapping[str, object]],
+    scoped: Sequence[Mapping[str, object]],
+    sim_routes: Sequence[Mapping[str, object]],
+    scenario: Mapping[str, Any],
+    controls: Mapping[str, object],
+) -> None:
+    """Store one finished run once, silently, without touching the simulation UI.
+
+    Streamlit reruns the page on every widget change, so the saved unit is the
+    run nonce produced by the execute button plus the executed route set.
+    """
+    if not bool(st.session_state.get("home_sim_playing")):
+        return
+    nonce = int(st.session_state.get("home_sim_run_nonce") or 0)
+    if nonce <= 0 or not sim_routes:
+        return
+    run_key = build_run_key(
+        st.session_state.get("data_signature"),
+        nonce,
+        sim_routes,
+        str(controls.get("display_mode") or ""),
+    )
+    if st.session_state.get("simulation_history_last_key") == run_key:
+        return
+    st.session_state["simulation_history_last_key"] = run_key
+    try:
+        summary, routes = build_run_records(
+            data_signature=st.session_state.get("data_signature"),
+            data_source_type=st.session_state.get("data_source_type"),
+            data_name=st.session_state.get("uploaded_filename"),
+            snapshot_label=resolve_snapshot_label(data),
+            filters={
+                "센터/점포": st.session_state.get("simulation_node_filter"),
+                "상품 범위": st.session_state.get("simulation_product_filter"),
+                "표시 방식": controls.get("display_mode"),
+                "표시 경로": controls.get("rank_label"),
+            },
+            candidate_count=len(recommendations),
+            scoped_candidate_count=len(scoped),
+            simulation_routes=sim_routes,
+            scenario=scenario,
+            pipeline_result=st.session_state.get("varo_pipeline_result") or {},
+        )
+        record_simulation_run(summary, routes, run_key=run_key)
+    except Exception as exc:  # pragma: no cover - history never blocks the run
+        try:
+            record_failed_run(
+                run_key=run_key,
+                error_summary=f"{type(exc).__name__}: {exc}",
+                data_signature=st.session_state.get("data_signature"),
+                data_name=st.session_state.get("uploaded_filename"),
+                data_source_type=st.session_state.get("data_source_type"),
+            )
+        except Exception:
+            pass
+
+
 def _render_inventory_basis(scenario: Mapping[str, Any]) -> None:
     with st.expander("재고 상태 계산 기준", expanded=False):
         metadata = scenario.get("metadata") or {}
@@ -1001,6 +1067,7 @@ def render_overview_page() -> None:
     scenario = cached_inventory_scenario(
         _data_signature(), data or {}, sim_routes, display_mode=str(controls["display_mode"]),
     )
+    _persist_simulation_run(data, recommendations, filtered, sim_routes, scenario, controls)
     base_nodes = _nodes_from_data(sim_routes)
     nodes = _decorate_nodes(base_nodes, scenario, sim_routes, str(controls["inventory_view"]))
     all_routes = _network_routes_from_data()

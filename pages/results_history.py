@@ -18,6 +18,12 @@ from pages.recommendations import _render_downloads, _render_selected_recommenda
 from pages.route_detail import _render_route_steps
 from services.analysis_pipeline import sort_recommendations
 from services.dqn_service import OUTPUT_DIR
+from services.simulation_history import (
+    STATUS_FAILED,
+    get_run_routes,
+    history_storage_info,
+    list_simulation_runs,
+)
 
 
 def _number(value: object) -> float | None:
@@ -170,6 +176,163 @@ def _render_selected_history(rows: list[dict[str, Any]]) -> None:
         )
 
 
+def _scope_label(payload: object, limit: int = 3) -> str:
+    try:
+        values = [str(value) for value in json.loads(str(payload or "[]"))]
+    except (ValueError, TypeError):
+        return "-"
+    if not values:
+        return "-"
+    head = " · ".join(values[:limit])
+    return head if len(values) <= limit else f"{head} 외 {len(values) - limit}곳"
+
+
+def _filters_label(payload: object) -> str:
+    try:
+        values = json.loads(str(payload or "{}"))
+    except (ValueError, TypeError):
+        return "-"
+    parts = [f"{key}: {value}" for key, value in values.items() if value not in (None, "")]
+    return " · ".join(parts) if parts else "-"
+
+
+def _simulation_frame(runs: list[dict[str, Any]]) -> pd.DataFrame:
+    return pd.DataFrame([{
+        "실행일시": str(row.get("created_at") or "")[:19].replace("T", " "),
+        "실행 조건": _filters_label(row.get("filters_json")),
+        "최종 전략": row.get("final_strategy") or "-",
+        "최종 선택 건수": int(row.get("selected_count") or 0),
+        "총 이동수량": _number(row.get("total_moved_quantity")) or 0,
+        "예상 절감액": _number(row.get("total_expected_saving")) or 0,
+        "부족재고 감소": _number(row.get("shortage_reduction")) or 0,
+        "서비스 충족률(%)": _number(row.get("service_fill_rate")),
+        "상태": row.get("status") or "-",
+    } for row in runs])
+
+
+def _render_simulation_detail(run: dict[str, Any]) -> None:
+    metrics = (
+        ("실행일시", str(run.get("created_at") or "-")[:19].replace("T", " ")),
+        ("상태", run.get("status") or "-"),
+        ("데이터", run.get("data_name") or "-"),
+        ("데이터 종류", run.get("data_source_type") or "-"),
+        ("데이터 식별자", str(run.get("data_signature") or "-")[:16]),
+        ("기준 스냅샷/기간", run.get("snapshot_label") or "데이터에 기준일자 열 없음"),
+        ("실행 조건", _filters_label(run.get("filters_json"))),
+        ("센터/점포 범위", _scope_label(run.get("node_scope_json"))),
+        ("상품 범위", _scope_label(run.get("product_scope_json"))),
+        ("후보 수", f"{int(run.get('candidate_count') or 0):,}건"),
+        ("조건 적용 후보 수", f"{int(run.get('scoped_candidate_count') or 0):,}건"),
+        ("실행 가능 후보 수", f"{int(run.get('feasible_candidate_count') or 0):,}건"),
+        ("최종 선택 건수", f"{int(run.get('selected_count') or 0):,}건"),
+        ("총 이동수량", f"{_number(run.get('total_moved_quantity')) or 0:,.0f}"),
+        ("총 예상 이동비용", f"{_number(run.get('total_move_cost')) or 0:,.0f}원"),
+        ("총 예상 절감액", f"{_number(run.get('total_expected_saving')) or 0:,.0f}원"),
+        ("초과재고 감소", f"{_number(run.get('excess_reduction')) or 0:,.0f}"),
+        ("부족재고 감소", f"{_number(run.get('shortage_reduction')) or 0:,.0f}"),
+        (
+            "서비스 충족률",
+            f"{_number(run.get('service_fill_rate')):.1f}%"
+            if _number(run.get("service_fill_rate")) is not None else "-",
+        ),
+        ("최종 전략", run.get("final_strategy") or "-"),
+        ("결과 기준", run.get("strategy_basis") or "-"),
+        ("계산 버전", run.get("calculation_version") or "-"),
+    )
+    if run.get("error_summary"):
+        metrics = (*metrics, ("실패 요약", str(run["error_summary"])))
+    rows_html = "".join(
+        '<div class="v2-detail-row">'
+        f'<span class="v2-card-caption">{html.escape(str(label))}</span>'
+        f'<strong>{html.escape(str(value))}</strong></div>'
+        for label, value in metrics
+    )
+    variant = "warning" if str(run.get("status")) == STATUS_FAILED else "success"
+    st.markdown(
+        '<div class="v2-wrap v2-card">'
+        f'<div class="v2-card-head"><div class="v2-card-title">실행 요약</div>'
+        f'{badge_html(str(run.get("status") or "-"), variant)}</div>'
+        f'{rows_html}</div>',
+        unsafe_allow_html=True,
+    )
+    routes = get_run_routes(str(run.get("run_id") or ""))
+    render_section_header(st, "최종 선택 경로", "최종 Varo가 실제로 선택한 경로만 저장합니다.")
+    if not routes:
+        render_empty_state(st, "저장된 최종 선택 경로가 없습니다", compact=True)
+        return
+    st.dataframe(
+        pd.DataFrame([{
+            "순서": row.get("sequence"),
+            "route_id": row.get("route_id"),
+            "상품": row.get("product_name") or row.get("product_id"),
+            "출발": row.get("source_id"),
+            "도착": row.get("target_id"),
+            "경유 DC": row.get("dc_id") or "-",
+            "경로 유형": row.get("route_type"),
+            "전략": row.get("action") or "-",
+            "추천 수량": _number(row.get("recommended_qty")),
+            "적용 수량": _number(row.get("applied_qty")),
+            "이동 비용": _number(row.get("move_cost")),
+            "예상 절감액": _number(row.get("expected_saving")),
+            "VARO 순위": _number(row.get("varo_final_rank")),
+            "VHS 순위": _number(row.get("vhs_rank")),
+            "Greedy 순위": _number(row.get("greedy_rank")),
+            "실행": "실행" if row.get("executed") else "건너뜀",
+            "건너뛴 사유": row.get("skipped_reason") or "-",
+        } for row in routes]),
+        hide_index=True,
+        width="stretch",
+        height=260,
+    )
+
+
+def _render_simulation_history() -> None:
+    runs = list_simulation_runs()
+    storage = history_storage_info()
+    if not runs:
+        render_empty_state(
+            st,
+            "저장된 시뮬레이션 이력이 없습니다",
+            "시뮬레이션 화면에서 실행을 완료하면 이곳에 자동으로 쌓입니다.",
+        )
+        st.caption(f"저장 위치: {storage['path']}")
+        return
+    completed = [row for row in runs if str(row.get("status")) != STATUS_FAILED]
+    savings = [_number(row.get("total_expected_saving")) or 0.0 for row in completed]
+    columns = st.columns(3, gap="medium")
+    values = (
+        ("총 실행 건수", f"{len(runs):,}건", "로컬에 저장된 시뮬레이션 실행"),
+        ("정상 완료", f"{len(completed):,}건", "최종 결과가 확정된 실행"),
+        ("누적 예상 절감액", f"{sum(savings):,.0f}원", "정상 완료 실행 합계"),
+    )
+    for column, (title, value, caption) in zip(columns, values):
+        with column:
+            render_kpi_card(st, title, value, caption=caption, compact=True)
+
+    area = st.container(key="simulation_history_workspace")
+    list_column, detail_column = area.columns([2.35, 1], gap="medium")
+    with list_column:
+        render_section_header(st, "시뮬레이션 실행 목록", right=f"총 {len(runs):,}건")
+        st.dataframe(_simulation_frame(runs), hide_index=True, width="stretch", height=330)
+    with detail_column:
+        render_section_header(st, "선택 실행 상세")
+        by_id = {str(row.get("run_id")): row for row in runs}
+        selected_id = st.selectbox(
+            "실행 선택",
+            list(by_id),
+            format_func=lambda key: (
+                f"{str(by_id[key].get('created_at') or '')[:16].replace('T', ' ')} · "
+                f"{by_id[key].get('final_strategy') or by_id[key].get('status') or '-'}"
+            ),
+            key="simulation_history_select",
+        )
+    _render_simulation_detail(by_id[selected_id])
+    st.caption(
+        f"저장 위치: {storage['path']} · 현재 크기 {storage['size_kb']:,.1f}KB · "
+        f"실행 {storage['run_count']:,}건 · 선택 경로 {storage['route_row_count']:,}행"
+    )
+
+
 def _render_current_result() -> None:
     recommendations = sort_recommendations(st.session_state.get("varo_recommendations") or [])
     render_section_header(st, "현재 시뮬레이션 결과", "현재 적용된 실제 추천 후보와 경로를 확인하고 내려받습니다.")
@@ -195,8 +358,18 @@ def render_results_history_page() -> None:
     render_page_header(
         st,
         "결과 이력",
-        "저장된 학습 실행을 찾고 현재 시뮬레이션 결과를 확인하세요.",
+        "로컬에 저장된 시뮬레이션 실행과 DQN 학습 결과를 구분해 확인하세요.",
     )
+    simulation_tab, dqn_tab = st.tabs(["시뮬레이션 이력", "DQN 학습/저장 결과"])
+    with simulation_tab:
+        _render_simulation_history()
+        with st.expander("현재 시뮬레이션 상세", expanded=False):
+            _render_current_result()
+    with dqn_tab:
+        _render_dqn_history()
+
+
+def _render_dqn_history() -> None:
     history = _saved_dqn_runs(str(OUTPUT_DIR))
     _render_history_kpis(history)
     render_section_header(st, "결과 검색", "실제 저장된 학습 결과만 조회합니다.")
@@ -219,6 +392,3 @@ def render_results_history_page() -> None:
         with detail_column:
             render_section_header(st, "선택 결과 미리보기")
             _render_selected_history(filtered)
-
-    with st.expander("현재 시뮬레이션 상세", expanded=not bool(history)):
-        _render_current_result()

@@ -5,15 +5,19 @@ reads historical DQN artifacts from the original project.
 """
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import math
+import random
 import warnings
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+
+from services.local_paths import dqn_output_dir
 
 ACTION_LABELS = (
     "재고 이동",
@@ -81,7 +85,34 @@ FEATURE_COLUMNS = (
     "confidence_score",
 )
 
-OUTPUT_DIR = Path(__file__).resolve().parents[1] / "outputs" / "dqn"
+# Other strategies' own outputs are deliberately kept out of the DQN state so the
+# agent stays an independent strategy instead of a VHS/Greedy imitator.
+STRATEGY_OUTPUT_COLUMNS = ("vhs_score", "greedy_rank")
+DQN_STATE_COLUMNS = tuple(
+    column for column in FEATURE_COLUMNS if column not in STRATEGY_OUTPUT_COLUMNS
+)
+
+# Columns that carry a real observation time.  When one exists the train/holdout
+# split follows it so a later period never trains an earlier decision.
+TIME_ORDER_COLUMNS = (
+    "snapshot_date", "base_date", "as_of_date", "as_of", "reference_date",
+    "created_at", "order_date", "기준일자", "기준일",
+)
+
+DISCOUNT_FACTOR = 0.9
+REPLAY_CAPACITY = 4096
+REPLAY_BATCH_SIZE = 32
+TARGET_SYNC_EPISODES = 5
+EPSILON_START = 1.0
+EPSILON_END = 0.05
+MAX_STEPS_PER_EPISODE = 48
+MAX_OPTIMIZER_STEPS = 12000
+MIN_HOLDOUT_CANDIDATES = 8
+HOLDOUT_RATIO = 0.2
+ACTION_CONCENTRATION_LIMIT = 0.90
+
+OUTPUT_DIR = dqn_output_dir()
+TRAINING_COMPARISON_CSV = OUTPUT_DIR / "dqn_training_comparison.csv"
 LATEST_JSON = OUTPUT_DIR / "latest_dqn_result.json"
 LATEST_MODEL = OUTPUT_DIR / "latest_dqn_model.pt"
 LATEST_BATCH_JSON = OUTPUT_DIR / "latest_dqn_batch.json"
@@ -377,6 +408,196 @@ def calculate_rewards(recommendations: Sequence[Mapping[str, Any]]) -> list[floa
     return rewards
 
 
+def _norm_high(recs: Sequence[Mapping[str, Any]], names: Sequence[str], neutral: float = 0.5) -> list[float]:
+    """Scale the first present column to 0..1; missing data stays neutral."""
+    values: list[float | None] = []
+    for row in recs:
+        found: float | None = None
+        for name in names:
+            found = _num(row.get(name))
+            if found is not None:
+                break
+        values.append(found)
+    clean = [value for value in values if value is not None]
+    if not clean or max(clean) == min(clean):
+        return [neutral for _ in values]
+    low, high = min(clean), max(clean)
+    return [
+        neutral if value is None else max(0.0, min(1.0, (value - low) / (high - low)))
+        for value in values
+    ]
+
+
+def _norm_low(recs: Sequence[Mapping[str, Any]], names: Sequence[str], neutral: float = 0.5) -> list[float]:
+    return [1.0 - value for value in _norm_high(recs, names, 1.0 - neutral)]
+
+
+def build_reward_signals(recommendations: Sequence[Mapping[str, Any]]) -> dict[str, list[float]]:
+    """Derive the operational signals the reward function is allowed to use.
+
+    Every signal comes from a value the current Varo pipeline produces at
+    decision time.  No VHS rank, Greedy selection, MILP result, or realized
+    future outcome takes part.
+    """
+    recs = [dict(row) for row in recommendations or []]
+    expiry = _norm_high(recs, ("days_to_expiry", "expiry_days"))
+    return {
+        "saving": _norm_high(recs, ("expected_saving", "savings_score")),
+        "cost": _norm_low(recs, ("move_cost", "estimated_cost")),
+        "feasibility": _norm_high(recs, ("feasibility_score",), neutral=0.75),
+        "demand": _norm_high(recs, ("demand_fit_score",)),
+        "balance": _norm_high(recs, ("inventory_balance_score",)),
+        "risk": _norm_high(recs, ("disposal_risk_score",)),
+        "promotion": _norm_high(recs, ("promotion_score",), neutral=0.55),
+        "quantity": _norm_high(recs, ("recommended_qty",)),
+        "distance": _norm_low(recs, ("distance_km",)),
+        "expiry_pressure": [1.0 - value for value in expiry],
+        "route_ok": [
+            1.0 if str(row.get("route_type") or "").upper() in {"DIRECT", "VIA_DC"} else 0.0
+            for row in recs
+        ],
+        "is_direct": [1.0 if str(row.get("route_type") or "").upper() == "DIRECT" else 0.0 for row in recs],
+        "is_via_dc": [1.0 if str(row.get("route_type") or "").upper() == "VIA_DC" else 0.0 for row in recs],
+    }
+
+
+def action_reward_matrix(recommendations: Sequence[Mapping[str, Any]]) -> list[list[float]]:
+    """Reward every (candidate, action) pair against the Varo operating goals.
+
+    The order of priorities mirrors operations: secure executable service
+    quantity first, then keep cost down, then capture savings, and always
+    punish feasibility violations.  Nothing here reads another strategy's
+    decision, so the agent must find its own policy.
+    """
+    recs = [dict(row) for row in recommendations or []]
+    if not recs:
+        return []
+    signal = build_reward_signals(recs)
+    matrix: list[list[float]] = []
+    for index in range(len(recs)):
+        saving = signal["saving"][index]
+        cost = signal["cost"][index]
+        feasibility = signal["feasibility"][index]
+        demand = signal["demand"][index]
+        balance = signal["balance"][index]
+        risk = signal["risk"][index]
+        promotion = signal["promotion"][index]
+        quantity = signal["quantity"][index]
+        distance = signal["distance"][index]
+        pressure = signal["expiry_pressure"][index]
+        service = 0.55 * demand + 0.45 * quantity
+        move_expensive = 1.0 - cost
+
+        transfer = (
+            0.30 * service + 0.24 * saving + 0.18 * cost
+            + 0.16 * feasibility + 0.08 * balance + 0.04 * distance
+        )
+        if signal["route_ok"][index] < 1.0:
+            transfer -= 0.20
+        if feasibility < 0.35:
+            transfer -= 0.20
+
+        direct = transfer + (0.06 if signal["is_direct"][index] else -0.10)
+        via_dc = transfer + (0.06 if signal["is_via_dc"][index] else -0.10)
+
+        discount = (
+            0.30 * risk + 0.24 * pressure + 0.20 * (1.0 - feasibility)
+            + 0.14 * (1.0 - demand) + 0.12 * move_expensive
+        )
+        urgent = (
+            0.40 * pressure + 0.30 * risk + 0.18 * (1.0 - feasibility) + 0.12 * move_expensive
+        )
+        if pressure < 0.6:
+            urgent -= 0.15
+        bundle = (
+            0.45 * promotion + 0.22 * risk + 0.18 * quantity + 0.15 * (1.0 - demand)
+        )
+        dispose = 0.10 + 0.32 * risk * pressure
+        if feasibility >= 0.5:
+            dispose -= 0.25
+        hold = 0.30 + 0.18 * (1.0 - risk) + 0.12 * (1.0 - pressure)
+        if feasibility < 0.35:
+            hold += 0.15
+
+        row = {
+            "재고 이동": transfer,
+            "DC 경유 이동": via_dc,
+            "직접 이동": direct,
+            "할인": discount,
+            "긴급 할인": urgent,
+            "1+1": bundle,
+            "폐기": dispose,
+            "보류": hold,
+        }
+        matrix.append([round(max(0.0, min(1.0, row[label])), 6) for label in ACTION_LABELS])
+    return matrix
+
+
+def reward_optimal_actions(recommendations: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Best-response action per candidate under the DQN reward only.
+
+    This is the distribution a learned policy is measured against.  It comes
+    from the reward function, never from the Greedy or VHS decision, so a
+    uniform heuristic label set cannot make the DQN look unusable.
+    """
+    matrix = action_reward_matrix(recommendations)
+    return [
+        ACTION_LABELS[max(range(len(row)), key=lambda index: row[index])]
+        for row in matrix
+    ]
+
+
+def _time_order_key(recommendations: Sequence[Mapping[str, Any]]) -> str | None:
+    for column in TIME_ORDER_COLUMNS:
+        if any(str(row.get(column) or "").strip() for row in recommendations or []):
+            return column
+    return None
+
+
+def chronological_split(
+    recommendations: Sequence[Mapping[str, Any]],
+    holdout_ratio: float = HOLDOUT_RATIO,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split train/holdout in time order, never by shuffling.
+
+    When the data carries a real observation time the rows are sorted by it
+    first; otherwise the supplied candidate order is treated as the arrival
+    order.  The holdout is always the later slice, so no future row can reach
+    the training window.
+    """
+    recs = [dict(row) for row in recommendations or []]
+    if not recs:
+        return [], []
+    column = _time_order_key(recs)
+    if column:
+        recs = sorted(recs, key=lambda row: (str(row.get(column) or ""),))
+    if len(recs) < MIN_HOLDOUT_CANDIDATES or holdout_ratio <= 0.0:
+        return recs, []
+    holdout_size = max(1, int(round(len(recs) * float(holdout_ratio))))
+    cut = len(recs) - holdout_size
+    return recs[:cut], recs[cut:]
+
+
+def action_concentration(actions: Sequence[str]) -> dict[str, Any]:
+    """Report how strongly one action dominates real inference output."""
+    distribution = Counter(str(action) for action in actions if action)
+    total = sum(distribution.values())
+    if not total:
+        return {
+            "total": 0, "dominant_action": None, "dominant_ratio": None,
+            "distinct_actions": 0, "concentrated": False,
+        }
+    dominant_action, dominant_count = distribution.most_common(1)[0]
+    ratio = dominant_count / total
+    return {
+        "total": total,
+        "dominant_action": dominant_action,
+        "dominant_ratio": round(ratio, 6),
+        "distinct_actions": len([value for value in distribution.values() if value > 0]),
+        "concentrated": bool(ratio >= ACTION_CONCENTRATION_LIMIT or len(distribution) < 2),
+    }
+
+
 def evaluate_dqn_stability(
     losses: Sequence[float],
     actions: Sequence[str],
@@ -405,7 +626,7 @@ def evaluate_dqn_stability(
         len(target_distribution) < 2
         or max(target_distribution.values()) / max(1, sum(target_distribution.values())) >= 0.90
     ):
-        return NEEDS_REVIEW_STATUS, "원본 라벨 분포가 한쪽으로 치우쳤습니다."
+        return NEEDS_REVIEW_STATUS, "보상 기준 최적 action 분포가 한쪽으로 치우쳤습니다."
     if any(not math.isfinite(float(reward)) for reward in rewards):
         return NEEDS_REVIEW_STATUS, "reward 값이 안정적이지 않습니다."
     if rewards and max(rewards) == min(rewards):
@@ -517,6 +738,228 @@ def _model(input_size: int, output_size: int, seed: int = 17):
     )
 
 
+def _cost_shares(recommendations: Sequence[Mapping[str, Any]]) -> list[float]:
+    """Share of the run's transport cost each candidate would consume."""
+    costs = [
+        (_num(row.get("move_cost")) or _num(row.get("estimated_cost")) or 0.0)
+        for row in recommendations
+    ]
+    total = sum(costs)
+    if total <= 0:
+        return [1.0 / max(1, len(costs)) for _ in costs]
+    return [value / total for value in costs]
+
+
+def build_training_states(
+    recommendations: Sequence[Mapping[str, Any]],
+    feature_columns: Sequence[str] = DQN_STATE_COLUMNS,
+) -> list[list[float]]:
+    """Candidate features for DQN, without the two per-episode dimensions."""
+    return build_state_vectors(recommendations, feature_columns=feature_columns)
+
+
+def _episode_state(base: Sequence[float], progress: float, budget: float) -> list[float]:
+    return [*base, round(max(0.0, min(1.0, progress)), 6), round(max(0.0, min(1.0, budget)), 6)]
+
+
+TRANSFER_ACTIONS = frozenset({"재고 이동", "DC 경유 이동", "직접 이동"})
+_TRANSFER_INDEXES = tuple(
+    index for index, label in enumerate(ACTION_LABELS) if label in TRANSFER_ACTIONS
+)
+
+
+def state_schema_fingerprint(feature_columns: Sequence[str] = DQN_STATE_COLUMNS) -> str:
+    """Identify the exact state layout a saved model expects."""
+    blob = json.dumps(
+        {
+            "feature_columns": list(feature_columns),
+            "extra_dimensions": ["route_via_dc", "cold_chain", "progress", "remaining_budget"],
+            "action_labels": list(ACTION_LABELS),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _greedy_rollout(model, base_states: Sequence[Sequence[float]], cost_shares: Sequence[float]):
+    """Run the learned policy over the candidate sequence with no exploration."""
+    import torch
+
+    total = max(1, len(base_states))
+    budget = 1.0
+    chosen: list[int] = []
+    q_rows: list[list[float]] = []
+    with torch.no_grad():
+        for index, base in enumerate(base_states):
+            vector = _episode_state(base, index / total, budget)
+            values = model(torch.tensor([vector], dtype=torch.float32))[0]
+            q_values = [float(value) for value in values.tolist()]
+            action = int(max(range(len(q_values)), key=lambda position: q_values[position]))
+            chosen.append(action)
+            q_rows.append(q_values)
+            if action in _TRANSFER_INDEXES:
+                budget = max(0.0, budget - float(cost_shares[index]))
+    return chosen, q_rows
+
+
+def _confidence_from_q(q_values: Sequence[float]) -> float:
+    """Softmax confidence of the selected action, computed without torch."""
+    clean = [value for value in q_values if math.isfinite(value)]
+    if not clean:
+        return 0.0
+    highest = max(clean)
+    exponents = [math.exp(min(60.0, value - highest)) for value in clean]
+    total = sum(exponents)
+    return float(max(exponents) / total) if total > 0 else 0.0
+
+
+def run_dqn_training(
+    recommendations: Sequence[Mapping[str, Any]],
+    episodes: int,
+    learning_rate: float,
+    seed: int = 17,
+) -> dict[str, Any]:
+    """Train a Q network with replay, epsilon-greedy control, and a target net.
+
+    One episode walks the candidate sequence in chronological order while the
+    remaining transport budget changes with the actions taken, so each update is
+    a real temporal-difference step instead of a fit to another strategy label.
+    """
+    import torch
+    from torch import nn
+
+    train_recs, holdout_recs = chronological_split(recommendations)
+    base_states = build_training_states(train_recs)
+    reward_matrix = action_reward_matrix(train_recs)
+    cost_shares = _cost_shares(train_recs)
+    action_count = len(ACTION_LABELS)
+    input_size = len(base_states[0]) + 2
+    device = torch.device(get_torch_training_device(torch))
+
+    torch.manual_seed(int(seed))
+    policy = _model(input_size, action_count, seed=seed).to(device)
+    target = _model(input_size, action_count, seed=seed).to(device)
+    target.load_state_dict(policy.state_dict())
+    target.eval()
+    initial_parameters = [parameter.detach().clone() for parameter in policy.parameters()]
+
+    optimizer = torch.optim.Adam(policy.parameters(), lr=float(learning_rate))
+    criterion = nn.SmoothL1Loss()
+    rng = random.Random(int(seed))
+    buffer: deque = deque(maxlen=REPLAY_CAPACITY)
+
+    total_candidates = max(1, len(base_states))
+    window = min(total_candidates, MAX_STEPS_PER_EPISODE)
+    episode_losses: list[float | None] = []
+    episode_rewards: list[float] = []
+    exploration_actions: list[int] = []
+    optimizer_steps = 0
+    diverged = False
+
+    for episode in range(int(episodes)):
+        span = max(1, int(episodes) - 1)
+        epsilon = EPSILON_START + (EPSILON_END - EPSILON_START) * (episode / span)
+        start = (episode * window) % total_candidates if total_candidates > window else 0
+        indexes = list(range(start, min(start + window, total_candidates))) or [0]
+        budget = 1.0
+        reward_sum = 0.0
+        step_losses: list[float] = []
+        for order, index in enumerate(indexes):
+            state = _episode_state(base_states[index], index / total_candidates, budget)
+            if rng.random() < epsilon:
+                action = rng.randrange(action_count)
+            else:
+                with torch.no_grad():
+                    values = policy(torch.tensor([state], dtype=torch.float32, device=device))[0]
+                action = int(torch.argmax(values).item())
+            exploration_actions.append(action)
+            reward = float(reward_matrix[index][action])
+            reward_sum += reward
+            next_budget = (
+                max(0.0, budget - float(cost_shares[index]))
+                if action in _TRANSFER_INDEXES else budget
+            )
+            done = order == len(indexes) - 1
+            next_index = index + 1 if index + 1 < total_candidates else index
+            next_state = _episode_state(
+                base_states[next_index], next_index / total_candidates, next_budget
+            )
+            buffer.append((state, action, reward, next_state, done))
+            budget = next_budget
+
+            learn_ready = len(buffer) >= min(REPLAY_BATCH_SIZE, total_candidates)
+            if learn_ready and optimizer_steps < MAX_OPTIMIZER_STEPS:
+                batch = rng.sample(list(buffer), min(REPLAY_BATCH_SIZE, len(buffer)))
+                states_tensor = torch.tensor([item[0] for item in batch], dtype=torch.float32, device=device)
+                actions_tensor = torch.tensor([item[1] for item in batch], dtype=torch.long, device=device)
+                rewards_tensor = torch.tensor([item[2] for item in batch], dtype=torch.float32, device=device)
+                next_tensor = torch.tensor([item[3] for item in batch], dtype=torch.float32, device=device)
+                done_tensor = torch.tensor(
+                    [1.0 if item[4] else 0.0 for item in batch], dtype=torch.float32, device=device
+                )
+                predicted = policy(states_tensor).gather(1, actions_tensor.unsqueeze(1)).squeeze(1)
+                with torch.no_grad():
+                    bootstrap = target(next_tensor).max(dim=1).values
+                expected = rewards_tensor + DISCOUNT_FACTOR * bootstrap * (1.0 - done_tensor)
+                loss = criterion(predicted, expected)
+                if not torch.isfinite(loss):
+                    diverged = True
+                    step_losses.append(float("inf"))
+                    break
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                optimizer_steps += 1
+                step_losses.append(float(loss.detach().item()))
+        episode_rewards.append(round(reward_sum / max(1, len(indexes)), 6))
+        episode_losses.append(
+            round(sum(step_losses) / len(step_losses), 8) if step_losses else None
+        )
+        if diverged:
+            break
+        if episode % TARGET_SYNC_EPISODES == 0:
+            target.load_state_dict(policy.state_dict())
+
+    target.load_state_dict(policy.state_dict())
+    policy.eval()
+    parameters_changed = any(
+        not torch.equal(before, after.detach())
+        for before, after in zip(initial_parameters, policy.parameters())
+    )
+
+    policy_cpu = policy.to("cpu")
+    all_base = build_training_states(recommendations)
+    chosen, q_rows = _greedy_rollout(policy_cpu, all_base, _cost_shares(recommendations))
+    holdout_reward = None
+    if holdout_recs:
+        holdout_base = build_training_states(holdout_recs)
+        holdout_matrix = action_reward_matrix(holdout_recs)
+        holdout_actions, _ = _greedy_rollout(policy_cpu, holdout_base, _cost_shares(holdout_recs))
+        holdout_reward = round(
+            sum(holdout_matrix[index][action] for index, action in enumerate(holdout_actions))
+            / max(1, len(holdout_actions)),
+            6,
+        )
+    return {
+        "model": policy_cpu,
+        "input_size": input_size,
+        "episode_losses": episode_losses,
+        "episode_rewards": episode_rewards,
+        "selected_actions": chosen,
+        "q_values": q_rows,
+        "parameters_changed": bool(parameters_changed),
+        "optimizer_steps": optimizer_steps,
+        "diverged": diverged,
+        "exploration_distribution": dict(Counter(ACTION_LABELS[index] for index in exploration_actions)),
+        "train_candidate_count": len(train_recs),
+        "holdout_candidate_count": len(holdout_recs),
+        "holdout_mean_reward": holdout_reward,
+        "time_order_column": _time_order_key(recommendations),
+        "device": str(device),
+    }
+
+
 def train_dqn(
     recommendations: Sequence[Mapping[str, Any]],
     data_signature: str | None = None,
@@ -531,7 +974,7 @@ def train_dqn(
     seed: int = 17,
     progress_callback: Callable[[str], None] | None = None,
 ) -> DqnTrainingResult:
-    """Train a small V2-only Q network after an explicit user action."""
+    """Train a real Q network on the current V2 candidates after a user action."""
     recs = [dict(row) for row in recommendations or []]
     if candidate_count is not None:
         recs = recs[: max(0, int(candidate_count))]
@@ -554,56 +997,35 @@ def train_dqn(
         progress_callback("데이터 구성 중")
 
     import torch
-    from torch import nn
 
-    vectors = build_state_vectors(recs)
-    rewards = calculate_rewards(recs)
-    target_actions = _target_actions(recs)
-    action_index = build_action_mapping()
-    device = torch.device(get_torch_training_device(torch))
-    x = torch.tensor(vectors, dtype=torch.float32, device=device)
-    y = torch.zeros((len(recs), len(ACTION_LABELS)), dtype=torch.float32, device=device)
-    for row_index, (action, reward) in enumerate(zip(target_actions, rewards)):
-        y[row_index, action_index.get(action, 0)] = float(reward)
-
-    torch.manual_seed(int(seed))
-    model = _model(len(vectors[0]), len(ACTION_LABELS), seed=seed).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=float(learning_rate))
-    criterion = nn.MSELoss()
-    losses: list[float] = []
     max_episodes = max(1, min(int(episodes), 1200))
     if progress_callback is not None:
         progress_callback("DQN 학습 중")
-    for _ in range(max_episodes):
-        optimizer.zero_grad()
-        output = model(x)
-        loss = criterion(output, y)
-        if not torch.isfinite(loss):
-            losses.append(float("inf"))
-            break
-        loss.backward()
-        optimizer.step()
-        losses.append(float(loss.detach().item()))
+    training = run_dqn_training(
+        recs, episodes=max_episodes, learning_rate=float(learning_rate), seed=int(seed),
+    )
 
-    with torch.no_grad():
-        logits = model(x)
-        logits_are_finite = bool(torch.isfinite(logits).all().item())
-        if logits_are_finite:
-            probabilities = torch.softmax(logits, dim=1)
-            confidence_values, predicted_indices = torch.max(probabilities, dim=1)
-        else:
-            confidence_values = torch.zeros(len(recs), dtype=torch.float32)
-            predicted_indices = torch.zeros(len(recs), dtype=torch.long)
-
-    route_ids = _route_ids(recs)
-    predicted_actions = [ACTION_LABELS[int(index)] for index in predicted_indices.tolist()]
-    confidences = [round(float(value) * 100.0, 2) for value in confidence_values.tolist()]
+    model = training["model"]
+    losses = [value for value in training["episode_losses"] if value is not None]
+    if training["diverged"]:
+        losses = [*losses, float("inf")]
+    q_rows = training["q_values"]
+    q_values_are_finite = bool(q_rows) and all(
+        math.isfinite(value) for row in q_rows for value in row
+    )
+    predicted_actions = [ACTION_LABELS[index] for index in training["selected_actions"]]
+    confidences = [round(_confidence_from_q(row) * 100.0, 2) for row in q_rows]
+    reward_matrix = action_reward_matrix(recs)
+    action_rewards = [
+        float(reward_matrix[index][action])
+        for index, action in enumerate(training["selected_actions"])
+    ]
     references = [
         round(max(0.0, min(100.0, (reward * 72.0) + (confidence / 100.0) * 28.0)), 2)
-        for reward, confidence in zip(rewards, confidences)
+        for reward, confidence in zip(action_rewards, confidences)
     ]
     q_summaries = []
-    for values in logits.tolist():
+    for values in q_rows:
         clean = [float(value) for value in values if math.isfinite(float(value))]
         q_summaries.append({
             "max": round(max(clean), 6) if clean else None,
@@ -611,14 +1033,23 @@ def train_dqn(
             "avg": round(sum(clean) / len(clean), 6) if clean else None,
         })
 
+    route_ids = _route_ids(recs)
+    heuristic_actions = _target_actions(recs)
+    reference_actions = reward_optimal_actions(recs)
+    episode_rewards = training["episode_rewards"]
+    concentration = action_concentration(predicted_actions)
+
     if progress_callback is not None:
         progress_callback("안정성 검사 중")
     status, message = evaluate_dqn_stability(
-        losses, predicted_actions, rewards, candidate_count=len(recs), data_signature=signature,
-        current_signature=signature, target_actions=target_actions,
+        losses, predicted_actions, episode_rewards, candidate_count=len(recs),
+        data_signature=signature, current_signature=signature, target_actions=reference_actions,
     )
-    if not logits_are_finite:
+    if not q_values_are_finite:
         status, message = NEEDS_REVIEW_STATUS, "DQN 출력 값이 안정적이지 않습니다."
+    elif not training["parameters_changed"]:
+        status, message = NEEDS_REVIEW_STATUS, "학습 중 모델 파라미터가 변하지 않았습니다."
+
     trained_at, artifact_stamp = _now_parts()
     context_slug = _artifact_context(
         sample_id, training_mode, store_count, dc_count, max_episodes, float(learning_rate)
@@ -628,20 +1059,24 @@ def train_dqn(
     variant = training_mode if training_mode in VALID_VARIANTS else "original"
     model_payload = {
         "state_dict": model.state_dict(),
-        "input_size": len(vectors[0]),
-        "feature_columns": list(FEATURE_COLUMNS),
+        "input_size": training["input_size"],
+        "feature_columns": list(DQN_STATE_COLUMNS),
+        "state_schema": state_schema_fingerprint(),
         "action_labels": list(ACTION_LABELS),
         "data_signature": signature,
         "sample_id": sample_id,
         "training_mode": variant,
         "variant": variant,
         "seed": int(seed),
+        "episodes": max_episodes,
+        "learning_rate": float(learning_rate),
         "store_count": int(store_count or 0),
         "dc_count": int(dc_count or 0),
+        "trained_at": trained_at,
     }
     saved_model_path: str | None = None
     artifact_error_type: str | None = None
-    if status == NORMAL_STATUS and logits_are_finite:
+    if status == NORMAL_STATUS and q_values_are_finite:
         try:
             OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
             torch.save(model_payload, model_path)
@@ -668,16 +1103,20 @@ def train_dqn(
         candidate_count=len(recs),
         action_distribution=dict(Counter(predicted_actions)),
         prediction_distribution=dict(Counter(predicted_actions)),
-        target_distribution=dict(Counter(target_actions)),
-        reward_history=[round(float(value), 8) for value in rewards],
-        loss_history=[round(float(value), 8) if math.isfinite(float(value)) else None for value in losses],
-        reward_summary=_summary(rewards),
+        target_distribution=dict(Counter(reference_actions)),
+        reward_history=[round(float(value), 8) for value in episode_rewards],
+        loss_history=[
+            round(float(value), 8) if value is not None and math.isfinite(float(value)) else None
+            for value in training["episode_losses"]
+        ],
+        reward_summary=_summary(episode_rewards),
         loss_summary=_summary(losses),
         average_confidence=round(sum(confidences) / len(confidences), 2) if confidences else None,
         reflection_mode=reflection_mode,
         model_status="trained" if status == NORMAL_STATUS else "not_applied",
         model_path=saved_model_path,
         result_path=str(result_path),
+        feature_columns=list(DQN_STATE_COLUMNS),
         dqn_action_by_route=dict(zip(route_ids, predicted_actions)),
         dqn_confidence_by_route=dict(zip(route_ids, confidences)),
         dqn_reference_by_route=dict(zip(route_ids, references)),
@@ -685,11 +1124,30 @@ def train_dqn(
         dqn_status_by_route={route_id: status for route_id in route_ids},
         diagnostics={
             "historical_artifacts_used": False,
-            "target_action_distribution": dict(Counter(target_actions)),
+            "heuristic_action_distribution": dict(Counter(heuristic_actions)),
+            "reward_optimal_distribution": dict(Counter(reference_actions)),
+            "target_action_distribution": dict(Counter(reference_actions)),
             "prediction_distribution": dict(Counter(predicted_actions)),
+            "exploration_distribution": training["exploration_distribution"],
+            "action_concentration": concentration,
+            "parameters_changed": training["parameters_changed"],
+            "optimizer_steps": training["optimizer_steps"],
+            "replay_capacity": REPLAY_CAPACITY,
+            "replay_batch_size": REPLAY_BATCH_SIZE,
+            "discount_factor": DISCOUNT_FACTOR,
+            "target_sync_episodes": TARGET_SYNC_EPISODES,
+            "epsilon_range": [EPSILON_START, EPSILON_END],
+            "train_candidate_count": training["train_candidate_count"],
+            "holdout_candidate_count": training["holdout_candidate_count"],
+            "holdout_mean_reward": training["holdout_mean_reward"],
+            "time_order_column": training["time_order_column"],
+            "state_schema": state_schema_fingerprint(),
+            "mean_selected_action_reward": (
+                round(sum(action_rewards) / len(action_rewards), 6) if action_rewards else None
+            ),
             "latest_model_path": str(LATEST_MODEL_BY_VARIANT[variant]) if saved_model_path else None,
             "seed": int(seed),
-            "device": str(device),
+            "device": training["device"],
             "storage_status": "session_only" if artifact_error_type else "pending",
             "storage_error_type": artifact_error_type,
         },
@@ -703,6 +1161,10 @@ def train_dqn(
         result.result_path = None
         result.diagnostics["storage_status"] = "session_only"
         result.diagnostics["storage_error_type"] = type(exc).__name__
+    try:
+        append_training_comparison_row(result)
+    except Exception as exc:  # pragma: no cover - the comparison log never blocks training
+        result.diagnostics["comparison_log_error_type"] = type(exc).__name__
     return result
 
 
@@ -734,6 +1196,76 @@ def save_dqn_result(result: DqnTrainingResult | Mapping[str, Any]) -> dict[str, 
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
     return data
+
+
+COMPARISON_COLUMNS = (
+    "timestamp", "sample_id", "variant", "episodes", "learning_rate", "candidate_count",
+    "seed", "status", "message", "reward_first", "reward_last", "reward_avg",
+    "loss_first", "loss_last", "average_confidence", "distinct_actions",
+    "dominant_action", "dominant_ratio", "optimizer_steps", "parameters_changed",
+    "holdout_mean_reward", "train_candidate_count", "holdout_candidate_count",
+    "state_schema", "model_path",
+)
+
+
+def append_training_comparison_row(
+    result: DqnTrainingResult | Mapping[str, Any], path: Path | None = None,
+) -> Path:
+    """Append one row to the cumulative local training comparison file.
+
+    This file is written by V2 only and is never read back as pipeline input, so
+    the historical-artifact guard in ``services.dqn_guard`` stays intact.
+    """
+    data = result.to_dict() if isinstance(result, DqnTrainingResult) else dict(result)
+    diagnostics = dict(data.get("diagnostics") or {})
+    concentration = dict(diagnostics.get("action_concentration") or {})
+    reward = dict(data.get("reward_summary") or {})
+    loss = dict(data.get("loss_summary") or {})
+    row = {
+        "timestamp": data.get("timestamp"),
+        "sample_id": data.get("sample_id"),
+        "variant": data.get("variant") or data.get("training_mode"),
+        "episodes": data.get("episodes"),
+        "learning_rate": data.get("learning_rate"),
+        "candidate_count": data.get("candidate_count"),
+        "seed": data.get("seed"),
+        "status": data.get("final_status") or data.get("status"),
+        "message": data.get("message"),
+        "reward_first": reward.get("first"),
+        "reward_last": reward.get("last"),
+        "reward_avg": reward.get("avg"),
+        "loss_first": loss.get("first"),
+        "loss_last": loss.get("last"),
+        "average_confidence": data.get("average_confidence"),
+        "distinct_actions": concentration.get("distinct_actions"),
+        "dominant_action": concentration.get("dominant_action"),
+        "dominant_ratio": concentration.get("dominant_ratio"),
+        "optimizer_steps": diagnostics.get("optimizer_steps"),
+        "parameters_changed": diagnostics.get("parameters_changed"),
+        "holdout_mean_reward": diagnostics.get("holdout_mean_reward"),
+        "train_candidate_count": diagnostics.get("train_candidate_count"),
+        "holdout_candidate_count": diagnostics.get("holdout_candidate_count"),
+        "state_schema": diagnostics.get("state_schema"),
+        "model_path": data.get("model_path"),
+    }
+    target = Path(path) if path is not None else TRAINING_COMPARISON_CSV
+    target.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not target.exists() or target.stat().st_size == 0
+    with target.open("a", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(COMPARISON_COLUMNS))
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+    return target
+
+
+def read_training_comparison_rows(path: Path | None = None) -> list[dict[str, Any]]:
+    """Read back the V2 comparison log for display only."""
+    target = Path(path) if path is not None else TRAINING_COMPARISON_CSV
+    if not target.exists():
+        return []
+    with target.open("r", encoding="utf-8-sig", newline="") as handle:
+        return [dict(row) for row in csv.DictReader(handle)]
 
 
 def _save_json_payload_best_effort(payload: dict[str, Any], path: Path) -> None:
@@ -808,13 +1340,80 @@ def can_apply_dqn_to_current_data(training_result: Mapping[str, Any] | None, dat
     return True
 
 
+def model_payload_is_compatible(
+    payload: Mapping[str, Any] | None,
+    data_signature: str | None,
+    variant: str | None = None,
+) -> tuple[bool, str]:
+    """Check a saved model against the current state schema and data."""
+    if not payload:
+        return False, "저장된 DQN 모델이 없습니다."
+    if list(payload.get("action_labels") or []) != list(ACTION_LABELS):
+        return False, "DQN action 정의가 달라 비교할 수 없습니다."
+    schema = str(payload.get("state_schema") or "")
+    if schema != state_schema_fingerprint():
+        return False, "DQN feature schema가 달라 비교할 수 없습니다."
+    if list(payload.get("feature_columns") or []) != list(DQN_STATE_COLUMNS):
+        return False, "DQN feature schema가 달라 비교할 수 없습니다."
+    if variant is not None:
+        payload_variant = str(payload.get("variant") or payload.get("training_mode") or "original")
+        if payload_variant != variant:
+            return False, "요청한 학습 유형과 다른 DQN 모델입니다."
+    if data_signature and payload.get("data_signature") != data_signature:
+        return False, "현재 데이터와 다른 DQN 모델입니다."
+    return True, "DQN 모델 사용 가능"
+
+
+def _load_model_payload(path: Path) -> Mapping[str, Any] | None:
+    import torch
+
+    try:
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+    except Exception:
+        return None
+    return payload if isinstance(payload, Mapping) else None
+
+
+def find_compatible_model(
+    data_signature: str | None,
+    variant: str = "original",
+    limit: int = 30,
+) -> tuple[Path, Mapping[str, Any]] | None:
+    """Return the newest saved model that matches the current schema and data.
+
+    Only models this V2 build wrote can match, because the state schema
+    fingerprint is stored inside every payload.
+    """
+    if not OUTPUT_DIR.exists():
+        return None
+    candidates = [LATEST_MODEL_BY_VARIANT.get(variant), LATEST_MODEL]
+    candidates.extend(
+        sorted(OUTPUT_DIR.glob("dqn_model_*.pt"), key=lambda item: item.stat().st_mtime, reverse=True)[:limit]
+    )
+    seen: set[str] = set()
+    for path in candidates:
+        if path is None or not path.exists() or str(path) in seen:
+            continue
+        seen.add(str(path))
+        payload = _load_model_payload(path)
+        compatible, _ = model_payload_is_compatible(payload, data_signature, variant)
+        if compatible and payload is not None:
+            return path, payload
+    return None
+
+
 def infer_dqn_actions(
     recommendations: Sequence[Mapping[str, Any]],
     data_signature: str | None = None,
     model_path: str | None = None,
     training_mode: str = "original",
 ) -> DqnTrainingResult:
-    """Run inference from a saved V2 model only when explicitly requested."""
+    """Run a real forward pass from a saved V2 model, or say training is needed.
+
+    Priority is the explicitly requested model, then the newest compatible one.
+    A missing model, a mismatched feature schema, or a failed load always ends
+    in a ``학습 필요`` result; no other strategy's values are substituted.
+    """
     recs = [dict(row) for row in recommendations or []]
     signature = data_signature or data_signature_from_recommendations(recs)
     torch_ok, torch_message = get_torch_status()
@@ -822,57 +1421,80 @@ def infer_dqn_actions(
         return _empty_result(
             ENV_REQUIRED_STATUS, torch_message, recs, signature, training_mode=training_mode
         )
-    variant = training_mode if training_mode in VALID_VARIANTS else "original"
-    path = Path(model_path) if model_path else LATEST_MODEL_BY_VARIANT[variant]
-    if not path.exists():
+    if not recs:
         return _empty_result(
-            NEEDS_TRAINING_STATUS, "저장된 DQN 모델이 없습니다.", recs, signature,
-            training_mode=training_mode,
+            NEEDS_TRAINING_STATUS, "후보가 없습니다.", recs, signature, training_mode=training_mode,
         )
+    variant = training_mode if training_mode in VALID_VARIANTS else "original"
+
+    payload: Mapping[str, Any] | None = None
+    path: Path | None = None
+    if model_path:
+        path = Path(model_path)
+        if not path.exists():
+            return _empty_result(
+                NEEDS_TRAINING_STATUS, "저장된 DQN 모델이 없습니다.", recs, signature,
+                training_mode=training_mode,
+            )
+        payload = _load_model_payload(path)
+        compatible, message = model_payload_is_compatible(payload, signature, variant)
+        if not compatible:
+            status = PAST_RESULT_STATUS if payload else NEEDS_TRAINING_STATUS
+            return _empty_result(status, message, recs, signature, training_mode=training_mode)
+    else:
+        found = find_compatible_model(signature, variant)
+        if found is None:
+            return _empty_result(
+                NEEDS_TRAINING_STATUS, "현재 데이터와 맞는 DQN 모델이 없습니다.", recs, signature,
+                training_mode=training_mode,
+            )
+        path, payload = found
 
     import torch
 
-    payload = torch.load(path, map_location="cpu")
-    model_signature = payload.get("data_signature")
-    if model_signature != signature:
+    assert payload is not None and path is not None
+    base_states = build_training_states(recs)
+    expected_size = len(base_states[0]) + 2
+    if int(payload.get("input_size") or 0) != expected_size:
         return _empty_result(
-            PAST_RESULT_STATUS, "현재 데이터와 다른 DQN 모델입니다.", recs, model_signature,
-            training_mode=training_mode,
-        )
-    payload_variant = str(payload.get("variant") or payload.get("training_mode") or "original")
-    if payload_variant != variant:
-        return _empty_result(
-            PAST_RESULT_STATUS, "요청한 학습 유형과 다른 DQN 모델입니다.", recs,
-            model_signature, training_mode=training_mode,
-        )
-
-    vectors = build_state_vectors(recs)
-    if not vectors:
-        return _empty_result(
-            NEEDS_TRAINING_STATUS, "후보가 없습니다.", recs, signature,
+            NEEDS_TRAINING_STATUS, "DQN feature schema가 달라 비교할 수 없습니다.", recs, signature,
             training_mode=training_mode,
         )
     seed = int(payload.get("seed") or 17)
-    model = _model(int(payload.get("input_size") or len(vectors[0])), len(ACTION_LABELS), seed=seed)
-    model.load_state_dict(payload["state_dict"])
+    model = _model(expected_size, len(ACTION_LABELS), seed=seed)
+    try:
+        model.load_state_dict(payload["state_dict"])
+    except Exception:
+        return _empty_result(
+            NEEDS_TRAINING_STATUS, "DQN 모델을 불러오지 못했습니다.", recs, signature,
+            training_mode=training_mode,
+        )
     model.eval()
-    x = torch.tensor(vectors, dtype=torch.float32)
     with torch.no_grad():
-        logits = model(x)
-        probabilities = torch.softmax(logits, dim=1)
-        confidence_values, predicted_indices = torch.max(probabilities, dim=1)
+        selected, q_rows = _greedy_rollout(model, base_states, _cost_shares(recs))
+
     route_ids = _route_ids(recs)
-    actions = [ACTION_LABELS[int(index)] for index in predicted_indices.tolist()]
-    confidences = [round(float(value) * 100.0, 2) for value in confidence_values.tolist()]
-    rewards = calculate_rewards(recs)
+    actions = [ACTION_LABELS[int(index)] for index in selected]
+    confidences = [round(_confidence_from_q(row) * 100.0, 2) for row in q_rows]
+    reward_matrix = action_reward_matrix(recs)
+    action_rewards = [float(reward_matrix[index][action]) for index, action in enumerate(selected)]
     references = [
         round(max(0.0, min(100.0, (reward * 72.0) + (confidence / 100.0) * 28.0)), 2)
-        for reward, confidence in zip(rewards, confidences)
+        for reward, confidence in zip(action_rewards, confidences)
     ]
-    target_actions = _target_actions(recs)
+    q_summaries = []
+    for values in q_rows:
+        clean = [float(value) for value in values if math.isfinite(float(value))]
+        q_summaries.append({
+            "max": round(max(clean), 6) if clean else None,
+            "min": round(min(clean), 6) if clean else None,
+            "avg": round(sum(clean) / len(clean), 6) if clean else None,
+        })
+    reference_actions = reward_optimal_actions(recs)
+    concentration = action_concentration(actions)
     status, message = evaluate_dqn_stability(
-        [], actions, rewards, candidate_count=len(recs), data_signature=signature,
-        current_signature=signature, target_actions=target_actions,
+        [], actions, action_rewards, candidate_count=len(recs), data_signature=signature,
+        current_signature=signature, target_actions=reference_actions,
     )
     return DqnTrainingResult(
         status=status,
@@ -881,25 +1503,83 @@ def infer_dqn_actions(
         message=message,
         data_signature=signature,
         timestamp=datetime.now().isoformat(timespec="microseconds"),
+        episodes=int(payload.get("episodes") or 0),
+        learning_rate=float(payload.get("learning_rate") or 0.001),
+        sample_id=str(payload.get("sample_id") or "current"),
         candidate_count=len(recs),
         training_mode=variant,
         variant=variant,
         seed=seed,
         action_distribution=dict(Counter(actions)),
         prediction_distribution=dict(Counter(actions)),
-        target_distribution=dict(Counter(target_actions)),
-        reward_history=[round(float(value), 8) for value in rewards],
-        reward_summary=_summary(rewards),
+        target_distribution=dict(Counter(reference_actions)),
+        reward_history=[round(float(value), 8) for value in action_rewards],
+        reward_summary=_summary(action_rewards),
         average_confidence=round(sum(confidences) / len(confidences), 2) if confidences else None,
         reflection_mode="DQN 참고만",
         model_status="loaded",
         model_path=str(path),
+        feature_columns=list(DQN_STATE_COLUMNS),
         dqn_action_by_route=dict(zip(route_ids, actions)),
         dqn_confidence_by_route=dict(zip(route_ids, confidences)),
         dqn_reference_by_route=dict(zip(route_ids, references)),
+        q_value_summary_by_route=dict(zip(route_ids, q_summaries)),
         dqn_status_by_route={route_id: status for route_id in route_ids},
+        diagnostics={
+            "historical_artifacts_used": False,
+            "action_concentration": concentration,
+            "state_schema": str(payload.get("state_schema") or ""),
+            "inference_source": "saved_model_forward",
+            "model_path": str(path),
+            "mean_selected_action_reward": (
+                round(sum(action_rewards) / len(action_rewards), 6) if action_rewards else None
+            ),
+        },
         historical_artifacts_used=False,
     )
+
+
+def dqn_inference_view(
+    recommendations: Sequence[Mapping[str, Any]],
+    data_signature: str | None = None,
+    training_mode: str = "original",
+    training_result: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Attach real DQN output to candidates for comparison surfaces.
+
+    An in-session training result for the same data is reused; otherwise a saved
+    model is loaded and a forward pass is run.  When neither is usable, every
+    row keeps ``비교 불가`` instead of borrowing a Greedy or VHS value.
+    """
+    recs = [dict(row) for row in recommendations or []]
+    signature = data_signature or data_signature_from_recommendations(recs)
+    source = "training_result"
+    result: Mapping[str, Any] | None = None
+    if training_result and can_apply_dqn_to_current_data(training_result, signature):
+        result = dict(training_result)
+    else:
+        source = "saved_model"
+        result = infer_dqn_actions(recs, signature, training_mode=training_mode).to_dict()
+    applicable = can_apply_dqn_to_current_data(result, signature)
+    updated = apply_dqn_reference_to_recommendations(recs, result, signature)
+    status = str(result.get("final_status") or result.get("status") or NEEDS_TRAINING_STATUS)
+    concentration = dict((result.get("diagnostics") or {}).get("action_concentration") or {})
+    if not concentration:
+        concentration = action_concentration(
+            [row.get("dqn_action") for row in updated if applicable]
+        )
+    return {
+        "recommendations": updated,
+        "available": bool(applicable),
+        "status": status,
+        "message": str(result.get("message") or status),
+        "source": source,
+        "model_path": result.get("model_path"),
+        "model_status": result.get("model_status", "not_trained"),
+        "action_concentration": concentration,
+        "average_confidence": result.get("average_confidence"),
+        "candidate_count": len(updated),
+    }
 
 
 def apply_dqn_reference_to_recommendations(

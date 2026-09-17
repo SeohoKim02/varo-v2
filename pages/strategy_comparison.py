@@ -13,6 +13,7 @@ from components.status import badge_html, user_status_label
 from components.tables import format_currency
 from services.analysis_pipeline import sort_recommendations
 from services.app_state import current_data_status, has_app_data
+from services.dqn_service import ACTION_CONCENTRATION_LIMIT, dqn_inference_view
 
 
 _STRATEGY_META = {
@@ -93,6 +94,68 @@ def _filter_recommendations(recommendations: list[dict]) -> list[dict]:
             continue
         filtered.append(item)
     return filtered
+
+
+def _dqn_view(recommendations: Sequence[Mapping[str, object]]) -> dict[str, Any]:
+    """Run DQN inference once per data set and reuse it across reruns.
+
+    VHS, Greedy and Pareto keep their own pipeline values; the DQN column is
+    filled only by a real forward pass from a trained model.
+    """
+    signature = st.session_state.get("data_signature")
+    training_result = st.session_state.get("dqn_training_result")
+    variant = str(
+        (training_result or {}).get("variant")
+        or st.session_state.get("dqn_sample_training_mode")
+        or "original"
+    )
+    key = [
+        str(signature or ""), len(recommendations), variant,
+        str((training_result or {}).get("timestamp") or ""),
+    ]
+    cached = st.session_state.get("strategy_dqn_view")
+    if isinstance(cached, dict) and cached.get("key") == key:
+        return dict(cached["view"])
+    try:
+        view = dqn_inference_view(
+            recommendations, signature, training_mode=variant, training_result=training_result,
+        )
+    except Exception as exc:  # pragma: no cover - comparison never crashes the page
+        view = {
+            "recommendations": [dict(item) for item in recommendations],
+            "available": False,
+            "status": "비교 불가",
+            "message": f"DQN 추론을 실행하지 못했습니다 ({type(exc).__name__}).",
+            "source": "error",
+            "model_path": None,
+            "model_status": "not_trained",
+            "action_concentration": {},
+            "average_confidence": None,
+        }
+        for item in view["recommendations"]:
+            item["dqn_action"] = "비교 불가"
+            item["dqn_status"] = "비교 불가"
+    st.session_state["strategy_dqn_view"] = {"key": key, "view": view}
+    return dict(view)
+
+
+def _render_dqn_status(view: Mapping[str, Any]) -> None:
+    concentration = dict(view.get("action_concentration") or {})
+    ratio = concentration.get("dominant_ratio")
+    if not view.get("available"):
+        st.info(f"DQN 비교 불가 · {view.get('message') or '학습된 모델이 없습니다.'}")
+        return
+    caption = ["DQN은 저장된 모델을 실제로 불러와 추론한 결과입니다."]
+    if view.get("model_path"):
+        caption.append(f"모델: {str(view['model_path']).rsplit('/', 1)[-1].rsplit(chr(92), 1)[-1]}")
+    if view.get("average_confidence") is not None:
+        caption.append(f"평균 신뢰도 {float(view['average_confidence']):.1f}%")
+    st.caption(" · ".join(caption))
+    if ratio is not None and float(ratio) >= ACTION_CONCENTRATION_LIMIT:
+        st.warning(
+            f"DQN action이 '{concentration.get('dominant_action')}' 하나로 "
+            f"{float(ratio) * 100:.0f}% 쏠려 있습니다. 검토 필요 상태로 비교에서 제외하고 판단하세요."
+        )
 
 
 def _strategy_card(name: str, rows: Sequence[Mapping[str, object]]) -> str:
@@ -177,8 +240,9 @@ def render_strategy_comparison_page() -> None:
         render_empty_state(st, "비교할 데이터가 없습니다", "설정에서 데이터를 불러온 뒤 다시 확인해주세요.")
         return
 
+    dqn_view = _dqn_view(recommendations)
     with st.container(border=True, key="strategy_filters"):
-        filtered = _filter_recommendations(recommendations)
+        filtered = _filter_recommendations(dqn_view["recommendations"])
     if not filtered:
         render_empty_state(st, "선택 조건에 맞는 후보가 없습니다", compact=True)
         return
@@ -191,6 +255,7 @@ def render_strategy_comparison_page() -> None:
 
     render_section_header(st, "전략별 핵심 비교", "현재 계산 결과에 공통으로 존재하는 값만 표시합니다.")
     st.dataframe(_comparison_frame(strategy_sets), hide_index=True, width="stretch")
+    _render_dqn_status(dqn_view)
     with st.expander("후보별 상세 판단", expanded=False):
         render_section_header(st, "후보별 판단 차이", "최종 VARO 순위는 서비스 우선·비용 우선·VHS tie-break 원칙을 유지합니다.")
         st.dataframe(_candidate_frame(filtered), hide_index=True, width="stretch", height=310)
