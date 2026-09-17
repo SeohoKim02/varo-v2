@@ -187,7 +187,7 @@ def _render_sample_selector() -> None:
             st.session_state["pending_load_error"] = f"샘플 파일이 없습니다: {selected.filename}"
             st.rerun()
         if _load_with_progress(path, selected.filename, "샘플 추천 데이터"):
-            st.session_state["current_menu"] = "홈"
+            st.session_state["current_menu"] = "시뮬레이션"
         st.rerun()
 
 
@@ -209,8 +209,8 @@ def _load_with_progress(source, filename: str, source_type: str) -> bool:
         status.update(label=f"{failed_stage} 실패", state="error", expanded=False)
     return applied
 
-def render_data_management_page() -> None:
-    render_page_header(st, "데이터 관리", "")
+def render_data_sample_controls() -> None:
+    """Render existing sample selectors without imposing a page layout."""
     render_section_header(st, "데이터 불러오기", "")
     base_col, dqn_col = st.columns([1, 2], gap="small")
     with base_col:
@@ -238,6 +238,11 @@ def render_data_management_page() -> None:
     )
     with st.expander("DQN 샘플 10개 목록", expanded=False):
         st.dataframe(pd.DataFrame(dqn_sample_table_rows()), hide_index=True, width="stretch")
+
+
+def render_data_management_page() -> None:
+    render_page_header(st, "데이터 관리", "")
+    render_data_sample_controls()
 
     load_error = st.session_state.get("pending_load_error") or st.session_state.get("pending_validation_error")
     if load_error:

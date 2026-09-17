@@ -9,7 +9,7 @@ from typing import Any, Mapping, Sequence
 import pandas as pd
 import streamlit as st
 
-from components.cards import render_empty_state, render_kpi_card, render_section_header
+from components.cards import render_empty_state, render_kpi_card, render_page_header
 from components.tables import format_currency, format_number
 from services.analysis_pipeline import calculate_overview_kpis, sort_recommendations, top_recommendations
 from services.app_state import has_app_data, resolve_selected_route_id
@@ -151,34 +151,33 @@ def _render_kpis() -> None:
         if data_available and pipeline_summary
         else calculate_overview_kpis(recommendations, validation) if data_available else {}
     )
-    summary = getattr(validation, "summary", {}) if validation else {}
-    filename = str(st.session_state.get("uploaded_filename") or "데이터 없음")
-    store_count = int(summary.get("store_count") or 0) if data_available else 0
-    dc_count = int(summary.get("dc_count") or 0) if data_available else 0
-    product_count = int(summary.get("product_count") or 0) if data_available else 0
-    columns = st.columns([1.55, 1], gap="medium")
-    with columns[0]:
-        st.markdown(
-            '<div class="v2-wrap v2-card v2-kpi-card v2-kpi-card-compact v2-home-data-card">'
-            '<div class="v2-card-caption">현재 데이터 정보</div>'
-            f'<div class="v2-kpi-value v2-kpi-value-file" title="{_safe(filename)}">'
-            f'{_safe(filename if data_available else "데이터 없음")}</div>'
-            '<div class="v2-home-data-stats">'
-            f'<span>점포 <strong>{store_count}</strong></span>'
-            f'<span>DC <strong>{dc_count}</strong></span>'
-            f'<span>상품 <strong>{product_count}</strong></span>'
-            f'<span>추천 후보 <strong>{format_number(len(recommendations)) if data_available else "-"}</strong></span>'
-            '</div></div>',
-            unsafe_allow_html=True,
-        )
-    with columns[1]:
-        render_kpi_card(
-            st,
-            "전체 예상 절감액",
+    executable = sum(
+        1
+        for item in recommendations
+        if item.get("cutline_passed") is not False
+        and str(item.get("status") or "").lower() not in {"blocked", "error", "실행 불가", "이동 불가"}
+    )
+    columns = st.columns(3, gap="medium")
+    values = (
+        (
+            "총 후보 수",
+            f"{format_number(len(recommendations))}건" if data_available else "-",
+            str(st.session_state.get("uploaded_filename") or "데이터 적용 후 계산됩니다"),
+        ),
+        (
+            "예상 절감액",
             _format_kpi_value("total_expected_saving", kpis.get("total_expected_saving")) if data_available else "-",
-            caption=f"추천 후보 {format_number(len(recommendations))}건 기준" if data_available else "데이터 적용 후 계산됩니다",
-            compact=True,
-        )
+            "현재 추천 후보 전체 기준" if data_available else "데이터 적용 후 계산됩니다",
+        ),
+        (
+            "실행 가능 건수",
+            f"{format_number(executable)}건" if data_available else "-",
+            "현재 제약조건을 통과한 후보" if data_available else "데이터 적용 후 계산됩니다",
+        ),
+    )
+    for column, (title, value, caption) in zip(columns, values):
+        with column:
+            render_kpi_card(st, title, value, caption=caption, compact=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -752,7 +751,6 @@ def _set_sim_playing(value: bool) -> None:
 
 def _render_controls(recommendations: Sequence[Mapping[str, object]]) -> dict[str, object]:
     playing = bool(st.session_state.get("home_sim_playing", False))
-    columns = st.columns([0.92, 1.05, 1.12, 0.92, 0.82, 1.02, 1.08], gap="small")
     rank_options = [f"{index}순위" for index in range(1, min(3, len(recommendations)) + 1)] or ["1순위"]
     current_rank = str(st.session_state.get("home_sim_route_rank") or "1순위")
     if current_rank not in rank_options:
@@ -760,9 +758,9 @@ def _render_controls(recommendations: Sequence[Mapping[str, object]]) -> dict[st
         st.session_state["home_sim_route_rank"] = current_rank
     if st.session_state.get("home_sim_route_rank_select") not in rank_options:
         st.session_state["home_sim_route_rank_select"] = current_rank
-    rank_label = columns[0].selectbox(
+    rank_label = st.selectbox(
         "표시 경로 선택", rank_options,
-        key="home_sim_route_rank_select", label_visibility="collapsed", help="표시할 추천 순위를 선택합니다.",
+        key="home_sim_route_rank_select", help="표시할 추천 순위를 선택합니다.",
     )
     display_options = ["단일 경로", "상위 3개"]
     current_display = str(st.session_state.get("home_sim_display_mode") or "단일 경로")
@@ -771,17 +769,13 @@ def _render_controls(recommendations: Sequence[Mapping[str, object]]) -> dict[st
         st.session_state["home_sim_display_mode"] = current_display
     if st.session_state.get("home_sim_display_select") not in display_options:
         st.session_state["home_sim_display_select"] = current_display
-    display_mode = columns[1].selectbox(
+    display_mode = st.selectbox(
         "표시 방식", display_options,
-        key="home_sim_display_select", label_visibility="collapsed",
+        key="home_sim_display_select",
     )
-    columns[2].button(
+    st.button(
         "시뮬레이션 실행", width="stretch", key="sim_start", disabled=playing,
         type="primary", on_click=_set_sim_playing, args=(True,),
-    )
-    columns[3].button(
-        "다시 실행", width="stretch", key="sim_restart",
-        on_click=_set_sim_playing, args=(True,),
     )
     speed_options = ["느림", "보통", "빠름"]
     current_speed = str(st.session_state.get("simulation_speed") or "보통")
@@ -790,10 +784,6 @@ def _render_controls(recommendations: Sequence[Mapping[str, object]]) -> dict[st
         st.session_state["simulation_speed"] = current_speed
     if st.session_state.get("home_speed_select") not in speed_options:
         st.session_state["home_speed_select"] = current_speed
-    speed = columns[4].selectbox(
-        "시뮬레이션 속도", speed_options,
-        key="home_speed_select", label_visibility="collapsed",
-    )
     view_options = ["전후 비교", "이동 전", "이동 후"]
     current_view = str(st.session_state.get("home_sim_inventory_view") or "전후 비교")
     if current_view not in view_options:
@@ -801,14 +791,23 @@ def _render_controls(recommendations: Sequence[Mapping[str, object]]) -> dict[st
         st.session_state["home_sim_inventory_view"] = current_view
     if st.session_state.get("home_inventory_view_select") not in view_options:
         st.session_state["home_inventory_view_select"] = current_view
-    inventory_view = columns[5].selectbox(
-        "재고 표시", view_options,
-        key="home_inventory_view_select", label_visibility="collapsed",
-    )
-    show_all = columns[6].toggle(
-        "전체 경로 보기", value=bool(st.session_state.get("show_all_routes", False)),
-        key="home_show_all", help="실행 경로는 유지하고 보조 연결선만 표시합니다.",
-    )
+    with st.expander("표시 옵션", expanded=False):
+        speed = st.selectbox(
+            "시뮬레이션 속도", speed_options,
+            key="home_speed_select",
+        )
+        inventory_view = st.selectbox(
+            "재고 표시", view_options,
+            key="home_inventory_view_select",
+        )
+        show_all = st.toggle(
+            "전체 경로 보기", value=bool(st.session_state.get("show_all_routes", False)),
+            key="home_show_all", help="실행 경로는 유지하고 보조 연결선만 표시합니다.",
+        )
+        st.button(
+            "다시 실행", width="stretch", key="sim_restart",
+            on_click=_set_sim_playing, args=(True,),
+        )
     st.session_state["home_sim_route_rank"] = rank_label
     st.session_state["home_sim_display_mode"] = display_mode
     st.session_state["simulation_speed"] = speed
@@ -821,6 +820,76 @@ def _render_controls(recommendations: Sequence[Mapping[str, object]]) -> dict[st
         "inventory_view": inventory_view,
         "show_all": bool(show_all),
     }
+
+
+def _render_scope_filters(recommendations: Sequence[Mapping[str, object]]) -> list[dict]:
+    node_values = sorted({
+        str(value)
+        for item in recommendations
+        for value in (
+            item.get("source_name") or item.get("source_id"),
+            item.get("target_name") or item.get("target_id"),
+            item.get("dc_name") or item.get("dc_id"),
+        )
+        if value
+    })
+    product_values = sorted({
+        str(item.get("product_name") or item.get("product_id"))
+        for item in recommendations
+        if item.get("product_name") or item.get("product_id")
+    })
+    node_options = ["전체 센터/점포", *node_values]
+    product_options = ["전체 상품", *product_values]
+    if st.session_state.get("simulation_node_filter") not in node_options:
+        st.session_state["simulation_node_filter"] = node_options[0]
+    if st.session_state.get("simulation_product_filter") not in product_options:
+        st.session_state["simulation_product_filter"] = product_options[0]
+    selected_node = st.selectbox("센터/점포", node_options, key="simulation_node_filter")
+    selected_product = st.selectbox("상품 범위", product_options, key="simulation_product_filter")
+    filtered = []
+    for item in recommendations:
+        nodes = {
+            str(item.get("source_name") or item.get("source_id") or ""),
+            str(item.get("target_name") or item.get("target_id") or ""),
+            str(item.get("dc_name") or item.get("dc_id") or ""),
+        }
+        product = str(item.get("product_name") or item.get("product_id") or "")
+        if selected_node != "전체 센터/점포" and selected_node not in nodes:
+            continue
+        if selected_product != "전체 상품" and selected_product != product:
+            continue
+        filtered.append(dict(item))
+    return filtered
+
+
+def _render_core_results(scenario: Mapping[str, Any], routes: Sequence[Mapping[str, object]]) -> None:
+    kpis = scenario.get("kpis") or {}
+    scenario_saving = _number(kpis.get("expected_saving"))
+    if scenario_saving is None:
+        scenario_saving = sum(_number(route.get("expected_saving")) or 0.0 for route in routes)
+    affected_nodes = {
+        str(value)
+        for route in routes
+        for value in (route.get("source_id"), route.get("target_id"), route.get("dc_id"))
+        if value
+    }
+    values = (
+        ("예상 절감액", format_currency(scenario_saving)),
+        ("이동 수량", _qty(kpis.get("moved_quantity"))),
+        ("영향 점포/센터", f"{len(affected_nodes):,}곳"),
+        ("부족재고 감소", _qty(kpis.get("shortage_reduction"))),
+    )
+    rows = "".join(
+        '<div class="v3-result-row">'
+        f'<div><small>{_safe(label)}</small><strong>{_safe(value)}</strong></div>'
+        '<span class="v2-badge v2-badge-success">계산 결과</span></div>'
+        for label, value in values
+    )
+    st.markdown(
+        '<div class="v3-panel-title">핵심 결과</div>'
+        f'<div class="v3-result-list">{rows}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _render_steps(route_type: str, playing: bool, inventory_view: str) -> None:
@@ -891,6 +960,11 @@ def render_overview_page() -> None:
     data = st.session_state.get("varo_data")
     recommendations = _recommendations()
     data_available = has_app_data(data, recommendations)
+    render_page_header(
+        st,
+        "시뮬레이션",
+        "조건을 선택하고 재고 이동 흐름과 예상 효과를 한 화면에서 확인하세요.",
+    )
     _render_kpis()
 
     if not data_available:
@@ -900,24 +974,28 @@ def render_overview_page() -> None:
         )
         return
 
-    selected_route_id = resolve_selected_route_id(recommendations, st.session_state.get("selected_route_id"))
+    layout = st.columns([0.92, 2.65, 0.95], gap="medium")
+    with layout[0]:
+        with st.container(border=True):
+            st.markdown('<div class="v3-panel-title">시뮬레이션 설정</div>', unsafe_allow_html=True)
+            filtered = _render_scope_filters(recommendations)
+            if not filtered:
+                render_empty_state(st, "선택 조건에 맞는 경로가 없습니다", compact=True)
+                return
+            controls = _render_controls(filtered)
+
+    selected_route_id = resolve_selected_route_id(filtered, st.session_state.get("selected_route_id"))
     if selected_route_id != st.session_state.get("selected_route_id"):
         st.session_state["selected_route_id"] = selected_route_id
 
-    render_section_header(
-        st,
-        "재고 이동 시뮬레이션",
-        "추천 경로를 실행했을 때의 실제 재고 변화와 차량 이동 단계를 확인합니다.",
-    )
-    controls = _render_controls(recommendations)
     sim_routes = _simulation_routes(
-        recommendations,
+        filtered,
         bool(controls["show_all"]),
         str(controls["display_mode"]),
         str(controls["rank_label"]),
     )
-    focus_index = max(0, min(len(recommendations) - 1, int(str(controls["rank_label"])[0]) - 1))
-    focus_id = str(recommendations[focus_index].get("route_id") or "") if recommendations else ""
+    focus_index = max(0, min(len(filtered) - 1, int(str(controls["rank_label"])[0]) - 1))
+    focus_id = str(filtered[focus_index].get("route_id") or "") if filtered else ""
     if controls["display_mode"] == "단일 경로" and sim_routes:
         focus_id = str(sim_routes[0].get("route_id") or "")
     scenario = cached_inventory_scenario(
@@ -928,12 +1006,16 @@ def render_overview_page() -> None:
     all_routes = _network_routes_from_data()
     playing = bool(st.session_state.get("home_sim_playing", False))
     speed_seconds = animation_duration_seconds(str(controls["speed"]))
-    _render_network(
-        nodes, sim_routes, all_routes, playing, speed_seconds, bool(controls["show_all"]),
-        scenario, str(controls["inventory_view"]), str(controls["display_mode"]), focus_id,
-    )
     focus_route = next((route for route in sim_routes if str(route.get("route_id")) == focus_id), sim_routes[0] if sim_routes else {})
-    _render_steps(normalize_route_type(focus_route), playing, str(controls["inventory_view"]))
-    _render_simulation_kpis(scenario)
-    _render_scenario_status(scenario, str(controls["display_mode"]))
+    with layout[1]:
+        st.markdown('<div class="v3-panel-title">재고 이동 흐름</div>', unsafe_allow_html=True)
+        _render_network(
+            nodes, sim_routes, all_routes, playing, speed_seconds, bool(controls["show_all"]),
+            scenario, str(controls["inventory_view"]), str(controls["display_mode"]), focus_id,
+        )
+        _render_steps(normalize_route_type(focus_route), playing, str(controls["inventory_view"]))
+        _render_scenario_status(scenario, str(controls["display_mode"]))
+    with layout[2]:
+        with st.container(border=True):
+            _render_core_results(scenario, sim_routes)
     _render_inventory_basis(scenario)

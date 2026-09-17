@@ -8,7 +8,7 @@ import streamlit as st
 from services.app_state import has_app_data
 
 def _go_to_data_management() -> None:
-    st.session_state["current_menu"] = "데이터 관리"
+    st.session_state["current_menu"] = "설정"
 
 
 def _toggle_replace_controls() -> None:
@@ -93,6 +93,12 @@ def _render_feedback() -> None:
         st.error("데이터를 적용할 수 없습니다.")
     elif st.session_state.get("data_apply_message"):
         st.success(st.session_state["data_apply_message"])
+
+
+def render_data_source_controls(key_prefix: str = "data_source") -> None:
+    """Render the existing upload/sample flow inside a product page."""
+    _render_load_controls(key_prefix)
+    _render_feedback()
 
 
 def render_quick_data_bar() -> None:

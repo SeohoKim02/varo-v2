@@ -8,17 +8,35 @@ from components.status import user_status_label
 from services.app_state import current_data_status, has_app_data
 
 MENU_ITEMS = [
-    "홈",
-    "추천 실행",
-    "경로 상세",
-    "분석 및 검증",
-    "데이터 관리",
+    "시뮬레이션",
+    "전략 비교",
+    "학습 관리",
+    "결과 이력",
+    "설정",
 ]
+
+LEGACY_MENU_ITEMS = ["홈", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"]
+
+MENU_ICONS = {
+    "시뮬레이션": "⌂",
+    "전략 비교": "▥",
+    "학습 관리": "◇",
+    "결과 이력": "▤",
+    "설정": "⚙",
+}
+
+LEGACY_ACTIVE_MENU = {
+    "홈": "시뮬레이션",
+    "추천 실행": "결과 이력",
+    "경로 상세": "결과 이력",
+    "분석 및 검증": "전략 비교",
+    "데이터 관리": "설정",
+}
 
 
 def get_current_menu() -> str:
     current = st.session_state.get("current_menu")
-    if current not in MENU_ITEMS:
+    if current not in MENU_ITEMS and current not in LEGACY_MENU_ITEMS:
         st.session_state["current_menu"] = MENU_ITEMS[0]
     return st.session_state["current_menu"]
 
@@ -44,15 +62,25 @@ def _navigate_to(menu: str) -> None:
 
 
 def render_sidebar_nav(current_menu: str) -> None:
-    """Page navigation lives in the collapsed sidebar (no horizontal menu)."""
+    """Render the five product-oriented destinations in the sidebar."""
+    active_menu = LEGACY_ACTIVE_MENU.get(current_menu, current_menu)
     with st.sidebar:
-        st.markdown('<div class="v2-sidenav-title">메뉴</div>', unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div class="v3-sidebar-brand">
+              <div class="v3-sidebar-logo">VARO</div>
+              <div class="v3-sidebar-tagline">Smarter Inventory<br>A Better Tomorrow</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown('<div class="v2-sidenav-title">WORKSPACE</div>', unsafe_allow_html=True)
         for item in MENU_ITEMS:
             st.button(
-                item,
+                f"{MENU_ICONS[item]}　{item}",
                 key=f"nav_{item}",
                 width="stretch",
-                type="primary" if item == current_menu else "secondary",
+                type="primary" if item == active_menu else "secondary",
                 on_click=_navigate_to,
                 args=(item,),
             )
@@ -63,26 +91,26 @@ def render_sidebar_nav(current_menu: str) -> None:
             or training_result.get("status")
             or "학습 필요"
         )
-        st.caption(f"DQN {dqn_status}")
+        st.markdown(
+            f'<div class="v3-sidebar-footer"><span>학습 상태</span><strong>{dqn_status}</strong></div>',
+            unsafe_allow_html=True,
+        )
 
 
 def render_app_shell() -> None:
     current_menu = get_current_menu()
+    render_sidebar_nav(current_menu)
     st.markdown(
         f"""
-        <div class="v2-topbar">
-            <div>
-                <div class="v2-brand">VARO V2</div>
-                <div class="v2-page-context">현재 페이지 · {current_menu}</div>
-            </div>
-            <div class="v2-topbar-meta">
-                <span class="v2-pill">{_analysis_status()}</span>
-                <span class="v2-file-label">{_file_label()}</span>
-            </div>
+        <div class="v3-contextbar">
+            <span class="v3-context-file">{_file_label()}</span>
+            <span class="v2-pill">{_analysis_status()}</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    render_sidebar_nav(current_menu)
-    render_quick_data_bar()
+    if not has_app_data(
+        st.session_state.get("varo_data"),
+        st.session_state.get("varo_recommendations"),
+    ):
+        render_quick_data_bar()

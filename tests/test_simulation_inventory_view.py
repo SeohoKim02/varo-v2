@@ -65,7 +65,8 @@ class SimulationInventoryViewTests(unittest.TestCase):
         self.assertIn('class="v2-sim-steps"', blob)
         self.assertIn("출고 준비", blob)
         self.assertIn("재고 반영 완료", blob)
-        self.assertIn("이동 수량", {metric.label for metric in app.metric})
+        self.assertIn("핵심 결과", blob)
+        self.assertIn("이동 수량", blob)
         self.assertNotIn("TOP" + "1", blob)
 
     def test_inventory_view_and_top3_controls_render_without_reanalysis(self):

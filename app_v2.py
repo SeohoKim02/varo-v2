@@ -64,6 +64,14 @@ def initialize_session_state() -> None:
         "home_sim_display_mode": "단일 경로",
         "home_sim_inventory_view": "전후 비교",
         "home_sim_run_nonce": 0,
+        "simulation_node_filter": "전체 센터/점포",
+        "simulation_product_filter": "전체 상품",
+        "strategy_product_filter": "전체 상품",
+        "strategy_node_filter": "전체 센터/점포",
+        "settings_saved": False,
+        "settings_default_episodes": 80,
+        "settings_default_learning_rate": 0.001,
+        "settings_default_candidate_count": 20,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)

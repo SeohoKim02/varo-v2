@@ -4,20 +4,20 @@ from __future__ import annotations
 import streamlit as st
 
 DESIGN_TOKENS = {
-    "app_bg": "#f6f7f9",
+    "app_bg": "#f5f8fc",
     "card_bg": "#ffffff",
-    "text": "#1b2533",
-    "muted_text": "#4b5563",
-    "border": "#c7d0dc",
-    "accent": "#1f766d",
-    "accent_soft": "#e8f4f2",
-    "success": "#1f8a5b",
-    "warning": "#c99700",
-    "error": "#c2412d",
-    "info": "#2d5f9a",
-    "card_radius": "8px",
-    "button_radius": "7px",
-    "shadow": "0 8px 22px rgba(21, 30, 42, 0.08)",
+    "text": "#111b46",
+    "muted_text": "#66759a",
+    "border": "#e2eaf4",
+    "accent": "#1976f3",
+    "accent_soft": "#edf5ff",
+    "success": "#16a56f",
+    "warning": "#f59e0b",
+    "error": "#dc4c4c",
+    "info": "#6d4aff",
+    "card_radius": "14px",
+    "button_radius": "9px",
+    "shadow": "0 8px 24px rgba(34, 78, 132, 0.055)",
 }
 
 
@@ -54,6 +54,14 @@ def apply_global_styles() -> None:
         [data-testid="stBottomBlockContainer"] {{
             background: #ffffff !important;
             color: var(--varo-text) !important;
+        }}
+        section[data-testid="stSidebar"] {{
+            min-width: 238px !important;
+            max-width: 238px !important;
+            border-right: 1px solid #e6edf6;
+        }}
+        section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {{
+            padding: 1.05rem 0.78rem 1.1rem !important;
         }}
         div[data-baseweb="select"] > div,
         div[data-baseweb="input"] > div,
@@ -117,9 +125,9 @@ def apply_global_styles() -> None:
             font-weight: 680 !important;
         }}
         .block-container {{
-            padding-top: 2.55rem !important;
+            padding-top: 1.15rem !important;
             padding-bottom: 3rem;
-            max-width: 1520px;
+            max-width: 1620px;
             margin-left: auto !important;
             margin-right: auto !important;
         }}
@@ -139,6 +147,22 @@ def apply_global_styles() -> None:
             box-shadow: var(--varo-shadow);
             padding: 0.68rem 0.9rem;
             margin-bottom: 0.48rem;
+        }}
+        .v3-contextbar {{
+            min-height: 32px;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 0.55rem;
+            margin: 0 0 0.2rem;
+            color: var(--varo-muted);
+            font-size: 0.8rem;
+        }}
+        .v3-context-file {{
+            max-width: min(48vw, 620px);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }}
         .v2-brand {{
             font-size: 1.08rem;
@@ -212,20 +236,20 @@ def apply_global_styles() -> None:
             justify-content: space-between;
             align-items: flex-start;
             gap: 0.8rem;
-            margin: 0.48rem 0 0.62rem;
+            margin: 0.1rem 0 1.2rem;
         }}
         .v2-page-title {{
-            font-size: 1.42rem !important;
-            font-weight: 760;
+            font-size: clamp(1.72rem, 2.2vw, 2.28rem) !important;
+            font-weight: 830;
             line-height: 1.22 !important;
             color: var(--varo-text);
             margin: 0 !important;
             padding: 0 !important;
         }}
         .v2-page-desc {{
-            margin-top: 0.2rem;
+            margin-top: 0.34rem;
             color: var(--varo-muted);
-            font-size: 0.9rem;
+            font-size: 0.96rem;
             line-height: 1.4;
         }}
         .v2-card {{
@@ -233,7 +257,7 @@ def apply_global_styles() -> None:
             background: var(--varo-panel);
             border-radius: var(--varo-radius-card);
             box-shadow: var(--varo-shadow);
-            padding: 0.9rem;
+            padding: 1.05rem 1.12rem;
             min-width: 0;
         }}
         .v2-card-head {{
@@ -244,19 +268,19 @@ def apply_global_styles() -> None:
             margin-bottom: 0.65rem;
         }}
         .v2-kpi-card {{
-            padding: 0.95rem 1rem;
-            min-height: 120px;
+            padding: 1.05rem 1.12rem;
+            min-height: 112px;
         }}
         .v2-kpi-card-compact {{
-            min-height: 118px;
-            padding: 0.92rem 1rem;
+            min-height: 108px;
+            padding: 0.9rem 1rem;
             display: flex;
             flex-direction: column;
             justify-content: center;
             overflow: visible;
         }}
         .v2-kpi-card-compact .v2-kpi-value {{
-            font-size: clamp(1.28rem, 1.65vw, 1.72rem);
+            font-size: clamp(1.3rem, 1.7vw, 1.8rem);
             font-weight: 820;
             margin-top: 0.28rem;
         }}
@@ -292,11 +316,11 @@ def apply_global_styles() -> None:
             justify-content: space-between;
             gap: 0.75rem;
             align-items: center;
-            margin: 0.9rem 0 0.42rem;
+            margin: 1.15rem 0 0.52rem;
         }}
         .v2-section-title {{
-            font-size: 1.04rem;
-            font-weight: 740;
+            font-size: 1.12rem;
+            font-weight: 790;
             color: var(--varo-text);
         }}
         .v2-section-desc {{
@@ -406,21 +430,21 @@ def apply_global_styles() -> None:
         .v2-network-shell {{
             position: relative;
             width: 100%;
-            min-height: 760px;
-            border: 1.4px solid #b9c4d1;
+            min-height: 620px;
+            border: 1px solid #dce6f2;
             border-radius: var(--varo-radius-card);
-            background: radial-gradient(circle at 52% 46%, #ffffff 0, #f8fafb 58%, #f3f6f8 100%);
+            background: radial-gradient(circle at 52% 46%, #ffffff 0, #f7faff 58%, #eff5fc 100%);
             overflow: hidden;
         }}
         .v2-network-placeholder {{
-            min-height: 660px;
+            min-height: 560px;
             display: grid;
             place-items: center;
             color: var(--varo-muted);
             text-align: center;
             padding: 1rem;
         }}
-        .v2-network-svg {{ display: block; width: 100%; height: 700px; margin-top: 0; }}
+        .v2-network-svg {{ display: block; width: 100%; height: 570px; margin-top: 0; }}
         .v2-network-svg text {{ font-family: inherit; fill: var(--varo-text); }}
         .v2-network-svg .node-label {{
             font-size: 14px;
@@ -553,23 +577,131 @@ def apply_global_styles() -> None:
         .stButton button[kind="primary"],
         button[data-testid="stBaseButton-primary"],
         button[data-testid="baseButton-primary"] {{
-            background-color: #dbeafe !important;
-            border-color: #93c5fd !important;
-            color: #1e3a5f !important;
-            box-shadow: none !important;
+            background-color: var(--varo-accent) !important;
+            border-color: var(--varo-accent) !important;
+            color: #ffffff !important;
+            box-shadow: 0 6px 14px rgba(25, 118, 243, 0.16) !important;
+            min-height: 2.62rem;
         }}
         .stButton button[kind="primary"]:hover,
         button[data-testid="stBaseButton-primary"]:hover,
         button[data-testid="baseButton-primary"]:hover {{
-            background-color: #bfdbfe !important;
-            border-color: #7db2ea !important;
+            background-color: #0f68df !important;
+            border-color: #0f68df !important;
         }}
         /* Sidebar navigation */
         .v2-sidenav-title {{
             font-weight: 760;
-            font-size: 0.95rem;
+            font-size: 0.67rem;
+            letter-spacing: 0.11em;
+            color: #9aa6bd;
+            margin: 1.25rem 0 0.5rem 0.55rem;
+        }}
+        .v3-sidebar-brand {{
+            padding: 0.25rem 0.65rem 0.72rem;
+            border-bottom: 1px solid #edf1f7;
+        }}
+        .v3-sidebar-logo {{
+            color: #0d1a4a;
+            font-size: 1.56rem;
+            font-weight: 900;
+            letter-spacing: 0.015em;
+        }}
+        .v3-sidebar-tagline {{
+            margin-top: 0.14rem;
+            color: #7181a4;
+            font-size: 0.7rem;
+            line-height: 1.35;
+        }}
+        .v3-sidebar-footer {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            margin: 1.4rem 0.3rem 0;
+            padding: 0.72rem 0.7rem;
+            border-radius: 10px;
+            background: #f5f8fc;
+            color: #73809a;
+            font-size: 0.72rem;
+        }}
+        .v3-sidebar-footer strong {{ color: #26365d; font-size: 0.73rem; }}
+        section[data-testid="stSidebar"] .stButton button {{
+            justify-content: flex-start !important;
+            min-height: 2.72rem;
+            border-radius: 9px !important;
+            box-shadow: none !important;
+            padding-left: 0.85rem !important;
+        }}
+        section[data-testid="stSidebar"] .stButton button[kind="secondary"] {{
+            border-color: transparent !important;
+            color: #314160 !important;
+        }}
+        section[data-testid="stSidebar"] .stButton button[kind="secondary"]:hover {{
+            background: #f1f6fd !important;
+            border-color: #e5edf8 !important;
+        }}
+        .v3-panel-title {{
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
             color: var(--varo-text);
-            margin: 0.1rem 0 0.5rem;
+            font-size: 1.05rem;
+            font-weight: 790;
+            margin-bottom: 0.78rem;
+        }}
+        .v3-panel-title::before {{
+            content: "";
+            width: 7px;
+            height: 22px;
+            border-radius: 6px;
+            background: var(--varo-accent);
+        }}
+        .v3-result-list {{ display: grid; gap: 0.08rem; }}
+        .v3-result-row {{
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 0.7rem;
+            align-items: center;
+            padding: 0.72rem 0;
+            border-bottom: 1px solid #edf1f6;
+        }}
+        .v3-result-row:last-child {{ border-bottom: 0; }}
+        .v3-result-row small {{ display: block; color: var(--varo-muted); margin-bottom: 0.12rem; }}
+        .v3-result-row strong {{ color: var(--varo-text); font-size: 0.96rem; }}
+        .v3-strategy-card {{ min-height: 230px; position: relative; overflow: hidden; }}
+        .v3-strategy-card::before {{
+            content: "";
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 4px;
+            background: var(--strategy-color, var(--varo-accent));
+        }}
+        .v3-strategy-name {{ font-size: 1.18rem; font-weight: 820; color: var(--varo-text); }}
+        .v3-strategy-subtitle {{ color: var(--varo-muted); font-size: 0.76rem; margin: 0.1rem 0 0.75rem; }}
+        .v3-strategy-metric {{
+            display: flex;
+            justify-content: space-between;
+            gap: 0.7rem;
+            padding: 0.48rem 0;
+            border-bottom: 1px solid #edf1f6;
+            color: #65718b;
+            font-size: 0.8rem;
+        }}
+        .v3-strategy-metric strong {{ color: var(--varo-text); text-align: right; }}
+        .v3-simulation-settings [data-testid="stVerticalBlockBorderWrapper"],
+        .v3-results-panel [data-testid="stVerticalBlockBorderWrapper"] {{
+            background: #ffffff;
+            border-color: #e2eaf4 !important;
+            border-radius: 14px !important;
+            box-shadow: var(--varo-shadow);
+        }}
+        [data-testid="stMetric"] {{
+            background: #ffffff;
+            border: 1px solid #e2eaf4;
+            border-radius: 12px;
+            padding: 0.78rem 0.9rem;
+            box-shadow: 0 6px 18px rgba(34, 78, 132, 0.04);
         }}
         .stTabs [data-baseweb="tab-list"] {{ flex-wrap: wrap; gap: 0.35rem; overflow-x: visible; }}
         .stTabs [data-baseweb="tab"] {{

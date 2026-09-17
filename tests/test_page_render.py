@@ -29,7 +29,7 @@ from services.data_loader import SAMPLE_FILENAME, get_default_sample_path, load_
 from services.data_validator import validate_workbook_data
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "app_v2.py")
-MENUS = ["홈", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"]
+MENUS = ["시뮬레이션", "전략 비교", "학습 관리", "결과 이력", "설정"]
 
 
 @unittest.skipUnless(_APPTEST_AVAILABLE, "streamlit AppTest unavailable")
@@ -97,37 +97,27 @@ class PageRenderTests(unittest.TestCase):
         for banned in ("route_id", "fallback", "calculation_function"):
             self.assertNotIn(banned, blob)
 
-    def test_home_is_result_dashboard(self):
+    def test_simulation_is_focused_product_dashboard(self):
         app = self._new_app()
-        app.session_state["current_menu"] = "홈"
+        app.session_state["current_menu"] = "시뮬레이션"
         app.run()
         self.assertFalse(app.exception)
         blob = self._markdown_blob(app)
-        # The home stays intentionally small: data, savings, candidate count,
-        # and the simulation are the only result sections.
         for required in (
-            "현재 데이터 정보", "점포", "DC", "상품", "추천 후보",
-            "전체 예상 절감액", "재고 이동 시뮬레이션",
-            "추천 경로를 실행했을 때의 실제 재고 변화와 차량 이동 단계를 확인합니다.",
+            "시뮬레이션", "총 후보 수", "예상 절감액", "실행 가능 건수",
+            "시뮬레이션 설정", "재고 이동 흐름", "핵심 결과",
             "실선: 직접 이동", "점선: 물류센터 경유",
             "초과재고", "적정재고", "부족재고", "데이터 부족",
         ):
-            self.assertIn(required, blob, f"home must contain: {required}")
-        # Page navigation exists only in the sidebar.
-        sidebar_nav = {b.label: b.key for b in app.sidebar.button}
-        self.assertEqual(set(sidebar_nav), set(MENUS))
+            self.assertIn(required, blob, f"simulation must contain: {required}")
+        sidebar_nav = {b.key: b.label for b in app.sidebar.button}
+        self.assertEqual(set(sidebar_nav), {f"nav_{menu}" for menu in MENUS})
         for menu in MENUS:
-            self.assertEqual(sidebar_nav[menu], f"nav_{menu}")
+            self.assertIn(menu, sidebar_nav[f"nav_{menu}"])
         button_labels = {b.label for b in app.button}
-        for quick_button in ("추천 실행 보기", "경로 상세 보기", "분석 및 검증 보기", "데이터 관리 보기"):
-            self.assertNotIn(quick_button, button_labels)
-        # the top toolbar keeps only the data-replace toggle (no duplicate 데이터 관리 button)
-        self.assertIn("데이터 교체", button_labels)
         self.assertIn("시뮬레이션 실행", button_labels)
         self.assertIn("다시 실행", button_labels)
-        # forbidden elements / developer copy
         for banned in (
-            "파일 ·", "상태 ·",
             "실제 V2 내부 알고리즘 재계산 결과 기준",
             "DQN 과거 학습 결과는 제외",
             "varo_hybrid_score",
@@ -140,16 +130,14 @@ class PageRenderTests(unittest.TestCase):
             "운영 로그",
             "선택 후보 요약",
             "평균 VHS",
-            "다음에 볼 화면",
-            "재고 이동 네트워크 미리보기",
+            "추천 후보 Top 5",
         ):
-            self.assertNotIn(banned, blob, f"home should not contain: {banned}")
-        # no download buttons on home
+            self.assertNotIn(banned, blob, f"simulation should not contain: {banned}")
         self.assertNotIn("검증 리포트 Excel", button_labels)
         self.assertNotIn("추천 결과 CSV", button_labels)
-        for removed_section in ("현재 실행 경로 Top 3", "추천 Top 5", "선택 경로 요약"):
+        for removed_section in ("현재 실행 경로 Top 3", "추천 Top 5", "선택 경로 요약", "추천 결과 Top 5"):
             self.assertNotIn(removed_section, blob)
-        self.assertFalse(app.dataframe, "home must not contain recommendation or validation tables")
+        self.assertFalse(app.dataframe, "simulation must not contain recommendation or validation tables")
         self.assertIn('class="network-node dc-node"', blob)
         self.assertIn('class="network-node store-node', blob)
         self.assertEqual(blob.count('class="v2-vehicle'), 1)
@@ -162,16 +150,64 @@ class PageRenderTests(unittest.TestCase):
     def test_sidebar_nav_navigates_to_every_page(self):
         for menu in MENUS:
             app = self._new_app()
-            app.session_state["current_menu"] = "홈"
+            app.session_state["current_menu"] = "시뮬레이션"
             app.run()
             button = next(item for item in app.sidebar.button if item.key == f"nav_{menu}")
             button.click().run()
             self.assertEqual(app.session_state["current_menu"], menu)
             self.assertFalse(app.exception)
 
+    def test_strategy_comparison_uses_real_four_strategy_outputs(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "전략 비교"
+        app.run()
+        self.assertFalse(app.exception)
+        blob = self._markdown_blob(app)
+        for required in ("전략 비교", "VHS", "Greedy", "DQN", "Pareto", "전략별 핵심 비교", "후보별 판단 차이"):
+            self.assertIn(required, blob)
+        columns = self._dataframe_columns(app)
+        self.assertTrue({"지표", "VHS", "Greedy", "DQN", "Pareto"}.issubset(columns))
+        self.assertIn("고급 분석 도구", {item.label for item in app.expander})
+
+    def test_training_management_keeps_real_dqn_controls(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "학습 관리"
+        app.run()
+        self.assertFalse(app.exception)
+        blob = self._markdown_blob(app)
+        self.assertIn("학습 관리", blob)
+        select_labels = {item.label for item in app.selectbox}
+        number_labels = {item.label for item in app.number_input}
+        self.assertIn("모델 선택", select_labels)
+        self.assertTrue({"학습 에피소드", "Learning Rate", "후보 수"}.issubset(number_labels))
+        self.assertIn("DQN 학습 실행", {item.label for item in app.button})
+
+    def test_results_history_has_saved_runs_and_current_result_detail(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "결과 이력"
+        app.run()
+        self.assertFalse(app.exception)
+        blob = self._markdown_blob(app)
+        for required in ("결과 이력", "총 학습 실행", "정상 완료", "평균 최종 보상", "결과 검색"):
+            self.assertIn(required, blob)
+        self.assertIn("현재 시뮬레이션 상세", {item.label for item in app.expander})
+
+    def test_settings_exposes_only_supported_controls_and_data_flow(self):
+        app = self._new_app()
+        app.session_state["current_menu"] = "설정"
+        app.run()
+        self.assertFalse(app.exception)
+        blob = self._markdown_blob(app)
+        for required in ("설정", "기본 설정", "모델·의사결정 설정", "데이터·결과 설정", "엑셀 데이터 교체"):
+            self.assertIn(required, blob)
+        self.assertTrue({"기본 표시 방식", "기본 시뮬레이션 속도", "기본 재고 표시", "DQN 반영 방식"}.issubset(
+            {item.label for item in app.selectbox}
+        ))
+        self.assertIn("설정 저장", {item.label for item in app.button})
+
     def test_simulation_controls_do_not_reload_or_reanalyze_data(self):
         app = self._new_app()
-        app.session_state["current_menu"] = "홈"
+        app.session_state["current_menu"] = "시뮬레이션"
         app.run()
         signature = app.session_state["data_signature"]
         summary = dict(app.session_state["pipeline_summary"])
@@ -203,7 +239,7 @@ class PageRenderTests(unittest.TestCase):
         app.session_state["selected_route_id"] = "R002"
         app.session_state["current_menu"] = "홈"
         app.run()
-        for menu in ("추천 실행", "경로 상세", "분석 및 검증", "데이터 관리", "홈"):
+        for menu in ("전략 비교", "학습 관리", "결과 이력", "설정", "시뮬레이션"):
             button = next(item for item in app.sidebar.button if item.key == f"nav_{menu}")
             button.click().run()
             self.assertFalse(app.exception, msg=f"{menu}: {list(app.exception)}")

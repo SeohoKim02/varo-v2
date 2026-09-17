@@ -144,7 +144,7 @@ except Exception:  # pragma: no cover
 @unittest.skipIf(AppTest is None, "streamlit AppTest unavailable")
 class DqnDirectUploadPageTests(unittest.TestCase):
     HOME_TOP_COLUMNS = ["순위", "상품", "출발", "도착", "경로", "수량", "예상 절감액"]
-    MENUS = ["홈", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"]
+    MENUS = ["시뮬레이션", "전략 비교", "학습 관리", "결과 이력", "설정"]
 
     @staticmethod
     def _state_for_sample(number: str) -> tuple[dict, Path]:
@@ -167,12 +167,12 @@ class DqnDirectUploadPageTests(unittest.TestCase):
     def test_sample_02_state_renders_minimal_home_and_simulation(self):
         state, _ = self._state_for_sample("02")
         app = self._app_with_state(state)
-        app.session_state["current_menu"] = "홈"
+        app.session_state["current_menu"] = "시뮬레이션"
         app.run()
         self.assertFalse(app.exception)
         blob = " ".join(element.value for element in app.markdown)
         self.assertIn("추천 후보", blob)
-        self.assertIn("재고 이동 시뮬레이션", blob)
+        self.assertIn("재고 이동 흐름", blob)
         self.assertNotIn("추천 Top 5", blob)
         self.assertEqual(blob.count('class="network-node dc-node"'), 1)
         self.assertEqual(blob.count('class="network-node store-node'), 4)
@@ -188,7 +188,7 @@ class DqnDirectUploadPageTests(unittest.TestCase):
                 route_ids = {str(row["route_id"]) for row in recommendations}
 
                 app = self._app_with_state(state)
-                app.session_state["current_menu"] = "홈"
+                app.session_state["current_menu"] = "시뮬레이션"
                 app.run()
                 self.assertFalse(app.exception)
                 home_blob = " ".join(element.value for element in app.markdown)
@@ -208,9 +208,8 @@ class DqnDirectUploadPageTests(unittest.TestCase):
                     self.assertIn(app.session_state["selected_route_id"], route_ids)
                     page_blob = " ".join(element.value for element in app.markdown)
                     self.assertNotIn("Traceback", page_blob)
-                    if menu == "경로 상세":
+                    if menu == "결과 이력":
                         self.assertIn("이동 단계", page_blob)
-                        self.assertTrue("DIRECT" in page_blob or "VIA_DC" in page_blob)
 
     def test_sample_10_route_detail_keeps_the_selected_dc02(self):
         state, _ = self._state_for_sample("10")

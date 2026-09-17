@@ -732,6 +732,8 @@ def _run_single_dqn(
     data_signature: str | None,
     mode: str,
     episodes: int,
+    learning_rate: float,
+    candidate_count: int,
     sample_id: str,
     store_count: int,
     dc_count: int,
@@ -747,7 +749,7 @@ def _run_single_dqn(
     storage_warning = False
     try:
         status.update(label="데이터 구성 중", state="running")
-        prepared = prepare_dqn_recommendations(recommendations, mode)
+        prepared = prepare_dqn_recommendations(recommendations[:candidate_count], mode)
         if mode == "balanced":
             try:
                 save_balanced_recommendations(
@@ -767,7 +769,7 @@ def _run_single_dqn(
             prepared,
             data_signature=data_signature,
             episodes=episodes,
-            learning_rate=0.001,
+            learning_rate=learning_rate,
             reflection_mode="DQN 참고만",
             sample_id=sample_id,
             training_mode=mode,
@@ -796,6 +798,8 @@ def _run_dqn_comparison(
     recommendations: list[dict],
     data_signature: str | None,
     episodes: int,
+    learning_rate: float,
+    candidate_count: int,
     sample_id: str,
     store_count: int,
     dc_count: int,
@@ -808,17 +812,19 @@ def _run_dqn_comparison(
     snapshot = {key: copy.deepcopy(st.session_state.get(key)) for key in protected_keys}
     status = st.status("원본·균형형 비교 준비 중", expanded=True)
     try:
-        balanced = balanced_recommendations(recommendations)
+        selected_recommendations = recommendations[:candidate_count]
+        balanced = balanced_recommendations(selected_recommendations)
         try:
             save_balanced_recommendations(balanced, sample_id, store_count, dc_count)
         except Exception:
             st.session_state["dqn_storage_notice"] = True
         status.update(label="DQN 원본·균형형 학습 중", state="running")
         comparison = compare_dqn_training_sets(
-            recommendations,
+            selected_recommendations,
             balanced,
             str(data_signature or ""),
             episodes=episodes,
+            learning_rate=learning_rate,
             sample_id=sample_id,
             store_count=store_count,
             dc_count=dc_count,
@@ -863,7 +869,7 @@ def _render_dqn() -> None:
         "DQN 학습 실행",
         "현재 적용된 데이터로 DQN을 학습합니다. 원본 또는 균형형 데이터를 선택할 수 있습니다.",
     )
-    setup_cols = st.columns([1.25, 0.8, 1.0], gap="small")
+    setup_cols = st.columns([1.35, 0.85, 0.82, 0.82, 0.82], gap="small")
     with setup_cols[0]:
         training_data = st.radio(
             "학습 데이터 선택",
@@ -872,24 +878,55 @@ def _render_dqn() -> None:
             key="dqn_single_training_data",
         )
     with setup_cols[1]:
+        st.selectbox("모델 선택", ["DQN"], disabled=True, key="dqn_model_type")
+    with setup_cols[2]:
+        if "dqn_single_episodes" not in st.session_state:
+            st.session_state["dqn_single_episodes"] = int(st.session_state.get("settings_default_episodes", 80))
         episodes = int(st.number_input(
             "학습 에피소드",
             min_value=20,
             max_value=500,
-            value=80,
             step=10,
             key="dqn_single_episodes",
         ))
-    with setup_cols[2]:
-        st.markdown("**학습 상태**")
-        st.markdown(
-            badge_html(str(runtime["status"]), "success" if torch_ok else "warning"),
-            unsafe_allow_html=True,
-        )
-        if torch_ok:
-            st.caption(f"실행 장치: {runtime['device']} · PyTorch {runtime['version']}")
-        else:
-            st.caption(str(runtime["message"]))
+    with setup_cols[3]:
+        if "dqn_learning_rate" not in st.session_state:
+            st.session_state["dqn_learning_rate"] = float(
+                st.session_state.get("settings_default_learning_rate", 0.001)
+            )
+        learning_rate = float(st.number_input(
+            "Learning Rate",
+            min_value=0.0001,
+            max_value=0.0100,
+            step=0.0001,
+            format="%.4f",
+            key="dqn_learning_rate",
+        ))
+    with setup_cols[4]:
+        max_candidates = max(3, len(recommendations))
+        configured_candidates = int(st.session_state.get("settings_default_candidate_count", max_candidates))
+        if "dqn_candidate_count" not in st.session_state:
+            st.session_state["dqn_candidate_count"] = max(3, min(configured_candidates, max_candidates))
+        current_candidates = int(st.session_state["dqn_candidate_count"])
+        if current_candidates < 3 or current_candidates > max_candidates:
+            st.session_state["dqn_candidate_count"] = max(3, min(configured_candidates, max_candidates))
+        candidate_count = int(st.number_input(
+            "후보 수",
+            min_value=3,
+            max_value=max_candidates,
+            step=1,
+            key="dqn_candidate_count",
+            disabled=len(recommendations) < 3,
+        ))
+
+    st.markdown(
+        badge_html(str(runtime["status"]), "success" if torch_ok else "warning"),
+        unsafe_allow_html=True,
+    )
+    if torch_ok:
+        st.caption(f"실행 장치: {runtime['device']} · PyTorch {runtime['version']}")
+    else:
+        st.caption(str(runtime["message"]))
 
     selected_mode = _dqn_mode(training_data)
     actions = st.columns([1.4, 1.0, 1.0], gap="small")
@@ -901,7 +938,7 @@ def _render_dqn() -> None:
         width="stretch",
     ):
         _run_single_dqn(
-            recommendations, data_signature, selected_mode, episodes,
+            recommendations, data_signature, selected_mode, episodes, learning_rate, candidate_count,
             sample_id, store_count, dc_count,
         )
         st.rerun()
@@ -912,7 +949,8 @@ def _render_dqn() -> None:
         width="stretch",
     ):
         _run_dqn_comparison(
-            recommendations, data_signature, episodes, sample_id, store_count, dc_count,
+            recommendations, data_signature, episodes, learning_rate, candidate_count,
+            sample_id, store_count, dc_count,
         )
         st.rerun()
     if actions[2].button(
@@ -939,7 +977,7 @@ def _render_dqn() -> None:
             width="stretch",
         ):
             _run_single_dqn(
-                recommendations, data_signature, "original", episodes,
+                recommendations, data_signature, "original", episodes, learning_rate, candidate_count,
                 sample_id, store_count, dc_count,
             )
             st.rerun()
@@ -950,7 +988,7 @@ def _render_dqn() -> None:
             width="stretch",
         ):
             _run_single_dqn(
-                recommendations, data_signature, "balanced", episodes,
+                recommendations, data_signature, "balanced", episodes, learning_rate, candidate_count,
                 sample_id, store_count, dc_count,
             )
             st.rerun()
