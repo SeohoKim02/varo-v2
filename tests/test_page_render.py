@@ -73,6 +73,20 @@ class PageRenderTests(unittest.TestCase):
         app.run()
         self.assertFalse(app.exception)
 
+    def test_each_new_page_renders_independently_without_data(self):
+        for menu in MENUS:
+            with self.subTest(menu=menu):
+                app = AppTest.from_file(APP_PATH, default_timeout=90)
+                app.run()
+                app.session_state["current_menu"] = menu
+                app.run()
+                self.assertFalse(app.exception, msg=f"empty {menu}: {list(app.exception)}")
+                self.assertIn(menu, self._markdown_blob(app))
+                self.assertEqual(
+                    {item.key for item in app.sidebar.button},
+                    {f"nav_{item}" for item in MENUS},
+                )
+
     def test_data_management_shows_dqn_samples_and_compact_summary(self):
         app = self._new_app()
         app.session_state["current_menu"] = "데이터 관리"
@@ -115,6 +129,9 @@ class PageRenderTests(unittest.TestCase):
         for menu in MENUS:
             self.assertIn(menu, sidebar_nav[f"nav_{menu}"])
         button_labels = {b.label for b in app.button}
+        self.assertTrue({
+            "추천 실행 보기", "경로 상세 보기", "분석 및 검증 보기", "데이터 관리 보기",
+        }.isdisjoint(button_labels))
         self.assertIn("시뮬레이션 실행", button_labels)
         self.assertIn("다시 실행", button_labels)
         for banned in (

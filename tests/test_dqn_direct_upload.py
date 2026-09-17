@@ -210,6 +210,15 @@ class DqnDirectUploadPageTests(unittest.TestCase):
                     self.assertNotIn("Traceback", page_blob)
                     if menu == "결과 이력":
                         self.assertIn("이동 단계", page_blob)
+                        selected = next(
+                            row for row in recommendations
+                            if str(row["route_id"]) == str(app.session_state["selected_route_id"])
+                        )
+                        if selected.get("route_type") == "DIRECT":
+                            self.assertIn("DIRECT", page_blob)
+                        else:
+                            self.assertEqual(selected.get("route_type"), "VIA_DC")
+                            self.assertIn(str(selected.get("dc_name") or selected.get("dc_id")), page_blob)
 
     def test_sample_10_route_detail_keeps_the_selected_dc02(self):
         state, _ = self._state_for_sample("10")
