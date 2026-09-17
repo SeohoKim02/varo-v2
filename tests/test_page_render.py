@@ -184,7 +184,9 @@ class PageRenderTests(unittest.TestCase):
             self.assertIn(required, blob)
         columns = self._dataframe_columns(app)
         self.assertTrue({"지표", "VHS", "Greedy", "DQN", "Pareto"}.issubset(columns))
-        self.assertIn("고급 분석 도구", {item.label for item in app.expander})
+        self.assertTrue({"후보별 상세 판단", "고급 분석 도구"}.issubset(
+            {item.label for item in app.expander}
+        ))
 
     def test_training_management_keeps_real_dqn_controls(self):
         app = self._new_app()
@@ -198,6 +200,9 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("모델 선택", select_labels)
         self.assertTrue({"학습 에피소드", "Learning Rate", "후보 수"}.issubset(number_labels))
         self.assertIn("DQN 학습 실행", {item.label for item in app.button})
+        self.assertTrue({"데이터 진단·일괄 학습", "학습 결과 상세 지표"}.issubset(
+            {item.label for item in app.expander}
+        ))
 
     def test_results_history_has_saved_runs_and_current_result_detail(self):
         app = self._new_app()

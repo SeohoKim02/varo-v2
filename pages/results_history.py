@@ -200,11 +200,16 @@ def render_results_history_page() -> None:
     history = _saved_dqn_runs(str(OUTPUT_DIR))
     _render_history_kpis(history)
     render_section_header(st, "결과 검색", "실제 저장된 학습 결과만 조회합니다.")
-    filtered = _filter_history(history)
+    if history:
+        with st.container(border=True, key="history_filters"):
+            filtered = _filter_history(history)
+    else:
+        filtered = []
     if not history:
         render_empty_state(st, "저장된 학습 이력이 없습니다", "학습 관리에서 학습을 완료하면 이곳에 표시됩니다.")
     else:
-        list_column, detail_column = st.columns([2.35, 1], gap="medium")
+        history_area = st.container(key="history_workspace")
+        list_column, detail_column = history_area.columns([2.35, 1], gap="medium")
         with list_column:
             render_section_header(st, "실행 이력 목록", right=f"총 {len(filtered):,}건")
             if filtered:

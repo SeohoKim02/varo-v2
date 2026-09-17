@@ -177,18 +177,21 @@ def render_strategy_comparison_page() -> None:
         render_empty_state(st, "비교할 데이터가 없습니다", "설정에서 데이터를 불러온 뒤 다시 확인해주세요.")
         return
 
-    filtered = _filter_recommendations(recommendations)
+    with st.container(border=True, key="strategy_filters"):
+        filtered = _filter_recommendations(recommendations)
     if not filtered:
         render_empty_state(st, "선택 조건에 맞는 후보가 없습니다", compact=True)
         return
     strategy_sets = _strategy_sets(filtered)
-    cards = st.columns(4, gap="medium")
+    card_area = st.container(key="strategy_cards")
+    cards = card_area.columns(4, gap="medium")
     for column, name in zip(cards, _STRATEGY_META):
         with column:
             st.markdown(_strategy_card(name, strategy_sets[name]), unsafe_allow_html=True)
 
     render_section_header(st, "전략별 핵심 비교", "현재 계산 결과에 공통으로 존재하는 값만 표시합니다.")
     st.dataframe(_comparison_frame(strategy_sets), hide_index=True, width="stretch")
-    render_section_header(st, "후보별 판단 차이", "최종 VARO 순위는 서비스 우선·비용 우선·VHS tie-break 원칙을 유지합니다.")
-    st.dataframe(_candidate_frame(filtered), hide_index=True, width="stretch", height=310)
+    with st.expander("후보별 상세 판단", expanded=False):
+        render_section_header(st, "후보별 판단 차이", "최종 VARO 순위는 서비스 우선·비용 우선·VHS tie-break 원칙을 유지합니다.")
+        st.dataframe(_candidate_frame(filtered), hide_index=True, width="stretch", height=310)
     _render_advanced_tools(st.session_state.get("varo_pipeline_result") or {}, filtered)

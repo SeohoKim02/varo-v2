@@ -35,7 +35,8 @@ def render_settings_page() -> None:
         "시뮬레이션 기본값과 학습 조건, 사용할 데이터를 관리하세요.",
     )
     runtime = get_torch_runtime_info()
-    sections = st.columns(2, gap="medium")
+    settings_area = st.container(key="settings_grid")
+    sections = settings_area.columns(2, gap="medium")
     with sections[0]:
         with st.container(border=True):
             st.markdown('<div class="v3-panel-title">기본 설정</div>', unsafe_allow_html=True)
@@ -96,7 +97,7 @@ def render_settings_page() -> None:
         st.success("현재 세션의 기본 설정을 저장했습니다.")
 
     render_section_header(st, "데이터·결과 설정", "실제 분석 데이터와 저장 결과를 관리합니다.")
-    with st.container(border=True):
+    with st.container(border=True, key="settings_data_panel"):
         st.markdown('<div class="v3-panel-title">엑셀 데이터 교체</div>', unsafe_allow_html=True)
         render_data_source_controls("settings_source")
         render_data_sample_controls()

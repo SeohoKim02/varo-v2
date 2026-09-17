@@ -881,8 +881,7 @@ def _render_core_results(scenario: Mapping[str, Any], routes: Sequence[Mapping[s
     )
     rows = "".join(
         '<div class="v3-result-row">'
-        f'<div><small>{_safe(label)}</small><strong>{_safe(value)}</strong></div>'
-        '<span class="v2-badge v2-badge-success">계산 결과</span></div>'
+        f'<small>{_safe(label)}</small><strong>{_safe(value)}</strong></div>'
         for label, value in values
     )
     st.markdown(
@@ -974,7 +973,8 @@ def render_overview_page() -> None:
         )
         return
 
-    layout = st.columns([0.92, 2.65, 0.95], gap="medium")
+    workspace = st.container(key="simulation_workspace")
+    layout = workspace.columns([0.92, 2.65, 0.95], gap="medium")
     with layout[0]:
         with st.container(border=True):
             st.markdown('<div class="v3-panel-title">시뮬레이션 설정</div>', unsafe_allow_html=True)

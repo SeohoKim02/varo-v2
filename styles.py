@@ -60,6 +60,12 @@ def apply_global_styles() -> None:
             max-width: 238px !important;
             border-right: 1px solid #e6edf6;
         }}
+        section[data-testid="stSidebar"][aria-expanded="false"] {{
+            width: 0 !important;
+            min-width: 0 !important;
+            max-width: 0 !important;
+            border-right: 0 !important;
+        }}
         section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {{
             padding: 1.05rem 0.78rem 1.1rem !important;
         }}
@@ -126,10 +132,34 @@ def apply_global_styles() -> None:
         }}
         .block-container {{
             padding-top: 1.15rem !important;
-            padding-bottom: 3rem;
+            padding-right: 1.25rem !important;
+            padding-bottom: 2rem;
+            padding-left: 1.25rem !important;
             max-width: 1620px;
             margin-left: auto !important;
             margin-right: auto !important;
+        }}
+        .stApp [data-testid="stWidgetLabel"] p {{
+            color: #34415c;
+            font-size: 0.82rem;
+            font-weight: 700;
+            line-height: 1.25;
+        }}
+        .stApp div[data-baseweb="select"] > div,
+        .stApp [data-testid="stNumberInput"] > div,
+        .stApp [data-testid="stTextInput"] > div {{
+            min-height: 2.62rem;
+        }}
+        .stApp .stButton button,
+        .stApp .stDownloadButton button {{
+            min-height: 2.62rem;
+            white-space: nowrap;
+        }}
+        .stApp [data-testid="stVerticalBlockBorderWrapper"] {{
+            background: #ffffff;
+            border-color: var(--varo-line) !important;
+            border-radius: var(--varo-radius-card) !important;
+            box-shadow: var(--varo-shadow);
         }}
         .v2-wrap, .v2-wrap * {{
             box-sizing: border-box;
@@ -236,7 +266,7 @@ def apply_global_styles() -> None:
             justify-content: space-between;
             align-items: flex-start;
             gap: 0.8rem;
-            margin: 0.1rem 0 1.2rem;
+            margin: 0.1rem 0 1rem;
         }}
         .v2-page-title {{
             font-size: clamp(1.72rem, 2.2vw, 2.28rem) !important;
@@ -310,13 +340,14 @@ def apply_global_styles() -> None:
             line-height: 1.12;
             color: var(--varo-text);
             margin-top: 0.12rem;
+            font-variant-numeric: tabular-nums;
         }}
         .v2-section-header {{
             display: flex;
             justify-content: space-between;
             gap: 0.75rem;
             align-items: center;
-            margin: 1.15rem 0 0.52rem;
+            margin: 1rem 0 0.48rem;
         }}
         .v2-section-title {{
             font-size: 1.12rem;
@@ -667,8 +698,8 @@ def apply_global_styles() -> None:
             border-bottom: 1px solid #edf1f6;
         }}
         .v3-result-row:last-child {{ border-bottom: 0; }}
-        .v3-result-row small {{ display: block; color: var(--varo-muted); margin-bottom: 0.12rem; }}
-        .v3-result-row strong {{ color: var(--varo-text); font-size: 0.96rem; }}
+        .v3-result-row small {{ color: var(--varo-muted); }}
+        .v3-result-row strong {{ color: var(--varo-text); font-size: 0.96rem; text-align: right; }}
         .v3-strategy-card {{ min-height: 230px; position: relative; overflow: hidden; }}
         .v3-strategy-card::before {{
             content: "";
@@ -689,13 +720,6 @@ def apply_global_styles() -> None:
             font-size: 0.8rem;
         }}
         .v3-strategy-metric strong {{ color: var(--varo-text); text-align: right; }}
-        .v3-simulation-settings [data-testid="stVerticalBlockBorderWrapper"],
-        .v3-results-panel [data-testid="stVerticalBlockBorderWrapper"] {{
-            background: #ffffff;
-            border-color: #e2eaf4 !important;
-            border-radius: 14px !important;
-            box-shadow: var(--varo-shadow);
-        }}
         [data-testid="stMetric"] {{
             background: #ffffff;
             border: 1px solid #e2eaf4;
@@ -712,6 +736,42 @@ def apply_global_styles() -> None:
             color: #344154 !important;
             font-weight: 700 !important;
         }}
+        @media (max-width: 1200px) {{
+            .st-key-simulation_workspace [data-testid="stHorizontalBlock"],
+            .st-key-history_workspace [data-testid="stHorizontalBlock"],
+            .st-key-settings_grid [data-testid="stHorizontalBlock"] {{
+                display: flex !important;
+                flex-wrap: wrap !important;
+            }}
+            .st-key-simulation_workspace [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+            .st-key-history_workspace [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+            .st-key-settings_grid [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{
+                flex: 1 1 100% !important;
+                width: 100% !important;
+                min-width: 0 !important;
+            }}
+            .st-key-strategy_cards [data-testid="stHorizontalBlock"],
+            .st-key-training_setup [data-testid="stHorizontalBlock"],
+            .st-key-training_actions [data-testid="stHorizontalBlock"],
+            .st-key-history_filters [data-testid="stHorizontalBlock"] {{
+                display: flex !important;
+                flex-wrap: wrap !important;
+            }}
+            .st-key-strategy_cards [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{
+                flex: 1 1 calc(50% - 0.75rem) !important;
+                width: auto !important;
+                min-width: 260px !important;
+            }}
+            .st-key-training_setup [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+            .st-key-training_actions [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+            .st-key-history_filters [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{
+                flex: 1 1 220px !important;
+                width: auto !important;
+                min-width: 0 !important;
+            }}
+            .v2-network-shell {{ min-height: 500px; }}
+            .v2-network-svg {{ height: 500px; }}
+        }}
         @media (max-width: 1100px) {{
             .v2-kpi-card:not(.v2-kpi-card-compact) {{ min-height: 104px; }}
             .v2-kpi-value {{ font-size: 1.28rem; }}
@@ -727,6 +787,15 @@ def apply_global_styles() -> None:
             .v2-network-svg {{ height: 470px; }}
             .v2-sim-route-summary {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
             .v2-sim-steps {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+            .st-key-strategy_cards [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+            .st-key-training_setup [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+            .st-key-training_actions [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+            .st-key-training_results [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+            .st-key-history_filters [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{
+                flex: 1 1 100% !important;
+                width: 100% !important;
+                min-width: 0 !important;
+            }}
         }}
         @media (max-width: 640px) {{
             .block-container {{ padding-left: 0.85rem; padding-right: 0.85rem; }}
