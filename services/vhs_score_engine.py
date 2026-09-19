@@ -12,6 +12,7 @@ from typing import Any, Mapping, Sequence
 
 import pandas as pd
 
+from services.pareto_service import pareto_layers, select_pareto_routes
 from services.recommendation_adapter import normalize_action
 
 COMPONENTS = (
@@ -35,9 +36,11 @@ WEIGHT_BOUNDS: dict[str, tuple[float, float]] = {
     "inventory_balance_score": (0.08, 0.18),
     "route_cost_score": (0.06, 0.16),
     "promotion_score": (0.03, 0.12),
-    "greedy_score": (0.03, 0.12),
-    "confidence_score": (0.05, 0.15),
-    "dqn_reference_score": (0.00, 0.08),
+    # Cross-strategy outputs remain visible for diagnostics/comparison only.
+    # They must not change the independent VHS score.
+    "greedy_score": (0.00, 0.00),
+    "confidence_score": (0.00, 0.00),
+    "dqn_reference_score": (0.00, 0.00),
 }
 
 BASE_WEIGHTS: dict[str, float] = {
@@ -48,8 +51,8 @@ BASE_WEIGHTS: dict[str, float] = {
     "inventory_balance_score": 0.10,
     "route_cost_score": 0.09,
     "promotion_score": 0.05,
-    "greedy_score": 0.06,
-    "confidence_score": 0.08,
+    "greedy_score": 0.00,
+    "confidence_score": 0.00,
     "dqn_reference_score": 0.00,
 }
 
@@ -385,7 +388,15 @@ def _project_to_bounds(raw: Mapping[str, float], bounds: Mapping[str, tuple[floa
             change = diff * (value / capacity_sum)
             weights[key] = max(bounds[key][0], min(bounds[key][1], weights[key] + change))
     total = sum(weights.values()) or 1.0
-    return {key: round(weights[key] / total, 6) for key in COMPONENTS}
+    rounded = {key: round(weights[key] / total, 6) for key in COMPONENTS}
+    residual = round(1.0 - sum(rounded.values()), 6)
+    if residual:
+        for key in COMPONENTS:
+            candidate = rounded[key] + residual
+            if bounds[key][0] - 1e-12 <= candidate <= bounds[key][1] + 1e-12:
+                rounded[key] = round(candidate, 6)
+                break
+    return rounded
 
 
 def optimize_weights(
@@ -466,41 +477,8 @@ def _ensure_greedy_rank(frame: pd.DataFrame) -> pd.Series:
 
 
 def pareto_ranks(recommendations: Sequence[Mapping[str, Any]]) -> list[int]:
-    """Return simple non-dominated layers used only as an auxiliary check."""
-    items = list(recommendations or [])
-    points = []
-    for item in items:
-        saving = _num(item.get("expected_saving")) or 0.0
-        disposal_risk = _num(item.get("disposal_risk_score")) or 0.0
-        demand_fit = _num(item.get("demand_fit_score")) or 0.0
-        feasibility = _num(item.get("feasibility_score")) or 0.0
-        route_cost = _num(item.get("move_cost") or item.get("estimated_cost")) or 0.0
-        points.append((saving, disposal_risk, demand_fit, feasibility, -route_cost))
-
-    remaining = set(range(len(items)))
-    ranks = [0] * len(items)
-    layer = 1
-    while remaining:
-        front: list[int] = []
-        for candidate in remaining:
-            dominated = False
-            for other in remaining:
-                if candidate == other:
-                    continue
-                at_least_as_good = all(left >= right for left, right in zip(points[other], points[candidate]))
-                strictly_better = any(left > right for left, right in zip(points[other], points[candidate]))
-                if at_least_as_good and strictly_better:
-                    dominated = True
-                    break
-            if not dominated:
-                front.append(candidate)
-        if not front:
-            front = [min(remaining)]
-        for index in front:
-            ranks[index] = layer
-            remaining.remove(index)
-        layer += 1
-    return ranks
+    """Return production Pareto layers for service, cost, and variable saving."""
+    return pareto_layers(recommendations)
 
 
 def build_strategy_comparison(recommendations: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -693,12 +671,22 @@ def apply_auto_vhs(
         frame["greedy_action"] = frame["greedy_strategy"]
     frame["varo_final_decision"] = frame["varo_final_rank"].map(lambda value: "최종 추천" if int(value) == 1 else "후보")
     frame["vhs_vs_greedy_match"] = frame["vhs_rank"].astype(int) == frame["greedy_rank"].fillna(999999).astype(float).astype(int)
-    frame["pareto_rank"] = pareto_ranks(frame.where(pd.notna(frame), None).to_dict("records"))
-    frame["pareto_status"] = frame["pareto_rank"].map(
-        lambda value: "비지배 후보" if int(value) == 1 else "보조 후보"
-    )
+    pareto_records = frame.where(pd.notna(frame), None).to_dict("records")
+    pareto_production = select_pareto_routes(pareto_records, max_routes=min(5, len(frame)))
+    frame["pareto_rank"] = pareto_production.ranks
+    frame["pareto_selected"] = False
+    frame["pareto_selection_order"] = pd.Series([None] * len(frame), index=frame.index, dtype="object")
+    frame["pareto_compromise_score"] = pd.Series([None] * len(frame), index=frame.index, dtype="object")
+    for order, position in enumerate(pareto_production.selected_indices, start=1):
+        frame.iloc[position, frame.columns.get_loc("pareto_selected")] = True
+        frame.iloc[position, frame.columns.get_loc("pareto_selection_order")] = order
+        frame.iloc[position, frame.columns.get_loc("pareto_compromise_score")] = pareto_production.compromise_scores.get(position)
+    frame["pareto_status"] = [
+        "운영 선택" if bool(selected) else "비지배 후보" if int(rank) == 1 else "보조 후보"
+        for selected, rank in zip(frame["pareto_selected"], frame["pareto_rank"])
+    ]
     frame["pareto_reason"] = (
-        "절감액·폐기 위험·수요·경로 비용·실행 가능성의 제한 탐색 비교"
+        "서비스 수량 최대화·비용 최소화·변동이 있는 절감액을 기준으로 frontier를 반복 재계산하고 ideal-point 거리가 가까운 후보를 선택"
     )
     if "dqn_action" not in frame.columns:
         frame["dqn_action"] = "미연결"
@@ -732,7 +720,7 @@ def apply_auto_vhs(
         "weight_rows": weight_rows,
         "component_columns": list(COMPONENTS),
         "dqn_included": dqn_enabled,
-        "dqn_policy": "DQN 정상 학습/추론 결과가 있을 때만 낮은 비중으로 반영",
+        "dqn_policy": "DQN은 독립 전략으로 비교만 하며 VHS 점수에는 반영하지 않음",
         "final_top_route_id": str(frame.sort_values("varo_final_rank").iloc[0].get("route_id")),
         "vhs_average": round(float(frame["auto_vhs_score"].mean()), 3),
         "recalculated_average": round(float(frame["auto_vhs_score"].mean()), 3),
@@ -740,5 +728,16 @@ def apply_auto_vhs(
         "fallback_components": [
             row["component"] for row in weight_rows if row.get("fallback_reason")
         ],
+        "pareto_production": {
+            "active_objectives": list(pareto_production.active_objectives),
+            "inactive_objectives": list(pareto_production.inactive_objectives),
+            "selection_limit": min(5, len(frame)),
+            "selected_count": len(pareto_production.selected_indices),
+            "selected_route_ids": [
+                str(frame.iloc[position].get("route_id") or frame.iloc[position].get("recommendation_id") or "")
+                for position in pareto_production.selected_indices
+            ],
+            "frontier_recalculation_steps": list(pareto_production.trace),
+        },
     }
     return VhsAutoResult(frame, analysis, build_strategy_comparison(frame.where(pd.notna(frame), None).to_dict("records")))

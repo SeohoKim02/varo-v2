@@ -180,7 +180,7 @@ class DqnServiceTests(unittest.TestCase):
         self.assertEqual(updated[0]["dqn_correction"], 0.0)
         self.assertEqual(updated[0]["vhs_score"], recommendations[0]["vhs_score"])
 
-    def test_weak_reflection_is_small_and_only_when_connected(self):
+    def test_legacy_weak_reflection_option_cannot_change_production_score(self):
         recommendations = _recommendations()
         result = {
             "status": "연결",
@@ -195,9 +195,9 @@ class DqnServiceTests(unittest.TestCase):
             "target_distribution": {"재고 이동": 1, "할인": 1},
         }
         updated = apply_dqn_result_to_recommendations(recommendations, result)
-        self.assertGreater(updated[0]["dqn_correction"], 0)
-        self.assertLessEqual(updated[0]["dqn_correction"], 2.0)
-        self.assertLessEqual(updated[0]["vhs_score"] - recommendations[0]["vhs_score"], 2.0)
+        self.assertEqual(updated[0]["dqn_correction"], 0.0)
+        self.assertEqual(updated[0]["vhs_score"], recommendations[0]["vhs_score"])
+        self.assertEqual(updated[1]["vhs_score"], recommendations[1]["vhs_score"])
 
     def test_review_required_does_not_change_score(self):
         recommendations = _recommendations()

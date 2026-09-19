@@ -653,18 +653,35 @@ def run_analysis_pipeline(
             "pareto_rank": item.get("pareto_rank"),
             "pareto_status": item.get("pareto_status"),
             "pareto_reason": item.get("pareto_reason"),
+            "pareto_selected": bool(item.get("pareto_selected")),
+            "pareto_selection_order": item.get("pareto_selection_order"),
+            "pareto_compromise_score": item.get("pareto_compromise_score"),
         }
         for item in standard_recommendations
     ]
+    pareto_production = dict(auto_vhs.analysis.get("pareto_production") or {})
+    objective_labels = {
+        "service_qty": "서비스 수량 최대화",
+        "transport_cost": "운송비 최소화",
+        "expected_saving": "예상 절감액 최대화",
+    }
     result.pareto_analysis = {
-        "status": "보조 검증",
+        "status": "운영 전략",
         "comparison_count": len(pareto_rows),
         "non_dominated_count": sum(1 for item in pareto_rows if item.get("pareto_rank") == 1),
-        "criteria": ["절감액", "폐기 위험", "수요 적합도", "경로 비용", "실행 가능성"],
+        "criteria": [
+            objective_labels.get(name, name)
+            for name in pareto_production.get("active_objectives", [])
+        ],
+        "inactive_objectives": list(pareto_production.get("inactive_objectives") or []),
+        "selected_count": int(pareto_production.get("selected_count") or 0),
+        "selected_route_ids": list(pareto_production.get("selected_route_ids") or []),
+        "selection_limit": int(pareto_production.get("selection_limit") or 0),
+        "frontier_recalculation_steps": list(pareto_production.get("frontier_recalculation_steps") or []),
         "rows": pareto_rows if collect_details else [],
     }
-    if "services.vhs_score_engine.pareto_ranks" not in result.connected_algorithms:
-        result.connected_algorithms.append("services.vhs_score_engine.pareto_ranks")
+    if "services.pareto_service.select_pareto_routes" not in result.connected_algorithms:
+        result.connected_algorithms.append("services.pareto_service.select_pareto_routes")
     result.confidence_analysis = (
         confidence_provenance(candidates, confidence_removed_columns)
         if collect_details else {}
@@ -698,7 +715,7 @@ def run_analysis_pipeline(
             "vhs": "services.vhs_score_engine.apply_auto_vhs",
             "legacy_vhs_reference": "varo_hybrid_score.calculate_varo_hybrid_score",
             "greedy": "heuristic_optimizer.add_heuristic_scores",
-            "pareto": "services.vhs_score_engine.pareto_ranks",
+            "pareto": "services.pareto_service.select_pareto_routes",
             "optimality_gap": "services.optimality_gap_service.run_optimality_gap · 버튼 실행 전용",
             "confidence": "vhs_confidence.add_confidence_columns · DQN 제외",
             "routes": "transfer_path_analyzer.analyze_direct_vs_dc_transfer",

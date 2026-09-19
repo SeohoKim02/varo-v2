@@ -70,7 +70,11 @@ class DqnRefreshGuardTests(unittest.TestCase):
         review = {"status": "검토 필요", "data_signature": signature}
         with patch.object(validation.st, "session_state", state):
             validation._refresh_recommendations_with_dqn(normal)
-            self.assertGreater(state["analysis_result"]["vhs_analysis"]["weights"]["dqn_reference_score"], 0)
+            self.assertEqual(state["analysis_result"]["vhs_analysis"]["weights"]["dqn_reference_score"], 0)
+            self.assertEqual(
+                [row["dqn_action"] for row in state["varo_recommendations"]],
+                ["재고 이동", "할인", "할인"],
+            )
             validation._refresh_recommendations_with_dqn(review)
 
         self.assertEqual(

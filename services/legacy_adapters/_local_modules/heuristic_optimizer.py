@@ -102,10 +102,10 @@ def add_heuristic_scores(final_recommendations):
     result = final_recommendations.copy()
 
     if "estimated_cost" not in result.columns:
-        result["estimated_cost"] = 0
+        result["estimated_cost"] = result.get("move_cost", pd.Series(float("nan"), index=result.index))
 
     if "suggested_qty" not in result.columns:
-        result["suggested_qty"] = 0
+        result["suggested_qty"] = result.get("recommended_qty", pd.Series(float("nan"), index=result.index))
 
     if "final_recommendation" not in result.columns:
         result["final_recommendation"] = ""
@@ -113,13 +113,16 @@ def add_heuristic_scores(final_recommendations):
     if "reason" not in result.columns:
         result["reason"] = ""
 
+    cost_numeric = _to_numeric(result["estimated_cost"]).where(lambda values: values >= 0)
+    quantity_numeric = _to_numeric(result["suggested_qty"]).where(lambda values: values >= 0)
+
     result["cost_score"] = _normalize_lower_is_better(
-        result["estimated_cost"],
+        cost_numeric,
         max_score=40
     )
 
     result["quantity_score"] = _normalize_higher_is_better(
-        result["suggested_qty"],
+        quantity_numeric,
         max_score=25
     )
 
@@ -135,16 +138,22 @@ def add_heuristic_scores(final_recommendations):
 
     result["heuristic_grade"] = result["heuristic_score"].apply(_grade)
 
-    result["_estimated_cost_numeric"] = _to_numeric(result["estimated_cost"])
-    result["_suggested_qty_numeric"] = _to_numeric(result["suggested_qty"])
+    result["_estimated_cost_numeric"] = cost_numeric
+    result["_suggested_qty_numeric"] = quantity_numeric
+    result["_route_id_key"] = result.get(
+        "route_id", result.get("recommendation_id", pd.Series("", index=result.index))
+    ).fillna("").astype(str)
 
     result = result.sort_values(
         by=[
             "heuristic_score",
             "_estimated_cost_numeric",
             "_suggested_qty_numeric",
+            "_route_id_key",
         ],
-        ascending=[False, True, False]
+        ascending=[False, True, False, True],
+        na_position="last",
+        kind="mergesort",
     ).reset_index(drop=True)
 
     result["greedy_rank"] = result.index + 1
@@ -158,6 +167,8 @@ def add_heuristic_scores(final_recommendations):
         ),
         axis=1
     )
+
+    result = result.drop(columns=["_route_id_key"])
 
     return result
 

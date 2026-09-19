@@ -73,21 +73,23 @@ class VhsAutoWeightingTests(unittest.TestCase):
         }
         self.assertTrue(required.issubset(comparison[0]))
 
-    def test_pareto_fields_are_attached_as_auxiliary_validation(self):
+    def test_pareto_fields_are_attached_as_operational_selection(self):
         self.assertTrue(all(rec.get("pareto_rank") is not None for rec in self.recommendations))
         self.assertTrue(all(rec.get("pareto_status") for rec in self.recommendations))
         self.assertTrue(all(rec.get("pareto_reason") for rec in self.recommendations))
         self.assertEqual(
             self.result.pareto_analysis["criteria"],
-            ["절감액", "폐기 위험", "수요 적합도", "경로 비용", "실행 가능성"],
+            ["서비스 수량 최대화", "운송비 최소화", "예상 절감액 최대화"],
         )
+        self.assertEqual(self.result.pareto_analysis["status"], "운영 전략")
+        self.assertGreater(self.result.pareto_analysis["selected_count"], 0)
 
     def test_dqn_unconnected_does_not_influence_vhs(self):
         self.assertTrue(all(float(rec.get("dqn_reference_score") or 0) == 0 for rec in self.recommendations))
         self.assertEqual(float(self.weights.get("dqn_reference_score", 0)), 0.0)
         self.assertTrue(all(rec.get("dqn_action") for rec in self.recommendations))
 
-    def test_normal_dqn_result_can_receive_low_reference_weight(self):
+    def test_normal_dqn_result_remains_comparison_only(self):
         frame = recommendations_frame().copy()
         frame["dqn_status"] = "정상"
         frame["dqn_action"] = "재고 이동"
@@ -95,8 +97,8 @@ class VhsAutoWeightingTests(unittest.TestCase):
         training = {"status": "정상"}
         result = apply_auto_vhs(frame, training)
         weight = result.analysis["weights"]["dqn_reference_score"]
-        self.assertGreater(weight, 0.0)
-        self.assertLessEqual(weight, WEIGHT_BOUNDS["dqn_reference_score"][1])
+        self.assertEqual(weight, 0.0)
+        self.assertEqual(WEIGHT_BOUNDS["dqn_reference_score"], (0.0, 0.0))
         self.assertTrue(result.frame["vhs_score"].between(0, 100).all())
 
     def test_pipeline_exposes_weight_and_comparison_sections(self):

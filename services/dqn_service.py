@@ -15,6 +15,7 @@ from collections import Counter, deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+from statistics import median
 from typing import Any, Callable, Mapping, Sequence
 
 from services.local_paths import dqn_output_dir
@@ -87,7 +88,7 @@ FEATURE_COLUMNS = (
 
 # Other strategies' own outputs are deliberately kept out of the DQN state so the
 # agent stays an independent strategy instead of a VHS/Greedy imitator.
-STRATEGY_OUTPUT_COLUMNS = ("vhs_score", "greedy_rank")
+STRATEGY_OUTPUT_COLUMNS = ("vhs_score", "greedy_rank", "confidence_score")
 DQN_STATE_COLUMNS = tuple(
     column for column in FEATURE_COLUMNS if column not in STRATEGY_OUTPUT_COLUMNS
 )
@@ -178,7 +179,7 @@ class DqnTrainingResult:
     model_status: str = "not_trained"
     model_path: str | None = None
     result_path: str | None = None
-    feature_columns: list[str] = field(default_factory=lambda: list(FEATURE_COLUMNS))
+    feature_columns: list[str] = field(default_factory=lambda: list(DQN_STATE_COLUMNS))
     action_labels: list[str] = field(default_factory=lambda: list(ACTION_LABELS))
     dqn_action_by_route: dict[str, str] = field(default_factory=dict)
     dqn_confidence_by_route: dict[str, float] = field(default_factory=dict)
@@ -287,6 +288,7 @@ def data_signature_from_recommendations(recommendations: Sequence[Mapping[str, A
     serializable = []
     for row in recommendations or []:
         serializable.append({
+            "snapshot_date": row.get("snapshot_date"),
             "route_id": row.get("route_id"),
             "product_id": row.get("product_id"),
             "source_id": row.get("source_id"),
@@ -317,10 +319,40 @@ def _feature_stats(recommendations: Sequence[Mapping[str, Any]], columns: Sequen
     return stats
 
 
+def _coerce_feature_stats(
+    stats: Mapping[str, Sequence[float]] | None,
+    columns: Sequence[str],
+) -> dict[str, tuple[float, float]] | None:
+    """Validate persisted train-only normalization statistics."""
+    if not stats:
+        return None
+    normalized: dict[str, tuple[float, float]] = {}
+    for column in columns:
+        values = stats.get(column)
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)) or len(values) != 2:
+            return None
+        low, high = _num(values[0]), _num(values[1])
+        if low is None or high is None or high < low:
+            return None
+        normalized[column] = (low, high)
+    return normalized
+
+
+def _serializable_feature_stats(
+    stats: Mapping[str, Sequence[float]],
+    columns: Sequence[str],
+) -> dict[str, list[float]]:
+    validated = _coerce_feature_stats(stats, columns)
+    if validated is None:
+        raise ValueError("invalid DQN feature normalization statistics")
+    return {column: [float(validated[column][0]), float(validated[column][1])] for column in columns}
+
+
 def build_state_vectors(
     recommendations: Sequence[Mapping[str, Any]],
     context: Mapping[str, Any] | None = None,
     feature_columns: Sequence[str] = FEATURE_COLUMNS,
+    feature_stats: Mapping[str, Sequence[float]] | None = None,
 ) -> list[list[float]]:
     """Map recommendation candidates to normalized DQN state vectors.
 
@@ -328,7 +360,7 @@ def build_state_vectors(
     hints are encoded in stable extra dimensions.
     """
     recs = [dict(row) for row in recommendations or []]
-    stats = _feature_stats(recs, feature_columns)
+    stats = _coerce_feature_stats(feature_stats, feature_columns) or _feature_stats(recs, feature_columns)
     vectors: list[list[float]] = []
     for row in recs:
         vector: list[float] = []
@@ -348,7 +380,28 @@ def build_state_vectors(
 
 
 def _route_ids(recommendations: Sequence[Mapping[str, Any]]) -> list[str]:
-    return [str(row.get("route_id") or f"R{index + 1:03d}") for index, row in enumerate(recommendations or [])]
+    rows = list(recommendations or [])
+    base_ids = [str(row.get("route_id") or f"R{index + 1:03d}") for index, row in enumerate(rows)]
+    counts = Counter(base_ids)
+    dated_ids: list[str] = []
+    for index, (row, base_id) in enumerate(zip(rows, base_ids)):
+        if counts[base_id] == 1:
+            dated_ids.append(base_id)
+            continue
+        time_value = next(
+            (str(row.get(column)).strip() for column in TIME_ORDER_COLUMNS if str(row.get(column) or "").strip()),
+            "",
+        )
+        dated_ids.append(f"{time_value}::{base_id}" if time_value else f"{base_id}::{index + 1}")
+    duplicate_counts = Counter(dated_ids)
+    occurrences: Counter[str] = Counter()
+    unique_ids: list[str] = []
+    for value in dated_ids:
+        occurrences[value] += 1
+        unique_ids.append(
+            value if duplicate_counts[value] == 1 else f"{value}::{occurrences[value]}"
+        )
+    return unique_ids
 
 
 def _target_actions(recommendations: Sequence[Mapping[str, Any]]) -> list[str]:
@@ -571,6 +624,14 @@ def chronological_split(
     column = _time_order_key(recs)
     if column:
         recs = sorted(recs, key=lambda row: (str(row.get(column) or ""),))
+        ordered_periods = list(dict.fromkeys(str(row.get(column) or "") for row in recs))
+        if len(ordered_periods) >= 2 and holdout_ratio > 0.0:
+            holdout_period_count = max(1, int(round(len(ordered_periods) * float(holdout_ratio))))
+            holdout_period_count = min(holdout_period_count, len(ordered_periods) - 1)
+            holdout_periods = set(ordered_periods[-holdout_period_count:])
+            train = [row for row in recs if str(row.get(column) or "") not in holdout_periods]
+            holdout = [row for row in recs if str(row.get(column) or "") in holdout_periods]
+            return train, holdout
     if len(recs) < MIN_HOLDOUT_CANDIDATES or holdout_ratio <= 0.0:
         return recs, []
     holdout_size = max(1, int(round(len(recs) * float(holdout_ratio))))
@@ -753,9 +814,14 @@ def _cost_shares(recommendations: Sequence[Mapping[str, Any]]) -> list[float]:
 def build_training_states(
     recommendations: Sequence[Mapping[str, Any]],
     feature_columns: Sequence[str] = DQN_STATE_COLUMNS,
+    feature_stats: Mapping[str, Sequence[float]] | None = None,
 ) -> list[list[float]]:
     """Candidate features for DQN, without the two per-episode dimensions."""
-    return build_state_vectors(recommendations, feature_columns=feature_columns)
+    return build_state_vectors(
+        recommendations,
+        feature_columns=feature_columns,
+        feature_stats=feature_stats,
+    )
 
 
 def _episode_state(base: Sequence[float], progress: float, budget: float) -> list[float]:
@@ -768,6 +834,38 @@ _TRANSFER_INDEXES = tuple(
 )
 
 
+def valid_action_indexes(candidate: Mapping[str, Any]) -> tuple[int, ...]:
+    """Return actions that are executable for one decision-time candidate."""
+    valid = set(range(len(ACTION_LABELS)))
+    route_type = str(candidate.get("route_type") or "").upper()
+    if route_type == "DIRECT":
+        valid.discard(ACTION_LABELS.index("DC 경유 이동"))
+    elif route_type == "VIA_DC":
+        valid.discard(ACTION_LABELS.index("직접 이동"))
+    else:
+        valid.difference_update(_TRANSFER_INDEXES)
+
+    quantity = _num(candidate.get("recommended_qty"))
+    feasibility = _num(candidate.get("feasibility_score"))
+    feasibility_ratio = None if feasibility is None else feasibility / 100.0 if feasibility > 1.0 else feasibility
+    if (quantity is not None and quantity <= 0.0) or (
+        feasibility_ratio is not None and feasibility_ratio < 0.35
+    ):
+        valid.difference_update(_TRANSFER_INDEXES)
+    if not valid:
+        return (ACTION_LABELS.index("보류"),)
+    return tuple(sorted(valid))
+
+
+def _action_masks(recommendations: Sequence[Mapping[str, Any]]) -> list[tuple[int, ...]]:
+    return [valid_action_indexes(row) for row in recommendations]
+
+
+def _masked_argmax(values: Sequence[float], valid_indexes: Sequence[int]) -> int:
+    allowed = tuple(int(index) for index in valid_indexes) or (ACTION_LABELS.index("보류"),)
+    return max(allowed, key=lambda index: float(values[index]))
+
+
 def state_schema_fingerprint(feature_columns: Sequence[str] = DQN_STATE_COLUMNS) -> str:
     """Identify the exact state layout a saved model expects."""
     blob = json.dumps(
@@ -775,6 +873,7 @@ def state_schema_fingerprint(feature_columns: Sequence[str] = DQN_STATE_COLUMNS)
             "feature_columns": list(feature_columns),
             "extra_dimensions": ["route_via_dc", "cold_chain", "progress", "remaining_budget"],
             "action_labels": list(ACTION_LABELS),
+            "normalization": "train_minmax_v1",
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -782,7 +881,12 @@ def state_schema_fingerprint(feature_columns: Sequence[str] = DQN_STATE_COLUMNS)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
-def _greedy_rollout(model, base_states: Sequence[Sequence[float]], cost_shares: Sequence[float]):
+def _greedy_rollout(
+    model,
+    base_states: Sequence[Sequence[float]],
+    cost_shares: Sequence[float],
+    action_masks: Sequence[Sequence[int]] | None = None,
+):
     """Run the learned policy over the candidate sequence with no exploration."""
     import torch
 
@@ -795,7 +899,8 @@ def _greedy_rollout(model, base_states: Sequence[Sequence[float]], cost_shares: 
             vector = _episode_state(base, index / total, budget)
             values = model(torch.tensor([vector], dtype=torch.float32))[0]
             q_values = [float(value) for value in values.tolist()]
-            action = int(max(range(len(q_values)), key=lambda position: q_values[position]))
+            valid = action_masks[index] if action_masks is not None else range(len(q_values))
+            action = int(_masked_argmax(q_values, valid))
             chosen.append(action)
             q_rows.append(q_values)
             if action in _TRANSFER_INDEXES:
@@ -814,6 +919,46 @@ def _confidence_from_q(q_values: Sequence[float]) -> float:
     return float(max(exponents) / total) if total > 0 else 0.0
 
 
+def _policy_evaluation(
+    recommendations: Sequence[Mapping[str, Any]],
+    actions: Sequence[int],
+    reward_matrix: Sequence[Sequence[float]],
+    masks: Sequence[Sequence[int]],
+    seed: int,
+) -> dict[str, Any]:
+    """Evaluate a policy on an untouched chronological holdout."""
+    recs = [dict(row) for row in recommendations]
+    selected_rewards = [float(reward_matrix[index][action]) for index, action in enumerate(actions)]
+    random_rng = random.Random(int(seed) + 100_003)
+    random_actions = [random_rng.choice(tuple(mask)) for mask in masks]
+    random_rewards = [float(reward_matrix[index][action]) for index, action in enumerate(random_actions)]
+    optimal_rewards = [max(float(row[index]) for index in masks[position]) for position, row in enumerate(reward_matrix)]
+    transfer_rows = [
+        recs[index] for index, action in enumerate(actions)
+        if ACTION_LABELS[int(action)] in TRANSFER_ACTIONS
+    ]
+    demand_values = [_num(row.get("demand_fit_score")) for row in transfer_rows]
+    clean_demand = [value for value in demand_values if value is not None]
+    return {
+        "mean_reward": round(sum(selected_rewards) / len(selected_rewards), 6) if selected_rewards else None,
+        "median_reward": round(float(median(selected_rewards)), 6) if selected_rewards else None,
+        "random_mean_reward": round(sum(random_rewards) / len(random_rewards), 6) if random_rewards else None,
+        "reward_optimal_mean": round(sum(optimal_rewards) / len(optimal_rewards), 6) if optimal_rewards else None,
+        "action_distribution": dict(Counter(ACTION_LABELS[int(action)] for action in actions)),
+        "feasibility_violations": sum(
+            1 for index, action in enumerate(actions) if int(action) not in set(masks[index])
+        ),
+        "selected_transfer_count": len(transfer_rows),
+        "throughput": round(sum(max(0.0, _num(row.get("recommended_qty")) or 0.0) for row in transfer_rows), 6),
+        "expected_saving": round(sum(_num(row.get("expected_saving")) or 0.0 for row in transfer_rows), 6),
+        "transport_cost": round(sum(
+            _num(row.get("move_cost")) or _num(row.get("estimated_cost")) or 0.0
+            for row in transfer_rows
+        ), 6),
+        "mean_service_score": round(sum(clean_demand) / len(clean_demand), 6) if clean_demand else None,
+    }
+
+
 def run_dqn_training(
     recommendations: Sequence[Mapping[str, Any]],
     episodes: int,
@@ -830,14 +975,18 @@ def run_dqn_training(
     from torch import nn
 
     train_recs, holdout_recs = chronological_split(recommendations)
-    base_states = build_training_states(train_recs)
+    feature_stats = _feature_stats(train_recs, DQN_STATE_COLUMNS)
+    base_states = build_training_states(train_recs, feature_stats=feature_stats)
     reward_matrix = action_reward_matrix(train_recs)
     cost_shares = _cost_shares(train_recs)
+    action_masks = _action_masks(train_recs)
     action_count = len(ACTION_LABELS)
     input_size = len(base_states[0]) + 2
     device = torch.device(get_torch_training_device(torch))
 
     torch.manual_seed(int(seed))
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(int(seed))
     policy = _model(input_size, action_count, seed=seed).to(device)
     target = _model(input_size, action_count, seed=seed).to(device)
     target.load_state_dict(policy.state_dict())
@@ -867,12 +1016,13 @@ def run_dqn_training(
         step_losses: list[float] = []
         for order, index in enumerate(indexes):
             state = _episode_state(base_states[index], index / total_candidates, budget)
+            valid_actions = action_masks[index]
             if rng.random() < epsilon:
-                action = rng.randrange(action_count)
+                action = rng.choice(valid_actions)
             else:
                 with torch.no_grad():
                     values = policy(torch.tensor([state], dtype=torch.float32, device=device))[0]
-                action = int(torch.argmax(values).item())
+                action = _masked_argmax(values.tolist(), valid_actions)
             exploration_actions.append(action)
             reward = float(reward_matrix[index][action])
             reward_sum += reward
@@ -885,7 +1035,7 @@ def run_dqn_training(
             next_state = _episode_state(
                 base_states[next_index], next_index / total_candidates, next_budget
             )
-            buffer.append((state, action, reward, next_state, done))
+            buffer.append((state, action, reward, next_state, done, action_masks[next_index]))
             budget = next_budget
 
             learn_ready = len(buffer) >= min(REPLAY_BATCH_SIZE, total_candidates)
@@ -900,7 +1050,11 @@ def run_dqn_training(
                 )
                 predicted = policy(states_tensor).gather(1, actions_tensor.unsqueeze(1)).squeeze(1)
                 with torch.no_grad():
-                    bootstrap = target(next_tensor).max(dim=1).values
+                    next_values = target(next_tensor)
+                    valid_tensor = torch.zeros_like(next_values, dtype=torch.bool)
+                    for row_index, item in enumerate(batch):
+                        valid_tensor[row_index, list(item[5])] = True
+                    bootstrap = next_values.masked_fill(~valid_tensor, float("-inf")).max(dim=1).values
                 expected = rewards_tensor + DISCOUNT_FACTOR * bootstrap * (1.0 - done_tensor)
                 loss = criterion(predicted, expected)
                 if not torch.isfinite(loss):
@@ -929,17 +1083,26 @@ def run_dqn_training(
     )
 
     policy_cpu = policy.to("cpu")
-    all_base = build_training_states(recommendations)
-    chosen, q_rows = _greedy_rollout(policy_cpu, all_base, _cost_shares(recommendations))
+    all_base = build_training_states(recommendations, feature_stats=feature_stats)
+    chosen, q_rows = _greedy_rollout(
+        policy_cpu, all_base, _cost_shares(recommendations), _action_masks(recommendations)
+    )
     holdout_reward = None
+    holdout_metrics: dict[str, Any] = {}
     if holdout_recs:
-        holdout_base = build_training_states(holdout_recs)
+        holdout_base = build_training_states(holdout_recs, feature_stats=feature_stats)
         holdout_matrix = action_reward_matrix(holdout_recs)
-        holdout_actions, _ = _greedy_rollout(policy_cpu, holdout_base, _cost_shares(holdout_recs))
+        holdout_masks = _action_masks(holdout_recs)
+        holdout_actions, _ = _greedy_rollout(
+            policy_cpu, holdout_base, _cost_shares(holdout_recs), holdout_masks
+        )
         holdout_reward = round(
             sum(holdout_matrix[index][action] for index, action in enumerate(holdout_actions))
             / max(1, len(holdout_actions)),
             6,
+        )
+        holdout_metrics = _policy_evaluation(
+            holdout_recs, holdout_actions, holdout_matrix, holdout_masks, seed,
         )
     return {
         "model": policy_cpu,
@@ -955,6 +1118,8 @@ def run_dqn_training(
         "train_candidate_count": len(train_recs),
         "holdout_candidate_count": len(holdout_recs),
         "holdout_mean_reward": holdout_reward,
+        "holdout_metrics": holdout_metrics,
+        "feature_stats": _serializable_feature_stats(feature_stats, DQN_STATE_COLUMNS),
         "time_order_column": _time_order_key(recommendations),
         "device": str(device),
     }
@@ -1061,6 +1226,7 @@ def train_dqn(
         "state_dict": model.state_dict(),
         "input_size": training["input_size"],
         "feature_columns": list(DQN_STATE_COLUMNS),
+        "feature_stats": training["feature_stats"],
         "state_schema": state_schema_fingerprint(),
         "action_labels": list(ACTION_LABELS),
         "data_signature": signature,
@@ -1140,8 +1306,12 @@ def train_dqn(
             "train_candidate_count": training["train_candidate_count"],
             "holdout_candidate_count": training["holdout_candidate_count"],
             "holdout_mean_reward": training["holdout_mean_reward"],
+            "holdout_metrics": training["holdout_metrics"],
             "time_order_column": training["time_order_column"],
             "state_schema": state_schema_fingerprint(),
+            "normalization": "train_minmax_v1",
+            "normalization_fit_count": training["train_candidate_count"],
+            "invalid_action_masking": True,
             "mean_selected_action_reward": (
                 round(sum(action_rewards) / len(action_rewards), 6) if action_rewards else None
             ),
@@ -1189,9 +1359,16 @@ def save_dqn_result(result: DqnTrainingResult | Mapping[str, Any]) -> dict[str, 
         result_path = OUTPUT_DIR / f"dqn_result_{_timestamp_slug(data['timestamp'])}.json"
     data["result_path"] = str(result_path)
     result_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    LATEST_JSON.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    status = str(data.get("final_status") or data.get("stability_status") or data.get("status") or "")
+    promote_latest = bool(
+        status == NORMAL_STATUS
+        and data.get("model_path")
+        and data.get("model_status") in {"trained", "loaded"}
+    )
+    if promote_latest:
+        LATEST_JSON.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     variant = str(data.get("variant") or data.get("training_mode") or "original")
-    if variant in LATEST_RESULT_BY_VARIANT:
+    if promote_latest and variant in LATEST_RESULT_BY_VARIANT:
         LATEST_RESULT_BY_VARIANT[variant].write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -1355,6 +1532,8 @@ def model_payload_is_compatible(
         return False, "DQN feature schema가 달라 비교할 수 없습니다."
     if list(payload.get("feature_columns") or []) != list(DQN_STATE_COLUMNS):
         return False, "DQN feature schema가 달라 비교할 수 없습니다."
+    if _coerce_feature_stats(payload.get("feature_stats"), DQN_STATE_COLUMNS) is None:
+        return False, "DQN 정규화 schema가 없어 비교할 수 없습니다."
     if variant is not None:
         payload_variant = str(payload.get("variant") or payload.get("training_mode") or "original")
         if payload_variant != variant:
@@ -1453,7 +1632,13 @@ def infer_dqn_actions(
     import torch
 
     assert payload is not None and path is not None
-    base_states = build_training_states(recs)
+    feature_stats = _coerce_feature_stats(payload.get("feature_stats"), DQN_STATE_COLUMNS)
+    if feature_stats is None:
+        return _empty_result(
+            NEEDS_TRAINING_STATUS, "DQN 정규화 schema가 없어 비교할 수 없습니다.", recs, signature,
+            training_mode=training_mode,
+        )
+    base_states = build_training_states(recs, feature_stats=feature_stats)
     expected_size = len(base_states[0]) + 2
     if int(payload.get("input_size") or 0) != expected_size:
         return _empty_result(
@@ -1471,7 +1656,9 @@ def infer_dqn_actions(
         )
     model.eval()
     with torch.no_grad():
-        selected, q_rows = _greedy_rollout(model, base_states, _cost_shares(recs))
+        selected, q_rows = _greedy_rollout(
+            model, base_states, _cost_shares(recs), _action_masks(recs)
+        )
 
     route_ids = _route_ids(recs)
     actions = [ACTION_LABELS[int(index)] for index in selected]
@@ -1531,6 +1718,8 @@ def infer_dqn_actions(
             "state_schema": str(payload.get("state_schema") or ""),
             "inference_source": "saved_model_forward",
             "model_path": str(path),
+            "normalization": "train_minmax_v1",
+            "invalid_action_masking": True,
             "mean_selected_action_reward": (
                 round(sum(action_rewards) / len(action_rewards), 6) if action_rewards else None
             ),
@@ -1602,13 +1791,14 @@ def apply_dqn_reference_to_recommendations(
     confidence_by_route = result.get("dqn_confidence_by_route") or {}
     reference_by_route = result.get("dqn_reference_by_route") or {}
     updated: list[dict[str, Any]] = []
-    for row in recommendations or []:
+    rows = list(recommendations or [])
+    route_keys = _route_ids(rows)
+    for row, route_key in zip(rows, route_keys):
         item = dict(row)
-        route_id = str(item.get("route_id") or "")
-        if applicable and route_id in action_by_route:
-            item["dqn_action"] = action_by_route.get(route_id)
-            item["dqn_confidence"] = confidence_by_route.get(route_id)
-            item["dqn_reference_score"] = reference_by_route.get(route_id, 0.0)
+        if applicable and route_key in action_by_route:
+            item["dqn_action"] = action_by_route.get(route_key)
+            item["dqn_confidence"] = confidence_by_route.get(route_key)
+            item["dqn_reference_score"] = reference_by_route.get(route_key, 0.0)
             item["dqn_status"] = status
         else:
             item["dqn_action"] = "비교 불가"
@@ -1624,28 +1814,18 @@ def apply_dqn_result_to_recommendations(
     recommendations: Sequence[Mapping[str, Any]],
     training_result: Mapping[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    """Backward-compatible wrapper with the old weak-reflection behavior."""
+    """Attach DQN comparison fields without changing VHS or Varo ranking.
+
+    The old ``DQN 약하게 반영`` option is intentionally reference-only.
+    DQN remains an independent policy comparison and never auto-corrects the
+    production score through this compatibility entry point.
+    """
     result = dict(training_result or {})
-    updated = apply_dqn_reference_to_recommendations(recommendations, result, result.get("data_signature"))
-    status = str(
-        result.get("final_status")
-        or result.get("stability_status")
-        or result.get("status")
-        or NEEDS_TRAINING_STATUS
+    return apply_dqn_reference_to_recommendations(
+        recommendations,
+        result,
+        result.get("data_signature"),
     )
-    mode = str(result.get("reflection_mode") or "DQN 참고만")
-    if status not in APPLICABLE_STATUSES or mode != "DQN 약하게 반영":
-        return updated
-    for item in updated:
-        confidence = (_num(item.get("dqn_confidence")) or 0.0) / 100.0
-        dqn_action = normalize_action(item.get("dqn_action"), default="보류", route_type=item.get("route_type"))
-        baseline = normalize_action(item.get("varo_action") or item.get("greedy_action"), default="보류", route_type=item.get("route_type"))
-        correction = round((2.0 if dqn_action == baseline else -1.0) * max(0.0, min(1.0, confidence)), 2)
-        item["dqn_correction"] = correction
-        vhs = _num(item.get("vhs_score"))
-        if vhs is not None:
-            item["vhs_score"] = round(max(0.0, min(100.0, vhs + correction)), 2)
-    return updated
 
 
 def get_dqn_status(training_result: Mapping[str, Any] | None = None) -> DqnStatus:

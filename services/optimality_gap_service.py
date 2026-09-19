@@ -671,6 +671,9 @@ def calculate_gap_metrics(
     *,
     exact: bool,
     upper_bound: float | None = None,
+    varo_service: float | None = None,
+    greedy_service: float | None = None,
+    best_service: float | None = None,
 ) -> dict[str, Any]:
     optimum = float(best_saving)
     if optimum <= 0:
@@ -689,9 +692,18 @@ def calculate_gap_metrics(
     varo_gap, inconsistent = gap(varo_saving, optimum)
     greedy_gap, greedy_inconsistent = gap(greedy_saving, optimum)
     target = min(100.0, max(0.0, 100.0 * float(varo_saving) / optimum))
+    service_values = (varo_service, greedy_service, best_service)
+    service_comparable = not all(value is not None for value in service_values) or (
+        abs(float(varo_service) - float(best_service)) <= 1e-9
+        and abs(float(greedy_service) - float(best_service)) <= 1e-9
+    )
     result = {
         "available": True,
-        "label": "최적성 Gap" if exact else "참고 Gap",
+        "label": (
+            "최적성 Gap" if exact and service_comparable
+            else "서비스 비동등 참고 Gap" if not service_comparable
+            else "참고 Gap"
+        ),
         "gap_pct": varo_gap,
         "gap_str": f"{varo_gap:.2f}%",
         "greedy_gap_pct": greedy_gap,
@@ -701,7 +713,13 @@ def calculate_gap_metrics(
         "formula": "100 × (최선 조합 절감액 - Varo 조합 절감액) / 최선 조합 절감액",
         "inconsistency": inconsistent or greedy_inconsistent,
         "exact": exact,
+        "service_comparable": service_comparable,
+        "objective_comparable": bool(exact and service_comparable),
     }
+    if not service_comparable:
+        result["comparison_warning"] = (
+            "전략별 처리 수량이 달라 절감액 Gap을 동일 서비스 수준의 exact optimality로 해석할 수 없습니다."
+        )
     if not exact and upper_bound is not None and upper_bound >= optimum and upper_bound > 0:
         lower_gap, _ = gap(varo_saving, optimum)
         upper_gap, _ = gap(varo_saving, float(upper_bound))
@@ -821,6 +839,8 @@ def run_optimality_gap(
     gap = stage("Gap·경로 일치", 6, "절감액 및 경로 ID 비교", lambda: calculate_gap_metrics(
         float(varo["total_saving"]), float(greedy["total_saving"]), float(best["total_saving"]),
         exact=exact, upper_bound=_number(upper_bound),
+        varo_service=float(varo["total_qty"]), greedy_service=float(greedy["total_qty"]),
+        best_service=float(best["total_qty"]),
     ))
     matches = {
         "varo_vs_best": _route_match(varo, best),

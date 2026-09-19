@@ -163,7 +163,9 @@ class OptimalityGapServiceTests(unittest.TestCase):
         result = self._run(search_mode="limited", time_limit=0.05)
         self.assertFalse(result["search"]["optimal"])
         self.assertEqual(result["search"]["status"], "제한 탐색")
-        self.assertEqual(result["gap"]["label"], "참고 Gap")
+        self.assertEqual(result["gap"]["label"], "서비스 비동등 참고 Gap")
+        self.assertFalse(result["gap"]["service_comparable"])
+        self.assertFalse(result["gap"]["objective_comparable"])
         self.assertIn("certified_gap_range", result["gap"])
 
     def test_original_recommendations_and_data_are_immutable(self):

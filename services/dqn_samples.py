@@ -131,8 +131,9 @@ def balanced_recommendations(
     """Return a feature-ranked, label-only balanced copy.
 
     Numeric and route fields remain byte-for-byte equivalent as Python values.
-    Only ``target_action`` is added for DQN supervision; the operational
-    ``varo_action`` remains untouched.
+    ``target_action`` is retained as a legacy diagnostic/comparison label.
+    The temporal-difference trainer does not use it as a supervised imitation
+    target, and the operational ``varo_action`` remains untouched.
     """
     rows = [dict(recommendation) for recommendation in recommendations or []]
 

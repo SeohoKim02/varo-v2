@@ -30,6 +30,7 @@ from services.dqn_service import (
     reward_optimal_actions,
     state_schema_fingerprint,
     train_dqn,
+    valid_action_indexes,
 )
 
 TORCH_AVAILABLE = dqn_service.get_torch_status()[0]
@@ -104,13 +105,30 @@ class DqnRewardAndStateContractTests(unittest.TestCase):
     def test_state_excludes_other_strategy_outputs(self):
         self.assertNotIn("vhs_score", DQN_STATE_COLUMNS)
         self.assertNotIn("greedy_rank", DQN_STATE_COLUMNS)
+        self.assertNotIn("confidence_score", DQN_STATE_COLUMNS)
         for column in DQN_STATE_COLUMNS:
             self.assertIn(column, FEATURE_COLUMNS)
 
     def test_state_vectors_ignore_vhs_and_greedy_values(self):
         base = _candidates()
-        changed = [dict(row, vhs_score=1.0, greedy_rank=999) for row in base]
+        changed = [dict(row, vhs_score=1.0, greedy_rank=999, confidence_score=1.0) for row in base]
         self.assertEqual(build_training_states(base), build_training_states(changed))
+
+    def test_train_fitted_normalization_is_reused_for_later_rows(self):
+        train = _candidates(10)
+        stats = dqn_service._feature_stats(train, DQN_STATE_COLUMNS)
+        later = [dict(train[0], expected_saving=10**12, move_cost=10**12)]
+        state = build_training_states(later, feature_stats=stats)[0]
+        self.assertTrue(all(0.0 <= value <= 1.0 for value in state))
+        self.assertEqual(state[DQN_STATE_COLUMNS.index("expected_saving")], 1.0)
+
+    def test_invalid_transfer_actions_are_masked(self):
+        direct = valid_action_indexes(dict(_candidates(1)[0], route_type="DIRECT"))
+        via = valid_action_indexes(dict(_candidates(1)[0], route_type="VIA_DC"))
+        blocked = valid_action_indexes(dict(_candidates(1)[0], recommended_qty=0, feasibility_score=0))
+        self.assertNotIn(ACTION_LABELS.index("DC 경유 이동"), direct)
+        self.assertNotIn(ACTION_LABELS.index("직접 이동"), via)
+        self.assertTrue(set(blocked).isdisjoint(dqn_service._TRANSFER_INDEXES))
 
     def test_state_vectors_stay_bounded_with_missing_values(self):
         vectors = build_training_states([{"route_id": "R001"}, {"route_id": "R002"}])
@@ -150,6 +168,55 @@ class DqnRewardAndStateContractTests(unittest.TestCase):
         latest_train = max(str(row["snapshot_date"]) for row in train)
         earliest_holdout = min(str(row["snapshot_date"]) for row in holdout)
         self.assertLess(latest_train, earliest_holdout)
+
+    def test_chronological_split_never_splits_one_snapshot_across_sets(self):
+        rows = []
+        for day in range(1, 32):
+            for candidate in range(20):
+                rows.append(dict(
+                    _candidates(1, seed=day * 100 + candidate)[0],
+                    route_id=f"R{candidate:03d}",
+                    snapshot_date=f"2026-07-{day:02d}",
+                ))
+        train, holdout = chronological_split(list(reversed(rows)))
+        train_dates = {row["snapshot_date"] for row in train}
+        holdout_dates = {row["snapshot_date"] for row in holdout}
+        self.assertFalse(train_dates & holdout_dates)
+        self.assertEqual(max(train_dates), "2026-07-25")
+        self.assertEqual(min(holdout_dates), "2026-07-26")
+        self.assertEqual((len(train), len(holdout)), (500, 120))
+
+    def test_repeated_route_ids_use_snapshot_qualified_result_keys(self):
+        rows = [
+            dict(_candidates(1)[0], route_id="R001", snapshot_date="2026-07-01"),
+            dict(_candidates(1)[0], route_id="R001", snapshot_date="2026-07-02"),
+        ]
+        keys = dqn_service._route_ids(rows)
+        self.assertEqual(keys, ["2026-07-01::R001", "2026-07-02::R001"])
+        result = {
+            "status": dqn_service.NORMAL_STATUS,
+            "final_status": dqn_service.NORMAL_STATUS,
+            "data_signature": "sig",
+            "variant": "original",
+            "candidate_count": 2,
+            "prediction_distribution": {"할인": 1, "직접 이동": 1},
+            "target_distribution": {"할인": 1, "직접 이동": 1},
+            "dqn_action_by_route": {keys[0]: "할인", keys[1]: "직접 이동"},
+            "dqn_confidence_by_route": {keys[0]: 70.0, keys[1]: 80.0},
+            "dqn_reference_by_route": {keys[0]: 60.0, keys[1]: 90.0},
+        }
+        applied = dqn_service.apply_dqn_reference_to_recommendations(rows, result, "sig")
+        self.assertEqual([row["dqn_action"] for row in applied], ["할인", "직접 이동"])
+
+    def test_data_signature_distinguishes_snapshot_dates(self):
+        row = _candidates(1)[0]
+        first = dqn_service.data_signature_from_recommendations([
+            dict(row, snapshot_date="2026-07-01")
+        ])
+        second = dqn_service.data_signature_from_recommendations([
+            dict(row, snapshot_date="2026-07-02")
+        ])
+        self.assertNotEqual(first, second)
 
     def test_small_candidate_sets_keep_every_row_for_training(self):
         train, holdout = chronological_split(_candidates(4))
@@ -209,6 +276,7 @@ class DqnRealTrainingTests(unittest.TestCase):
 
             payload = torch.load(model_file, map_location="cpu", weights_only=False)
             self.assertEqual(payload["feature_columns"], list(DQN_STATE_COLUMNS))
+            self.assertEqual(set(payload["feature_stats"]), set(DQN_STATE_COLUMNS))
             self.assertEqual(payload["state_schema"], state_schema_fingerprint())
             compatible, _ = model_payload_is_compatible(payload, result.data_signature, "original")
             self.assertTrue(compatible)
@@ -234,8 +302,10 @@ class DqnRealTrainingTests(unittest.TestCase):
             model = dqn_service._model(payload["input_size"], len(ACTION_LABELS), seed=payload["seed"])
             model.load_state_dict(payload["state_dict"])
             model.eval()
-            base = build_training_states(rows)
-            expected, _ = dqn_service._greedy_rollout(model, base, dqn_service._cost_shares(rows))
+            base = build_training_states(rows, feature_stats=payload["feature_stats"])
+            expected, _ = dqn_service._greedy_rollout(
+                model, base, dqn_service._cost_shares(rows), dqn_service._action_masks(rows)
+            )
         expected_actions = [ACTION_LABELS[index] for index in expected]
         self.assertEqual(list(inferred.dqn_action_by_route.values()), expected_actions)
 
@@ -327,15 +397,17 @@ class DqnRealTrainingTests(unittest.TestCase):
 
     def test_a_collapsed_policy_is_marked_for_review(self):
         rows = _candidates()
-        def collapsed(model, base_states, cost_shares):
+        def collapsed(model, base_states, cost_shares, action_masks=None):
             size = len(base_states)
             return [0] * size, [[1.0, *([0.0] * (len(ACTION_LABELS) - 1))] for _ in range(size)]
 
-        with _artifact_directory():
+        with _artifact_directory() as directory:
             with patch.object(dqn_service, "_greedy_rollout", side_effect=collapsed):
                 result = train_dqn(rows, episodes=12, learning_rate=0.002)
+            latest_exists = (directory / "latest_dqn_result.json").exists()
         self.assertEqual(result.status, dqn_service.NEEDS_REVIEW_STATUS)
         self.assertIsNone(result.model_path)
+        self.assertFalse(latest_exists)
 
     def test_training_never_learns_from_holdout_candidates(self):
         rows = [
@@ -357,6 +429,19 @@ class DqnRealTrainingTests(unittest.TestCase):
             < min(str(row["snapshot_date"]) for row in holdout)
         )
         self.assertIsNotNone(diagnostics["holdout_mean_reward"])
+        metrics = diagnostics["holdout_metrics"]
+        self.assertTrue(math.isfinite(metrics["mean_reward"]))
+        self.assertTrue(math.isfinite(metrics["random_mean_reward"]))
+        self.assertEqual(metrics["feasibility_violations"], 0)
+
+    def test_same_seed_reproduces_policy_and_losses(self):
+        rows = _candidates()
+        with _artifact_directory():
+            first = train_dqn(rows, episodes=12, learning_rate=0.002, seed=41)
+        with _artifact_directory():
+            second = train_dqn(rows, episodes=12, learning_rate=0.002, seed=41)
+        self.assertEqual(first.dqn_action_by_route, second.dqn_action_by_route)
+        self.assertEqual(first.loss_history, second.loss_history)
 
     def test_cumulative_comparison_file_records_every_run(self):
         with _artifact_directory() as directory:
