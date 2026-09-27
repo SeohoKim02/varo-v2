@@ -1,0 +1,3 @@
+# Offline canonical data adapters; application runtime remains unchanged.
+-r requirements.txt
+pyarrow>=14,<24
