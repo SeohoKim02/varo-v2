@@ -17,7 +17,13 @@ DATASETS = {
     "jangbogo": "23_KADX_JANGBOGO",
     "nfqs": "29_DOMESTIC_ADDITIONAL/NFQS_FISH_INVENTORY",
     "aihub": "26_AIHUB_INDUSTRIAL_LOGISTICS",
+    # External generalisation datasets (schema 1.2.0; adapters in services/external_data_adapters.py).
+    "m5": "20_WALMART_M5",
+    "favorita": "27_FAVORITA",
+    "freshretailnet": "05_FreshRetailNet",
+    "kamp": "30_KAMP_REBAR_SUPPLY_CHAIN",
 }
+EXTERNAL_DATASETS = ("m5", "favorita", "freshretailnet", "kamp")
 REGIONS = {"SEOUL": "서울", "INCHEON": "인천", "JANGHANG": "장항", "YEOSU": "여수", "MOKPO": "목포", "WANDO": "완도", "JEJU": "제주", "BUSAN": "부산", "TONGYEONG": "통영", "POHANG": "포항", "GANGNEUNG": "강릉", "PYEONGTAEK": "평택", "JEONJU": "전주", "INCHEONAIRPORT": "인천공항"}
 
 # Unit evidence. Only what a source header, official page/specification or label states.
@@ -60,7 +66,7 @@ def csv_chunks(path: Path, chunksize=50000, columns=None):
                        na_values=[""], chunksize=chunksize, usecols=columns)
 
 
-def base_frame(raw, dataset, source, grain="daily", scope="location_product", sheet="csv"):
+def base_frame(raw, dataset, source, grain="daily", scope="location_product", sheet="csv", version=VERSION):
     out = pd.DataFrame(index=raw.index)
     out["source_dataset"] = dataset
     out["source_file"] = str(source).replace("\\", "/")
@@ -73,7 +79,7 @@ def base_frame(raw, dataset, source, grain="daily", scope="location_product", sh
         # CSV 1-based data record (header excluded); JSON array position likewise.
         out["source_row_id"] = pd.Series(raw.index + 1, index=raw.index).astype(str)
         out["source_record_count"] = 1
-    out["transform_version"] = VERSION
+    out["transform_version"] = version
     out["date_grain"] = grain
     out["scope"] = scope
     out["product_grain"] = "product"

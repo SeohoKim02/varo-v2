@@ -1,3 +1,4 @@
 # Offline canonical data adapters; application runtime remains unchanged.
 -r requirements.txt
-pyarrow>=14,<24
+# Upper bound = newest pyarrow verified with the canonical pipeline (24.0.0 full run and tests; 23.0.1 canonical tests).
+pyarrow>=14,<=24.0.0

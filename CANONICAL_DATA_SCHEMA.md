@@ -1,4 +1,9 @@
-# Varo actual-data interchange, version 1.1.0
+# Varo actual-data interchange, schema version 1.2.0
+
+Schema 1.2.0 extends 1.1.0 without changing any 1.1.0 transform. The domestic
+adapters (Suhyup, LogisAll, Jangbogo, NFQS, AI Hub) keep `transform_version`
+1.1.0. The external generalisation adapters (M5, Favorita, FreshRetailNet,
+KAMP) write 1.2.0.
 
 The real-data root is `C:\VARO_V2_REAL_DATA`. The adapter is an offline,
 nullable interchange layer. It does not replace `analysis_pipeline`, modify
@@ -25,6 +30,48 @@ Auxiliary evidence tables (`schema_document()["auxiliary_tables"]`):
 |---|---|---|
 | product_measurement | one physical measurement (member file) of an item in a handling context | product_id, measurement_context |
 | product_identity_version | one observed (product_id, product_name) with its valid_from/valid_to | product_id, version_seq, valid_from |
+
+Context tables (1.2.0, `schema_document()["context_tables"]`) hold dated context,
+never fact quantities:
+
+| Table | Grain | Required |
+|---|---|---|
+| calendar_event | one named event/holiday on a date (event_type, event_locale, event_locale_name, event_transferred) | date, event_name |
+| covariate_series | one dated covariate value for a location or explicit scope (store traffic, oil price, weather, SNAP/holiday indicator) | date, covariate_name |
+
+Fields added in 1.2.0 (NULL for 1.1.0 outputs):
+
+- Identity: `product_id_namespace`/`product_key` and `location_id_namespace`/`location_key` on
+  inventory_snapshot, inventory_flow, demand_series, location_product_observation, the masters and covariate_series.
+- demand_series: `discount_rate` (1.0 = no discount), `stockout_hours`, `stockout_window_hours`,
+  `hourly_sales` (24 values joined by `|`, shortest round-trip text) and `hourly_stockout_status`
+  (24 characters `0`/`1`, hour 0..23).
+- inventory_flow: `project_id` and `project_part`, the ordering project and building part of an
+  order-based shipment. They are not locations, and they are part of the inventory_flow key.
+- product_master: `category_path` (`level=value|level=value`, lossless hierarchy).
+- location_master: `city`, `location_subtype` (e.g. store type), `location_cluster`.
+
+## Identity namespaces
+
+`product_id`/`location_id` keep the raw dataset-local spelling. External rows also
+carry `<entity>_id_namespace` = `<Dataset>:<source field>` (`M5:item_id`,
+`M5:store_id`, `M5:state_id`, `Favorita:item_nbr`, `Favorita:store_nbr`,
+`FreshRetailNet:product_id`, `FreshRetailNet:store_id`, `KAMP:rebar_grade`).
+`canonicalize` derives `<entity>_key` = namespace + `:` + raw id centrally. A key
+supplied by an adapter is overwritten, and a NULL part gives a NULL key. Unions
+across datasets must key on `product_key`/`location_key`: the same raw id in two
+namespaces stays two entities. 1.1.0 domestic outputs carry no namespace, so their
+key is NULL and `(source_dataset, id)` identifies them.
+
+## Wide-to-long lineage
+
+An unpivoted cell keeps `source_row_id` = `<record>:<source column>`, as NFQS
+region fields already did. Examples are M5 `17:d_123` (CSV data record 17, column
+d_123) and KAMP `2:HD10` (worksheet row 2, grade column HD10). A source NULL cell
+stays NULL and is flagged `missing:<field>`. A source zero stays zero. No cell is
+generated for an absent record. Streamed conservation compares exact (fsum) sums
+and non-null counts, and it also compares zero counts, so NULL and zero cannot
+trade places.
 
 Every row requires source_dataset, source_file, source_sheet_or_table,
 source_row_id, transform_version, date_grain and scope. A source identifier can
@@ -64,6 +111,18 @@ severe first, and `quality_status` is the first code or VALID:
 MISSING_KEY, MISSING_VALUE, SOURCE_ANOMALY, NEGATIVE_QUANTITY,
 DUPLICATE_OBSERVATION, UNKNOWN_UNIT, UNKNOWN_LOCATION, AMBIGUOUS_PRODUCT,
 BENCHMARK_PROXY, OUT_OF_SCOPE.
+
+Flags added in 1.2.0 (no new quality code):
+
+| Flag | Code | Blocking | Meaning |
+|---|---|---|---|
+| `documented_return:<col>` | NEGATIVE_QUANTITY | no | The official description states negatives are returns (Favorita). The value also carries the blocking `negative:<col>`. |
+| `weekly_price_absent` | MISSING_VALUE | no | No weekly price record and zero sales. M5 guide: a missing price means not sold that week. The price stays NULL. |
+| `sales_without_weekly_price` | SOURCE_ANOMALY | yes | Positive sales in a week without a price, which contradicts the M5 guide (0 rows observed). |
+| `promotion_not_reported` | MISSING_VALUE | no | The source promotion field is NULL (Favorita onpromotion NaN). It is never read as False. |
+| `discount_rate_zero`, `discount_rate_above_one` | SOURCE_ANOMALY | no | The discount rate is outside the documented (0, 1] range. The value is kept, and the sales observation stays usable. |
+| `stockout_count_mismatch` | SOURCE_ANOMALY | yes | The hourly out-of-stock slots in 6..21 do not sum to stock_hour6_22_cnt (0 rows observed). |
+| `hourly_sales_sum_mismatch` | SOURCE_ANOMALY | yes | The hourly sales differ from the daily amount by more than 1e-9 (0 rows observed). |
 
 Flags state analysis scope; they never delete, clip or repair a row.
 `analysis_eligible=false` when any blocking flag exists. Informational flags
@@ -128,6 +187,39 @@ occurrence after the first. Nothing is summed or picked.
   rows keep location_id NULL (UNKNOWN_LOCATION) and no placeholder location is
   created. Occupied volume and utilization do not become an inferred capacity.
 
+- M5: `sales_train_evaluation.csv` is converted to demand_series by unpivoting d_1..d_1941 via
+  `calendar.csv`. Unit `item` is SOURCE_METADATA ("The number of units sold at day i").
+  `sales_train_validation.csv` repeats d_1..d_1913 cell for cell (verified), so it is not converted
+  twice. `sample_submission.csv` is a scoring template. The weekly `sell_price` (USD,
+  SOURCE_METADATA) repeats on each sales day of its week. A missing weekly price stays NULL
+  (`weekly_price_absent`), and price records for weeks after d_1941 are not attached. Events go to
+  calendar_event and state SNAP indicators to covariate_series (location = `M5:state_id`). M5 has
+  no promotion, inventory, cost or network.
+- Favorita: `train.csv` (125,497,040 records) is streamed in 64 MB blocks. unit_sales is signed:
+  negatives are documented returns, kept and flagged, never abs()/0, and no returns_qty is
+  derived. The unit is item-dependent (count or kg) and unlabelled, so it is UNKNOWN. Zero-sales
+  rows are absent from the source: an absent key is neither zero nor a stock-out, and nothing is
+  generated. `onpromotion` NULL stays NULL. `stores.csv` and `items.csv` are the masters
+  (city/state/type/cluster, family/class/perishable). transactions (unit `transaction`) and oil
+  price (unit UNKNOWN; NULL stays NULL) go to covariate_series. holidays_events goes to
+  calendar_event: `locale_name` is a place name, not a store, and `transferred` is kept.
+  `test.csv` (no ground truth) and `sample_submission.csv` are not converted.
+- FreshRetailNet: both parquet splits (train 90 days, eval 7 days, disjoint) go to demand_series.
+  `sale_amount` is a globally normalised amount (unit `normalized_sales_amount`, SOURCE_METADATA,
+  coefficient undisclosed). `hours_stock_status` 1 = out of stock, verified against
+  stock_hour6_22_cnt on every row. Availability is not inventory: no inventory_snapshot exists.
+  `activity_flag` maps to promotion, and `discount` to discount_rate. Store-day weather and the
+  date-level holiday flag collapse from identical member rows into covariate_series, listing
+  every member record id; differing members fail the run. Per-product perishability is not
+  asserted: the card says 865 SKUs and the report says 863.
+- KAMP: the `Export` sheet goes to inventory_flow with one row per (worksheet row, grade). 합계
+  is kept as an all-products row (`aggregate_product_total`), never summed with grades. 공사/부위
+  (guidebook: 발주공사명/발주공사부위) are project_id/project_part, not locations. The shipping
+  plant is not keyed, so location_id is NULL (UNKNOWN_LOCATION). The quantity unit is not stated
+  (UNKNOWN). The guidebook names a stock collection that the workbook does not contain, so no
+  inventory_snapshot exists and shortage/surplus is never derived. The date grain is `event`
+  (shipment dates, not a daily panel).
+
 ## Quality and lineage
 
 CSV source_row_id is the 1-based data-record number excluding the header.
@@ -156,10 +248,25 @@ Reports under each dataset `results/`:
 - Suhyup only: canonical_reference_regression.json, exact 31-day comparison
 - NFQS only: nfqs_panel_coverage.csv
 
+`C:\VARO_V2_REAL_DATA\_COLLECTION_STATUS\EXTERNAL_VALIDATION_MATRIX.csv` holds one row
+per canonical dataset, derived only from the dataset's canonical outputs, algorithm
+coverage and the collection catalog. It records realness, date range, fact rows,
+products and locations, and the has_* flags from observed non-null fields. Its
+forecast/inventory/network/dqn readiness is the best coverage level of the
+respective algorithm group. Rebuild it with
+`python -m services.external_canonical_pipeline --data-root C:\VARO_V2_REAL_DATA --matrix-only`.
+
 FULL/PARTIAL/MISSING in field reports describes completeness, not correctness.
 Algorithm coverage FULL/PARTIAL/BENCHMARK_ONLY/UNSUPPORTED is a separate decision.
 FULL additionally requires known units, observed constraints and a recorded
-semantic review; column presence never proves FULL.
+semantic review; column presence never proves FULL. Pseudo-fields such as
+`consistent_unit` count as present only when the runner verified them. External
+datasets use explicit decisions (`EXTERNAL_COVERAGE`). The only FULL is M5 Demand
+Forecast, by recorded review: observed unit sales, a documented unit, verified key
+uniqueness, and holdout actuals in the data. Its limitation is that sales stay
+censored by unobserved stock-outs. Every routing, network and DQN algorithm is
+UNSUPPORTED for all four external datasets, because none has inventory, cost,
+capacity or a source/target network.
 
 ## Running
 
@@ -170,9 +277,14 @@ python -m services.canonical_data_pipeline --data-root C:\VARO_V2_REAL_DATA
 python -m services.canonical_reference_validation --data-root C:\VARO_V2_REAL_DATA
 ```
 
-Use `--datasets suhyup logisall jangbogo nfqs aihub` to select adapters. CSV inputs
+Use `--datasets suhyup logisall jangbogo nfqs aihub m5 favorita freshretailnet kamp`
+to select adapters; every run ends by rebuilding the validation matrix. CSV inputs
 are streamed in 50,000-row chunks, except files under a collapse policy, which
-are read whole (bounded LogisAll/Jangbogo files). Parquet uses Zstandard
+are read whole (bounded LogisAll/Jangbogo files). External sources are streamed as
+M5 500 series x 1,941 days, Favorita 64 MB blocks and FreshRetailNet 250,000-row
+batches. Their key uniqueness is exact: one 64-bit hash per row is checked at
+finish (`Exporter.bulk_key_tables`, reported as `semantic_checks.key_uniqueness`),
+and any repeat is flagged and classified exactly like the per-row counter. Parquet uses Zstandard
 compression. Outputs are `processed/canonical_<table>.parquet`. Tables without
 observations are absent. Reruns replace these named generated outputs; raw and
 existing benchmark files are read-only. Full tests should set `VARO_OUTPUT_ROOT`

@@ -13,11 +13,12 @@ import zipfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from services.canonical_schema import (COMMON, KEYS, LINEAGE, NUMERIC, TABLE_FIELDS, VERSION, add_flag, canonicalize,
     finalize_quality, schema_document)
-from services.real_data_adapters import (AIHUB_MEASUREMENT_CONTEXT, DATA_ROOT, DATASETS, LOGISALL_COLLAPSE, NFQS_FLOAT_RESIDUE_TOLERANCE_TON,
+from services.real_data_adapters import (AIHUB_MEASUREMENT_CONTEXT, DATA_ROOT, DATASETS, EXTERNAL_DATASETS, LOGISALL_COLLAPSE, NFQS_FLOAT_RESIDUE_TOLERANCE_TON,
     NFQS_IDENTITY_TOLERANCE_TON, REGIONS, UNIT_EVIDENCE, adapt_aihub, adapt_aihub_measurements, adapt_jangbogo, adapt_logisall, adapt_nfqs,
     adapt_suhyup, base_frame, classify_name_versions, collapse_source_records, csv_chunks, csv_encoding, mapped, nfqs_flow_identity_diff,
     nfqs_panel_coverage, pack_spec_tokens, suhyup_to_existing, verified_identifier_crosswalk)
@@ -37,8 +38,16 @@ ALGORITHMS = {
     "Varo Final": ["recommended_qty", "transport_cost", "vhs_score", "source_surplus", "target_need"],
 }
 ROUTING = {"Transport Cost", "Greedy", "VHS", "Pareto", "MILP", "Optimality Gap", "Varo Final", "DQN"}
-# FULL needs a recorded semantic review, never column presence alone: {(dataset, algorithm): evidence}. None approved.
-FULL_APPROVALS: dict = {}
+# FULL needs a recorded semantic review, never column presence alone: {(dataset, algorithm): evidence}.
+# The gate below still applies: every required field (including verified pseudo-fields such as consistent_unit)
+# must be present and the quantity unit known; otherwise the review alone grants nothing.
+FULL_APPROVALS: dict = {
+    ("m5", "Demand Forecast"): ("Semantic review 2026-09-29: target is observed daily store x item unit sales (M5 guide: 'The number of units sold at day i', "
+                                "the official M5 forecasting target); unit item SOURCE_METADATA; key (date, store, item) verified unique over all 59,181,090 cells; "
+                                "no NULL, negative or fractional cell; calendar.csv maps every d_* column to exactly one date; holdout ground truth exists in the data "
+                                "(d_1914-d_1941, the official validation window). Limitation: sales are censored by unobserved stock-outs; this is sales forecasting, "
+                                "not latent-demand recovery."),
+}
 # Evidence used to gate coverage; FULL additionally needs observed (non-proxy) constraints and a known quantity unit.
 DATASET_PROFILES = {
     "suhyup": {"grain": "daily center x product x processing-state stock and flow; 620 existing benchmark route candidates (31 days)",
@@ -54,6 +63,31 @@ DATASET_PROFILES = {
              "location_identification": "NFQS branch regions (aggregates of cooperating firms)", "observed_network_constraints": False, "quantity_unit_known": True},
     "aihub": {"grain": "61 daily site-aggregate rows; 20,480 item measurements", "quantity_unit_status": "SOURCE_METADATA (item); volume DIRECT (m3)",
               "location_identification": "none for flow rows; 2 metadata sites cannot be joined", "observed_network_constraints": False, "quantity_unit_known": True},
+    "m5": {"grain": "daily store x item unit sales (10 stores, 3,049 items, 1,941 days); weekly store x item sell price joined to its days; daily calendar events and state SNAP indicators",
+           "quantity_unit_status": "SOURCE_METADATA (item: 'number of units sold')", "location_identification": "10 identified stores in 3 states",
+           "observed_network_constraints": False, "quantity_unit_known": True},
+    "favorita": {"grain": "daily store x item unit sales (zero-sales rows absent in source); daily store transactions; daily oil price; dated holidays/events",
+                 "quantity_unit_status": "UNKNOWN (item-dependent count or kg, not labelled)", "location_identification": "54 identified stores (city/state/type/cluster)",
+                 "observed_network_constraints": False, "quantity_unit_known": False},
+    "freshretailnet": {"grain": "daily store x product sales with 24 hourly sales and hourly stockout values; store-day weather; national daily holiday indicator",
+                       "quantity_unit_status": "SOURCE_METADATA (globally normalised sales amount; coefficient undisclosed)",
+                       "location_identification": "898 encoded stores in 18 encoded cities", "observed_network_constraints": False, "quantity_unit_known": True,
+                       "quantity_unit_blocker": "quantity is a globally normalised amount, not a physical unit"},
+    "kamp": {"grain": "shipment event (date x ordering project x building part) x rebar grade", "quantity_unit_status": "UNKNOWN (guidebook unit column empty)",
+             "location_identification": "none: the shipping plant is not keyed; 공사/부위 are an ordering project and building part, not locations",
+             "observed_network_constraints": False, "quantity_unit_known": False},
+}
+# External datasets: explicit decisions; every other algorithm is UNSUPPORTED with the dataset default reason.
+EXTERNAL_COVERAGE = {
+    "m5": {"default": "M5 provides observed store x item unit sales, weekly sell prices and calendar context only; no on-hand inventory, cost, lead time, capacity or store-to-store network exists, so the required inputs are absent (no synthetic stock or route is generated).",
+           "ABC": ("PARTIAL", "A revenue ranking is computable from observed unit sales x weekly sell_price (USD per the M5 guide's dollar-sales weighting); Varo ABC multiplies sales by unit_cost, and a sell price is not a cost; no inventory value exists."),
+           "Demand Forecast": ("PARTIAL", "Observed daily store x item unit sales with unit item; FULL only when the recorded semantic review and the full gate hold.")},
+    "favorita": {"default": "Favorita provides observed store x item unit sales, promotions, store transactions, oil price and holidays only; no inventory, price, cost, lead time, capacity or network exists, so the required inputs are absent.",
+                 "Demand Forecast": ("PARTIAL", "Observed daily store x item unit_sales (125,497,040 rows) with promotion and store transactions; the unit is item-dependent (count or kg per the Kaggle description) and unlabelled, so unit UNKNOWN and items cannot be pooled; zero-sales days are absent from the source (absence is not zero; stock availability is unknown); negative values are documented returns; test.csv has no ground truth, so validation must hold out train dates.")},
+    "freshretailnet": {"default": "FreshRetailNet provides normalised sales, hourly stockout status, discounts and weather only; the stock level itself is not released (only out-of-stock hours), and no cost, lead time, capacity or network exists.",
+                       "Demand Forecast": ("PARTIAL", "Observed daily and hourly store x product sales for 50,000 series with hourly stockout annotations (censored-demand structure) and a 7-day eval split with actuals; sales are globally normalised by an undisclosed coefficient, so forecasts cannot be converted to physical quantities for replenishment.")},
+    "kamp": {"default": "KAMP releases order-based shipment quantities only: no inventory (the guidebook's MS-SQL stock collection is not in the workbook), no cost, lead time, capacity, identified shipping location or source/target network.",
+             "Demand Forecast": ("PARTIAL", "Order-based (바리스트) outbound shipment quantity per rebar grade for one masked construction project, dated per shipment event (186 dates); a shipment series, not retail sales or demand; unit not stated (UNKNOWN).")},
 }
 
 
@@ -65,7 +99,10 @@ def algorithm_coverage(dataset, present):
         have = sorted(set(required) & set(present))
         missing = sorted(set(required) - set(present))
         level, reason = "UNSUPPORTED", "Required semantics/fields absent; no forced algorithm execution."
-        if dataset == "suhyup" and algorithm in ROUTING:
+        if dataset in EXTERNAL_COVERAGE:
+            decision = EXTERNAL_COVERAGE[dataset]
+            level, reason = decision.get(algorithm, ("UNSUPPORTED", decision["default"]))
+        elif dataset == "suhyup" and algorithm in ROUTING:
             level = "BENCHMARK_ONLY"
             reason = "Existing 620-candidate/31-day benchmark only; outbound is not retail demand, target_need is the existing proxy, route costs are enriched reference estimates."
         elif dataset == "logisall" and algorithm == "Demand Forecast":
@@ -84,6 +121,8 @@ def algorithm_coverage(dataset, present):
         blockers = [f"missing fields: {', '.join(missing)}"] if missing else []
         if not profile.get("quantity_unit_known", False):
             blockers.append("quantity unit UNKNOWN")
+        elif profile.get("quantity_unit_blocker"):
+            blockers.append(profile["quantity_unit_blocker"])
         if algorithm in ROUTING and not profile.get("observed_network_constraints", False):
             blockers.append("no observed source surplus/target need/cost constraints")
         if not blockers and (dataset, algorithm) not in FULL_APPROVALS:
@@ -97,9 +136,36 @@ def algorithm_coverage(dataset, present):
     return pd.DataFrame(rows)
 
 
-MASTER_ATTRIBUTES = {"product_master": ("product_id", "product_name", "category", "product_state"),
-                     "location_master": ("location_id", "location_name", "location_type", "region", "address")}
+MASTER_ATTRIBUTES = {"product_master": ("product_id", "product_name", "category", "product_state", "product_id_namespace"),
+                     "location_master": ("location_id", "location_name", "location_type", "region", "address", "location_id_namespace")}
 IDENTITY_TABLES = {"inventory_snapshot", "inventory_flow", "transfer_network", "demand_series", "location_product_observation", "product_measurement"}
+FLAG_COLUMNS = ("validation_flags", "quality_flags", "quality_status", "analysis_eligible")
+
+
+def flag_statistics(path, batch_size=1_000_000):
+    """Flag/quality tallies of a written table, streamed in batches (bounded memory on large tables)."""
+    import pyarrow.parquet as pq
+    whole = {c: Counter() for c in ("validation_flags", "quality_flags")}
+    counts = {c: Counter() for c in ("quality_status", "analysis_eligible")}
+    nonnull = Counter()
+    for batch in pq.ParquetFile(path).iter_batches(batch_size=batch_size, columns=list(FLAG_COLUMNS)):
+        frame = batch.to_pandas()
+        for col in FLAG_COLUMNS:
+            nonnull[col] += int(frame[col].notna().sum())
+        for col in whole:
+            whole[col].update(frame[col].fillna("").astype(str).value_counts().to_dict())
+        for col in counts:
+            counts[col].update(frame[col].value_counts().to_dict())
+    split = {col: Counter() for col in whole}
+    for col, tally in whole.items():
+        for value, n in tally.items():
+            for part in str(value).split("|"):
+                if part:
+                    split[col][part] += n
+    ordered = lambda c: dict(sorted(c.items(), key=lambda kv: -kv[1]))
+    return {"flags": split["validation_flags"], "nonnull": nonnull,
+            "quality": {"quality_status": ordered(counts["quality_status"]), "quality_flags": dict(split["quality_flags"]),
+                        "analysis_eligible": ordered(counts["analysis_eligible"])}}
 
 
 def adjacent_identical_positions(frame):
@@ -126,6 +192,12 @@ class Exporter:
         self.root, self.dataset = Path(root), dataset
         self.folder = self.root / DATASETS[dataset]
         self.processed, self.results = self.folder / "processed", self.folder / "results"
+        self.transform_version = VERSION
+        self.unit_evidence = UNIT_EVIDENCE.get(dataset)
+        # Tables whose key uniqueness is checked with one 64-bit hash per row at finish() instead of a per-row
+        # Counter (bounded memory for 10^7-10^8 row sources); repeats are flagged in the same reflag pass.
+        self.bulk_key_tables = set()
+        self.bulk_hashes = defaultdict(list)
         self.processed.mkdir(parents=True, exist_ok=True)
         self.results.mkdir(parents=True, exist_ok=True)
         self.writers, self.key_counts = {}, defaultdict(Counter)
@@ -148,7 +220,7 @@ class Exporter:
         derived = derived or {}
         unit_status = unit_status or ("UNKNOWN" if unit is None else None)
         fields = {}
-        metadata = {"date_grain": grain, "scope": scope, "transform_version": VERSION, "source_dataset": self.dataset,
+        metadata = {"date_grain": grain, "scope": scope, "transform_version": self.transform_version, "source_dataset": self.dataset,
                     "source_file": source, "source_sheet_or_table": "source table", "source_row_id": "1-based source record"}
         for field in (*COMMON, *TABLE_FIELDS[table]):
             if field in derived:
@@ -167,15 +239,18 @@ class Exporter:
     def write(self, table, frame, raw=None, measures=None, masters=True):
         import pyarrow.parquet as pq
         frame = frame.copy()
-        counts = self.key_counts[table]
-        duplicate = []
-        for key in key_hashes(frame, table).tolist():
-            duplicate.append(counts[key] > 0)
-            counts[key] += 1
-        mask = pd.Series(duplicate, index=frame.index)
-        if mask.any():
-            # Repeats beyond the first are marked now; finish() classifies every member.
-            finalize_quality(add_flag(frame, mask, "duplicate_key"))
+        if table in self.bulk_key_tables:
+            self.bulk_hashes[table].append(key_hashes(frame, table).to_numpy(dtype="uint64", copy=True))
+        else:
+            counts = self.key_counts[table]
+            duplicate = []
+            for key in key_hashes(frame, table).tolist():
+                duplicate.append(counts[key] > 0)
+                counts[key] += 1
+            mask = pd.Series(duplicate, index=frame.index)
+            if mask.any():
+                # Repeats beyond the first are marked now; finish() classifies every member.
+                finalize_quality(add_flag(frame, mask, "duplicate_key"))
         self.counts[table] += len(frame)
         for col in frame:
             n = int(frame[col].notna().sum())
@@ -224,7 +299,7 @@ class Exporter:
             if col in frame and table not in {"product_master", "location_master", "product_identity_version"}:
                 self.entity_references[entity].update(frame[col].dropna().astype(str).unique())
         self.units[table].update(frame.unit.dropna().astype(str).unique())
-        self.unit_status[table].update(frame.unit_status.fillna("<NULL>").astype(str).tolist())
+        self.unit_status[table].update(frame.unit_status.fillna("<NULL>").astype(str).value_counts().to_dict())
         if table in IDENTITY_TABLES:
             self.collect_identity(table, frame)
 
@@ -281,7 +356,7 @@ class Exporter:
             for seq, r in enumerate(group.itertuples(), 1):
                 files = r.files.split("|")
                 rows.append({"source_dataset": self.dataset, "source_file": files[0], "source_sheet_or_table": "derived:product_identity_version",
-                             "source_row_id": "all_observations", "transform_version": VERSION, "date_grain": "static", "scope": "dataset_product_identity",
+                             "source_row_id": "all_observations", "transform_version": self.transform_version, "date_grain": "static", "scope": "dataset_product_identity",
                              "product_grain": "product", "product_id": pid, "product_name": r.product_name, "version_seq": seq,
                              "valid_from": r.first, "valid_to": r.last, "observation_count": r.n, "source_tables": r.tables, "source_files": r.files,
                              "pack_spec_tokens": "|".join(pack_spec_tokens(r.product_name)), "temporal_relation": temporal, "name_change_class": change,
@@ -305,6 +380,9 @@ class Exporter:
             if repeated:
                 hashes = key_hashes(df, table)
                 member = hashes.isin(repeated)
+                if table in self.bulk_key_tables:
+                    # Bulk-checked tables were written unflagged; mark every occurrence after the first, as write() does.
+                    add_flag(df, member & hashes.duplicated(keep="first"), "duplicate_key")
                 sub = df.loc[member].assign(_h=hashes[member])
                 numeric_cols = [c for c in df.columns if c in NUMERIC and c != "source_record_count"]
                 signature = sub[numeric_cols].astype("string").fillna("<NA>").agg("|".join, axis=1) if numeric_cols else pd.Series("", index=sub.index)
@@ -343,7 +421,20 @@ class Exporter:
             summary[table] = {name: n for name, n in classes.items() if n}
         return summary
 
+    def finalize_bulk_keys(self):
+        """Exact key uniqueness of bulk tables from one 64-bit hash per row."""
+        for table, parts in self.bulk_hashes.items():
+            hashes = np.concatenate(parts) if parts else np.array([], dtype="uint64")
+            unique, counts = np.unique(hashes, return_counts=True)
+            repeated = counts > 1
+            self.key_counts[table] = Counter({int(h): int(n) for h, n in zip(unique[repeated], counts[repeated])})
+            self.checks.setdefault("key_uniqueness", {})[table] = {
+                "rows": int(len(hashes)), "distinct_keys": int(len(unique)), "keys_repeated": int(repeated.sum()),
+                "key": list(KEYS[table]), "method": "64-bit hash of the string-normalised canonical key over every written row; repeats are flagged and classified in the reflag pass"}
+        self.bulk_hashes.clear()
+
     def finish(self):
+        self.finalize_bulk_keys()
         master_ids = {}
         identity = self.identity_summary()
         names_per_id = identity.groupby("product_id").product_name.nunique() if not identity.empty else pd.Series(dtype=int)
@@ -390,15 +481,12 @@ class Exporter:
                 master_ids[table] = set(pd.read_parquet(self.processed / f"canonical_{table}.parquet", columns=[col])[col].dropna().astype(str))
             self.checks[table + "_mapping"] = {"observed_references": len(references), "unmatched_identifiers": sorted(references - master_ids.get(table, set()))}
         for table in self.writers:
-            final = pd.read_parquet(self.processed / f"canonical_{table}.parquet", columns=["validation_flags", "quality_flags", "quality_status", "analysis_eligible"])
-            self.flags[table] = Counter(flag for s in final.validation_flags.fillna("") for flag in str(s).split("|") if flag)
-            self.quality[table] = {"quality_status": final.quality_status.value_counts().to_dict(),
-                                   "quality_flags": dict(Counter(c for s in final.quality_flags.fillna("") for c in str(s).split("|") if c)),
-                                   "analysis_eligible": final.analysis_eligible.value_counts().to_dict()}
-            for col in ("validation_flags", "quality_flags", "quality_status", "analysis_eligible"):
-                self.nonnull[table][col] = int(final[col].notna().sum())
+            stats = flag_statistics(self.processed / f"canonical_{table}.parquet")
+            self.flags[table], self.quality[table] = stats["flags"], stats["quality"]
+            for col in FLAG_COLUMNS:
+                self.nonnull[table][col] = stats["nonnull"][col]
         self.checks["unit_consistency"] = {table: {"observed_units": sorted(units), "unit_status": dict(self.unit_status[table]), "unknown_unit_rows": self.counts[table] - self.nonnull[table]["unit"], "policy": "Never combine quantities across units or unknown-unit source scopes"} for table, units in self.units.items()}
-        report = {"dataset": self.dataset, "transform_version": VERSION, "row_counts": dict(self.counts), "semantic_checks": self.checks,
+        report = {"dataset": self.dataset, "transform_version": self.transform_version, "row_counts": dict(self.counts), "semantic_checks": self.checks,
             "date_ranges": self.date_ranges, "flags": {k: dict(v) for k, v in self.flags.items()}, "quality": self.quality,
             "field_coverage": {t: {c: "MISSING" if n == 0 else "FULL" if n == self.counts[t] else "PARTIAL" for c,n in self.nonnull[t].items()} for t in self.counts},
             "null_counts": {t: {c: self.counts[t]-n for c,n in self.nonnull[t].items()} for t in self.counts},
@@ -407,7 +495,7 @@ class Exporter:
             "duplicate_policy": "Every source record stays traceable. Records collapse only under a documented dataset policy (source_record_count, full source_row_id list). Remaining repeated keys keep every row; all members are classified (cross_release_conflict/cross_release_repeat/repeated_key_missing_subkey/repeated_key_unexplained) and none is summed or picked.",
             "quarantine_policy": "Rows with invalid_date/negative/invalid_numeric flags remain traceable in canonical with analysis_eligible=false. No correction or deletion.",
             "notes": self.notes, "selected_sources": self.sources}
-        mapping = {"schema": schema_document(), "dataset": self.dataset, "unit_evidence": UNIT_EVIDENCE.get(self.dataset), "mappings": self.mappings,
+        mapping = {"schema": schema_document(), "dataset": self.dataset, "unit_evidence": self.unit_evidence, "mappings": self.mappings,
                    "scope": "Selected usable full tables/numeric subset, not a claim that all collected files are converted", "notes": self.notes}
         for name, obj in [("canonical_mapping.json", mapping), ("data_quality_report.json", report)]:
             (self.results / name).write_text(json.dumps(obj, ensure_ascii=False, indent=2, allow_nan=False, default=str), encoding="utf-8")
@@ -793,6 +881,14 @@ def run_aihub(e):
     e.checks["unit_evidence"] = UNIT_EVIDENCE["aihub"]
 
 
+def runner(dataset):
+    if dataset in EXTERNAL_DATASETS:
+        # Imported lazily: the external pipeline builds on this module's Exporter.
+        from services import external_canonical_pipeline
+        return getattr(external_canonical_pipeline, "run_" + dataset)
+    return globals()["run_" + dataset]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", type=Path, default=DATA_ROOT)
@@ -803,13 +899,15 @@ def main():
         exporter = Exporter(args.data_root, dataset)
         source_inventory(exporter)
         try:
-            globals()["run_" + dataset](exporter)
+            runner(dataset)(exporter)
             report = exporter.finish()
             results[dataset] = {"row_counts": report["row_counts"], "quantity_conservation": report["all_quantity_checks_passed"]}
             print(json.dumps({dataset: results[dataset]}, ensure_ascii=False), flush=True)
         finally:
             for writer in exporter.writers.values():
                 writer.close()
+    from services.external_canonical_pipeline import write_validation_matrix
+    print(json.dumps({"external_validation_matrix": str(write_validation_matrix(args.data_root))}, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":
