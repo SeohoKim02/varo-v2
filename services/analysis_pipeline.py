@@ -13,6 +13,7 @@ from services.analysis_provenance import (
     kpi_sources,
 )
 from services.data_validator import ValidationReport, validate_workbook_data
+from services.demand_forecast_router import DAILY_SALES_HISTORY_KEY, route_demand_forecast
 from services.dqn_guard import dqn_exclusion_report, is_dqn_column, strip_dqn_columns
 from services.legacy_adapters.data_adapter import (
     add_cluster_context,
@@ -45,6 +46,7 @@ AUTO_VHS_INPUT_COLUMNS = (
     "weight_profile_id", "weight_summary", "varo_final_decision",
     "varo_final_rank",
 )
+ROUTER_LABEL = "services.demand_forecast_router.route_demand_forecast"
 
 
 @dataclass
@@ -142,11 +144,25 @@ def _summary_call(runner: _Runner, module_name: str, function_name: str, frame: 
     return {}
 
 
+def _route_forecast(
+    runner: _Runner, v1_output: pd.DataFrame, daily_sales_history: pd.DataFrame | None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """V1 output -> forecast router (V2 only where the daily history is eligible; V1 fields stay the fallback)."""
+    routed, diagnostics = route_demand_forecast(v1_output, daily_sales_history)
+    if diagnostics.get("errors"):
+        runner.result.warnings.append("수요예측 V2 계산 오류로 해당 품목은 V1 예측을 사용했습니다.")
+    if diagnostics.get("counts_by_version", {}).get("v2") and ROUTER_LABEL not in runner.result.connected_algorithms:
+        runner.result.connected_algorithms.append(ROUTER_LABEL)
+    return routed, diagnostics
+
+
 def _run_inventory_analysis(
     runner: _Runner, inventory: pd.DataFrame, *, collect_details: bool = True,
+    daily_sales_history: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     current = strip_dqn_columns(inventory)
     summaries: dict[str, Any] = {}
+    router_diagnostics: dict[str, Any] = {}
     steps = (
         ("abc_analyzer", "analyze_abc", "get_abc_summary", "abc", ("product_id", "stock_qty", "unit_price")),
         ("turnover_analyzer", "analyze_turnover", "get_turnover_summary", "turnover", ("stock_qty", "sales_30d")),
@@ -159,6 +175,8 @@ def _run_inventory_analysis(
     for module_name, analyze_name, summary_name, key, required_columns in steps:
         before_columns = set(current.columns)
         output = runner.call(module_name, analyze_name, current)
+        if key == "demand_forecast" and isinstance(output, pd.DataFrame) and not output.empty:
+            output, router_diagnostics = _route_forecast(runner, output, daily_sales_history)
         if isinstance(output, pd.DataFrame) and not output.empty:
             current = strip_dqn_columns(output)
             summary = (
@@ -183,6 +201,8 @@ def _run_inventory_analysis(
                 "output_columns": [],
                 "summary": {},
             }
+    if router_diagnostics:
+        summaries["demand_forecast"]["forecast_router"] = router_diagnostics
     return current, summaries
 
 
@@ -526,6 +546,7 @@ def run_analysis_pipeline(
     runner = _Runner(result)
     analyzed_inventory, inventory_summaries = _run_inventory_analysis(
         runner, legacy_data["inventory"], collect_details=collect_details,
+        daily_sales_history=uploaded_data.get(DAILY_SALES_HISTORY_KEY),
     )
     legacy_data["inventory"] = analyzed_inventory
 

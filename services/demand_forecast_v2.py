@@ -1,9 +1,9 @@
-"""Varo Demand Forecast v2 - a generic, explainable forecast candidate (not wired into production).
+"""Varo Demand Forecast v2 - a generic, explainable forecast (production only through the forecast router).
 
 Production keeps ``demand_forecast_analyzer.analyze_demand_forecast`` (frozen below as
-``FORECAST_V1_BASELINE``). This module only builds the v2 candidate that a separate,
-pre-registered validation may recommend for promotion; nothing here is called by the
-analysis pipeline.
+``FORECAST_V1_BASELINE``) for every row. The analysis pipeline reaches this module only through
+``services.demand_forecast_router``, which replaces V1 with the gated v2 configuration on rows whose
+daily sales history passes its eligibility checks.
 
 Input of the Core is a day-aligned demand history matrix ``history`` (series x days,
 last column = the forecast cutoff): observed sales per day, ``0`` = an observed zero

@@ -21,7 +21,7 @@ from services.column_aliases import (
 # Canonical data keys. Sheet names are resolved case-insensitively through the
 # aliases below so DQN workbooks can keep their original naming convention.
 REQUIRED_SHEETS = ("stores", "products", "inventory", "routes")
-OPTIONAL_SHEETS = ("dcs", "recommendations", "transport_modes", "config", "quality_check", "readme")
+OPTIONAL_SHEETS = ("dcs", "recommendations", "transport_modes", "config", "quality_check", "readme", "daily_sales_history")
 SHEET_NAME_ALIASES = {
     "stores": ("stores", "store", "store_master", "점포", "점포목록"),
     "dcs": ("dcs", "dc", "distribution_centers", "distribution_center", "물류센터", "센터"),
@@ -36,6 +36,8 @@ SHEET_NAME_ALIASES = {
     "config": ("config", "configuration", "설정"),
     "quality_check": ("quality_check", "qualitycheck", "품질점검"),
     "readme": ("readme", "guide", "안내"),
+    # Optional long daily sales (store_id, product_id, date, quantity): services.demand_forecast_router contract.
+    "daily_sales_history": ("daily_sales_history", "daily_sales", "일별판매이력"),
 }
 SAMPLE_FILENAME = "Varo_V2_네트워크_샘플.xlsx"
 
@@ -216,6 +218,7 @@ _IDENTIFIER_COLUMNS = {
     "inventory": ("store_id", "product_id"),
     "routes": ("source_id", "target_id"),
     "recommendations": ("route_id", "product_id", "source_id", "target_id", "dc_id"),
+    "daily_sales_history": ("store_id", "location_id", "product_id"),
 }
 
 
@@ -474,6 +477,15 @@ def normalize_loaded_data(
         if "product_id" in inventory.columns:
             inventory["product_id"] = inventory["product_id"].map(lambda value: _resolve_identifier(value, product_name_to_id))
         normalized["inventory"] = inventory
+    history = normalized.get("daily_sales_history")
+    if isinstance(history, pd.DataFrame) and not history.empty:
+        # Same identifier resolution as the inventory sheet, so history rows match their inventory rows.
+        _, node_name_to_id = _lookup_maps(stores, "node_id", "node_name")
+        _, product_name_to_id = _lookup_maps(products, "product_id", "product_name")
+        for column, lookup in (("store_id", node_name_to_id), ("location_id", node_name_to_id), ("product_id", product_name_to_id)):
+            if column in history.columns:
+                history[column] = history[column].map(lambda value, lookup=lookup: _resolve_identifier(value, lookup))
+        normalized["daily_sales_history"] = history
     recommendations = normalized.get("recommendations")
     if isinstance(recommendations, pd.DataFrame) and not recommendations.empty:
         recommendations, generated = _enrich_recommendations(recommendations, stores, products, routes)
