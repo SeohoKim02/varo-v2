@@ -30,6 +30,7 @@ from services.legacy_adapters.loader import (
 )
 from services.recommendation_adapter import normalize_action, recommendations_from_dataframe
 from services.real_transport_enrichment import enrich_real_transport
+from services.seller_loss_engine import build_seller_loss_analysis
 from services.v2_summaries import (
     V2_SUMMARY_FUNCTIONS,
     recommendation_reasons,
@@ -76,6 +77,8 @@ class PipelineResult:
     excluded_dqn_artifacts: Dict[str, Any] = field(default_factory=dqn_exclusion_report)
     result_basis: str = "알고리즘 미연결"
     diagnostics: Dict[str, Any] = field(default_factory=dict)
+    # Seller Loss Decision computed next to Varo Final; never changes recommendations, actions, ranks or KPIs.
+    seller_loss_analysis: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -313,6 +316,18 @@ def _enrich_promotion(candidates: pd.DataFrame, promotion: pd.DataFrame | None) 
         )
         result.at[index, "promotion_reason"] = item.get("decision_reason")
     return result
+
+
+def _seller_loss_analysis(
+    uploaded_data: Mapping[str, Any], analyzed_inventory: pd.DataFrame,
+    recommendations: List[Dict[str, object]], candidates: pd.DataFrame,
+) -> dict[str, Any]:
+    """Parallel seller-loss comparison; fault-isolated so it can never alter or break the production result."""
+    try:
+        return build_seller_loss_analysis(uploaded_data, analyzed_inventory, recommendations, candidates)
+    except Exception as exc:  # pragma: no cover - defensive isolation of the parallel engine
+        return {"status": "error", "error_type": type(exc).__name__, "message": str(exc),
+                "legacy_action_replaced": False, "rows": []}
 
 
 def _route_type_for_row(row: pd.Series) -> str:
@@ -646,6 +661,9 @@ def run_analysis_pipeline(
 
     result.recommendations = standard_recommendations
     result.top5 = top_recommendations(standard_recommendations, limit=5)
+    result.seller_loss_analysis = _seller_loss_analysis(
+        uploaded_data, analyzed_inventory, standard_recommendations, candidates,
+    )
     result.vhs_analysis = (
         _vhs_analysis(candidates, runner, vhs_input_columns)
         if collect_details and not candidates.empty and "vhs" in candidates.columns else {}
