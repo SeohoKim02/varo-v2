@@ -1,0 +1,8 @@
+﻿scope,input_type,product_id,store_id,source_store_id,target_store_id,route_id,effective_date,normal_price,unit_cost,discount_rate,promotion_uplift,holding_cost_per_unit_day,disposal_cost_per_unit,salvage_value_per_unit,remaining_shelf_life_days,daily_demand,transfer_cost,transfer_cost_per_unit,transit_time_days,currency,quantity_unit,price_unit,note
+GLOBAL,,,,,,,,,,,,,300.0,,,,,,,KRW,EA,,SAMPLE: 모든 점포·상품의 폐기 처리비(원/EA). 실제 값으로 바꾸거나 행을 지우세요
+STORE,,,SAMPLE_STORE_A,,,,,,,,,5.0,,,,,,,,KRW,,,SAMPLE: A점 보관비(원/EA/일)
+PRODUCT,,SAMPLE_PRODUCT_1,,,,,,,2500.0,,,,,,4.0,,,,,KRW,,,SAMPLE: 상품 단위 값 (unit_cost는 매몰원가라 비교에는 쓰지 않음)
+PRODUCT_STORE,,SAMPLE_PRODUCT_1,SAMPLE_STORE_A,,,,,4900.0,,0.2,0.5,,,,,12.0,,,,,,KRW/EA,SAMPLE: A점 정상가·할인율(0.2=20%)·할인 시 판매 증가율(0.5=+50%)·일 수요
+PRODUCT_STORE,,SAMPLE_PRODUCT_1,SAMPLE_STORE_B,,,,,5200.0,,,,,,,,30.0,,,,,,KRW/EA,SAMPLE: B점(도착 후보) 정상가·일 수요
+ROUTE,,,,SAMPLE_STORE_A,SAMPLE_STORE_B,,,,,,,,,,,,15000.0,,0.5,KRW,,,SAMPLE: A→B 1회 운송비·이동시간(일). 실제 운송비 데이터가 있으면 그 값이 우선
+PRODUCT,SCENARIO,SAMPLE_PRODUCT_1,,,,,,,,0.3,,,,,,,,,,,,,"SAMPLE what-if: SCENARIO 모드에서만 사용, 결과는 SCENARIO_ONLY"

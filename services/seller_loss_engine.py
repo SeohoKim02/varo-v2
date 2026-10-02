@@ -70,10 +70,12 @@ SELLER_LOSS_ACTIONS = {TRANSFER: "재고 이동", NORMAL_SALE: "정상 판매 �
 STATUS_FULL, STATUS_PARTIAL, STATUS_UNAVAILABLE = "FULL", "PARTIAL", "COMPARISON_UNAVAILABLE"
 RECOMMENDED, NOT_ROBUST, NO_COMPARISON = "RECOMMENDED", "NOT_ROBUST_TO_UNKNOWN_INPUTS", "NO_COMPARISON"
 
-PROVENANCE_CLASSES = ("DIRECT_REAL", "DERIVED_REAL", "USER_INPUT", "DERIVED_FROM_USER_INPUT", "CONFIG", "PROXY", "MISSING")
-ACCEPTED_PROVENANCE = frozenset({"DIRECT_REAL", "DERIVED_REAL", "USER_INPUT", "DERIVED_FROM_USER_INPUT", "CONFIG"})
-# Explicit scenario values: allowed, never presented as observations.
-SCENARIO_PROVENANCE = frozenset({"CONFIG"})
+PROVENANCE_CLASSES = ("DIRECT_REAL", "DERIVED_REAL", "USER_INPUT", "DERIVED_FROM_USER_INPUT", "SCENARIO_INPUT", "CONFIG",
+                      "PROXY", "MISSING")
+ACCEPTED_PROVENANCE = frozenset({"DIRECT_REAL", "DERIVED_REAL", "USER_INPUT", "DERIVED_FROM_USER_INPUT", "SCENARIO_INPUT",
+                                 "CONFIG"})
+# Explicit scenario values (what-if seller inputs, workbook config settings): allowed, never presented as observations.
+SCENARIO_PROVENANCE = frozenset({"SCENARIO_INPUT", "CONFIG"})
 TRANSFER_COST_BASES = ("QUANTITY_SPECIFIC", "FIXED_PER_TRIP", "PER_UNIT")
 NON_PHYSICAL_UNITS = frozenset({"normalized_sales_amount"})
 
@@ -153,6 +155,7 @@ REASON_MESSAGES = {
     "TRANSFER_COST_QTY_MISMATCH": "실행 가능한 이동 수량에 대한 이동 비용을 알 수 없습니다",
     "TRANSIT_TIME_MISSING": "이동 소요시간이 없어 도착 점포 판매 기간을 알 수 없습니다",
     "NO_EXECUTABLE_TRANSFER_QTY": "재고·수요·용량 제약 안에서 이동 가능한 수량이 없습니다",
+    "SELLER_UNIT_UNVERIFIABLE": "판매자 입력값의 단위를 재고 수량 단위와 대조할 수 없습니다(재고 수량 단위 미상)",
 }
 
 
@@ -240,6 +243,8 @@ class SellerDecisionInput:
     route_capacity_qty: InputField = MISSING
     source_surplus_basis: str = ""
     target_need_basis: str = ""
+    # "CODE:field" problems found by the input layer that the field values cannot show (services.seller_loss_inputs).
+    input_issues: tuple[str, ...] = ()
 
     def input_fields(self) -> dict[str, InputField]:
         return {f.name: getattr(self, f.name) for f in fields(self) if isinstance(getattr(self, f.name), InputField)}
@@ -494,6 +499,8 @@ def evaluate_seller_decision(inp: SellerDecisionInput) -> dict[str, Any]:
     """Compare TRANSFER / NORMAL_SALE / DISCOUNT_SALE for ``inp.decision_qty`` (pure, deterministic)."""
     notes: list[str] = []
     blockers, transfer_blockers, unit_notes = _consistency_blockers(inp)
+    for issue in inp.input_issues:
+        (transfer_blockers if issue.partition(":")[2] in TRANSFER_ONLY_FIELDS else blockers).append(issue)
     notes.extend(unit_notes)
     rejected: list[str] = []
 
@@ -862,6 +869,8 @@ def _reason_text(code: str) -> str:
         return f"{field_name}에 음수 값이 있습니다"
     if head == "TRANSFER_QTY_CAPPED":
         return f"{field_name} 제약으로 이동 수량이 제한됩니다"
+    if field_name and head in ("SELLER_UNIT_UNVERIFIABLE", "UNIT_MISMATCH"):
+        return f"{REASON_MESSAGES[head]}({field_name})"
     return REASON_MESSAGES.get(head, code)
 
 
@@ -1006,24 +1015,79 @@ def _config(config: Any) -> dict[str, Any]:
     return values
 
 
+# A production row may declare a column's provenance in `<column>_provenance` (e.g. the Suhyup E2E inventory
+# `stock_qty_provenance=actual`). Only these labels are recognised; a label containing "proxy" is PROXY.
+DECLARED_PROVENANCE = {"actual": "DIRECT_REAL", "direct_real": "DIRECT_REAL", "observed": "DIRECT_REAL",
+                       "derived_real": "DERIVED_REAL"}
+DEMAND_PROXY_SEMANTICS = "demand_proxy_not_retail_sales"
+SALES_PROVENANCE_COLUMNS = ("sales_qty_provenance", "avg_daily_sales_provenance", "sales_7d_provenance",
+                            "sales_30d_provenance")
+
+
+def _label(value: Any) -> str:
+    text = _text_id(value).lower()
+    return "" if text in ("nan", "none") else text
+
+
+def declared_provenance(row: Mapping[str, Any] | None, column: str, default: str) -> tuple[str, str]:
+    """(provenance, declared label) of ``row[column]``; an unknown or absent label keeps ``default``."""
+    text = _label((row or {}).get(f"{column}_provenance"))
+    if not text:
+        return default, ""
+    if "proxy" in text:
+        return "PROXY", text
+    return DECLARED_PROVENANCE.get(text, default), text
+
+
+def demand_provenance(*rows: Mapping[str, Any] | None) -> str:
+    """Provenance of a demand forecast built from these rows' sales: PROXY, DERIVED_REAL or DERIVED_FROM_USER_INPUT."""
+    labels: list[str] = []
+    for row in rows:
+        if not row:
+            continue
+        if _label(row.get("sales_qty_semantics")) == DEMAND_PROXY_SEMANTICS:
+            return "PROXY"
+        labels.extend(label for label in (_label(row.get(c)) for c in SALES_PROVENANCE_COLUMNS) if label)
+    if any("proxy" in label for label in labels):
+        return "PROXY"
+    if labels and all(DECLARED_PROVENANCE.get(label) for label in labels):
+        return "DERIVED_REAL"
+    return "DERIVED_FROM_USER_INPUT"
+
+
 def _workbook_field(row: Mapping[str, Any] | None, columns: Sequence[str], label: str, *, money: bool,
                     currency: str, unit: str | None, provenance: str = "USER_INPUT") -> InputField:
     for column in columns:
         if row is not None and column in row:
             value = _finite(row.get(column))
             if value is not None:
-                return known(value, provenance, f"{label}.{column}", unit=unit, currency=currency if money else None,
-                             dataset=WORKBOOK_DATASET)
+                declared, text = declared_provenance(row, column, provenance)
+                return known(value, declared, f"{label}.{column}", unit=unit, currency=currency if money else None,
+                             dataset=WORKBOOK_DATASET, note=f"declared provenance '{text}'" if text else "")
     return InputField(source=f"{label}.{'|'.join(columns)} absent")
+
+
+def decision_date(row: Mapping[str, Any] | None, config: Mapping[str, Any]) -> str | None:
+    """Snapshot date of the decision (inventory snapshot_date, else config as_of / snapshot_date)."""
+    for value in ((row or {}).get("snapshot_date"), config.get("as_of"), config.get("snapshot_date")):
+        if _label(value):
+            try:
+                return pd.Timestamp(value).strftime("%Y-%m-%d")
+            except (TypeError, ValueError):
+                continue
+    return None
 
 
 def pipeline_decision_input(
     recommendation: Mapping[str, Any], *, inventory_rows: Mapping[tuple[str, str], Mapping[str, Any]],
     forecast_rows: Mapping[tuple[str, str], Mapping[str, Any]], product_rows: Mapping[str, Mapping[str, Any]],
     config: Mapping[str, Any], transition: Mapping[str, Any] | None = None,
-    candidate: Mapping[str, Any] | None = None,
+    candidate: Mapping[str, Any] | None = None, decision_mode: str = "ACTUAL_OPERATION",
 ) -> SellerDecisionInput:
-    """Map one existing recommendation + uploaded workbook rows onto the contract without inventing values."""
+    """Map one existing recommendation + uploaded workbook rows onto the contract without inventing values.
+
+    The workbook config promotion rows are scenario settings: they are read (as CONFIG) only in SCENARIO mode.
+    """
     product = _text_id(recommendation.get("product_id"))
     source = _text_id(recommendation.get("source_id"))
     target = _text_id(recommendation.get("target_id")) or None
@@ -1049,8 +1113,7 @@ def pipeline_decision_input(
         row = forecast_rows.get((store or "", product))
         if row is None:
             return InputField(source=f"demand_forecast_router row ({store},{product}) absent")
-        semantics = str(row.get("sales_qty_semantics") or "").strip()
-        provenance = "PROXY" if semantics == "demand_proxy_not_retail_sales" else "DERIVED_FROM_USER_INPUT"
+        provenance = demand_provenance(row, inventory_rows.get((store or "", product)))
         version = str(row.get("demand_forecast_version") or "v1")
         return known(row.get("demand_forecast_daily"), provenance,
                      f"demand_forecast_router[{version}].demand_forecast_daily", unit=unit, dataset=WORKBOOK_DATASET,
@@ -1063,8 +1126,14 @@ def pipeline_decision_input(
         cost_provenance = "PROXY" if proxies > 0 else "DERIVED_REAL"
         cost_note = "official-tariff reference estimate (not an invoice)" + (" with upper-class proxy vehicles" if proxies > 0 else "")
     travel = _finite(recommendation.get("travel_time_min", recommendation.get("expected_time_min")))
-    movable = (transition or {}).get("metadata", {}).get("movable_stock") if transition else None
-    shortage = (transition or {}).get("metadata", {}).get("target_shortage_limit") if transition else None
+    metadata = (transition or {}).get("metadata", {}) if transition else {}
+    movable, shortage = metadata.get("movable_stock"), metadata.get("target_shortage_limit")
+
+    def cap_provenance(basis: Any, store: str | None) -> str:
+        # A cap computed from a demand proxy ("max(sales_qty*7-stock_qty, 0)") is itself a proxy; explicit columns are not.
+        computed = str(basis or "").startswith("max(")
+        rows = (forecast_rows.get((store or "", product)), inventory_rows.get((store or "", product)))
+        return "PROXY" if computed and demand_provenance(*rows) == "PROXY" else "DERIVED_FROM_USER_INPUT"
 
     discount = InputField(source="config.promotion_discount_rate absent")
     uplift = InputField(source="config.promotion_sales_increase_rate absent")
@@ -1075,7 +1144,10 @@ def pipeline_decision_input(
             percent = _finite(config.get(key))
             if percent is None:
                 continue
-            item = known(percent / 100.0, "CONFIG", f"config.{key} (%)", note="explicit workbook scenario, not observed")
+            if decision_mode != "SCENARIO":
+                item = InputField(source=f"config.{key} (%) is a scenario setting; not used in ACTUAL_OPERATION")
+            else:
+                item = known(percent / 100.0, "CONFIG", f"config.{key} (%)", note="explicit workbook scenario, not observed")
             if key == "promotion_discount_rate":
                 discount = item
             else:
@@ -1110,18 +1182,25 @@ def pipeline_decision_input(
         transit_time_days=known(travel / 1440.0 if travel is not None else None,
                                 "DERIVED_REAL" if candidate and bool(candidate.get("real_transport_applied")) else "USER_INPUT",
                                 "recommendation.travel_time_min / 1440"),
-        source_surplus_cap=known(movable, "DERIVED_FROM_USER_INPUT", "inventory_transition_service movable_stock", unit=unit, dataset=WORKBOOK_DATASET),
-        target_need_cap=known(shortage, "DERIVED_FROM_USER_INPUT", "inventory_transition_service target_shortage_limit", unit=unit, dataset=WORKBOOK_DATASET),
-        source_surplus_basis=str((transition or {}).get("metadata", {}).get("movable_stock_basis") or ""),
-        target_need_basis=str((transition or {}).get("metadata", {}).get("target_shortage_basis") or ""),
+        source_surplus_cap=known(movable, cap_provenance(metadata.get("movable_stock_basis"), source),
+                                 "inventory_transition_service movable_stock", unit=unit, dataset=WORKBOOK_DATASET),
+        target_need_cap=known(shortage, cap_provenance(metadata.get("target_shortage_basis"), target),
+                              "inventory_transition_service target_shortage_limit", unit=unit, dataset=WORKBOOK_DATASET),
+        source_surplus_basis=str(metadata.get("movable_stock_basis") or ""),
+        target_need_basis=str(metadata.get("target_shortage_basis") or ""),
     )
 
 
 def build_seller_loss_analysis(
     uploaded_data: Mapping[str, Any], analyzed_inventory: Any, recommendations: Sequence[Mapping[str, Any]],
-    candidates: Any = None,
+    candidates: Any = None, *, decision_mode: str | None = None,
 ) -> dict[str, Any]:
-    """Seller-loss decisions next to the existing Varo Final results (never modifies them)."""
+    """Seller-loss decisions next to the existing Varo Final results (never modifies them).
+
+    Explicit seller business inputs (uploaded_data["seller_loss_inputs"] / workbook sheet) are merged by
+    services.seller_loss_inputs; without them only the production rows are used.
+    """
+    from services import seller_loss_inputs as seller_inputs
     from services.inventory_transition_service import build_inventory_baseline, calculate_inventory_transition
 
     data = {key: value for key, value in (uploaded_data or {}).items()}
@@ -1134,6 +1213,11 @@ def build_seller_loss_analysis(
         for record in products.to_dict("records"):
             product_rows.setdefault(_text_id(record.get("product_id")), record)
     config = _config(data.get("config"))
+    mode, mode_info = seller_inputs.resolve_decision_mode(decision_mode, data, config)
+    currency_basis = "config.currency" if config.get("currency") else WORKBOOK_CURRENCY_NOTE
+    table = seller_inputs.parse_seller_loss_inputs(
+        data.get(seller_inputs.SHEET_KEY), upload_currency=str(config.get("currency") or WORKBOOK_CURRENCY),
+        upload_currency_basis=currency_basis)
     candidate_rows: dict[str, dict[str, Any]] = {}
     if isinstance(candidates, pd.DataFrame) and "route_id" in candidates.columns:
         for record in candidates.to_dict("records"):
@@ -1147,13 +1231,24 @@ def build_seller_loss_analysis(
         decision_input = pipeline_decision_input(
             rec, inventory_rows=inventory_rows, forecast_rows=forecast_rows, product_rows=product_rows,
             config=config, transition=transition, candidate=candidate_rows.get(str(rec.get("route_id"))),
+            decision_mode=mode,
         )
-        decision = evaluate_seller_decision(decision_input)
+        source_row = inventory_rows.get((decision_input.source_store_id, decision_input.product_id))
+        decision = seller_inputs.evaluate_with_seller_inputs(
+            decision_input, table, decision_mode=mode, decision_date=decision_date(source_row, config),
+            dataset=WORKBOOK_DATASET)
         decisions.append(decision)
         rows.append(summary_row(decision))
     counts: dict[str, int] = {}
     for row in rows:
         counts[row["comparison_status"]] = counts.get(row["comparison_status"], 0) + 1
+
+    def tally(key: str) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for row in rows:
+            out[row[key]] = out.get(row[key], 0) + 1
+        return dict(sorted(out.items()))
+
     return {
         "status": "parallel_only",
         "engine_version": ENGINE_VERSION,
@@ -1164,6 +1259,13 @@ def build_seller_loss_analysis(
         "currency_basis": "config.currency" if config.get("currency") else WORKBOOK_CURRENCY_NOTE,
         "status_counts": dict(sorted(counts.items())),
         "recommended_count": sum(1 for row in rows if row["recommended_strategy"]),
+        "decision_mode": mode,
+        "decision_mode_basis": mode_info,
+        "input_contract_version": seller_inputs.INPUT_CONTRACT_VERSION,
+        "seller_loss_inputs": table.validation,
+        "evidence_level_counts": tally("evidence_level"),
+        "readiness_counts": tally("recommendation_readiness"),
+        "recommendable_count": sum(1 for row in rows if row["recommendation_readiness"] == "RECOMMENDABLE"),
         "rows": rows,
         "decisions": decisions,
     }
@@ -1192,6 +1294,14 @@ def summary_row(decision: Mapping[str, Any]) -> dict[str, Any]:
         "decision_confidence": decision.get("decision_confidence"),
         "reason_codes": "|".join(decision.get("reason_codes") or []),
         "explanation": decision.get("explanation"),
+        "decision_mode": decision.get("decision_mode"),
+        "evidence_level": decision.get("evidence_level"),
+        "recommendation_readiness": decision.get("recommendation_readiness"),
+        "strategy_readiness": "|".join(f"{k}={v}" for k, v in (decision.get("strategy_readiness") or {}).items()),
+        "real_input_fields": "|".join(decision.get("real_input_fields") or []),
+        "seller_input_fields": "|".join(decision.get("seller_input_fields") or []),
+        "missing_required_fields": "|".join(decision.get("missing_required_fields") or []),
+        "conflicting_fields": "|".join(decision.get("conflicting_fields") or []),
     }
 
 

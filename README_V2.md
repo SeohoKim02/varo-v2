@@ -42,9 +42,29 @@ Varo V2는 실제 재고 데이터를 분석해 폐기 위험과 재고 불균�
 - 기준은 예상 회피 가능 손실 최소화 하나다: `L(s) = Q × 정상가 − V(s)`, `V(s)`는 해당 전략으로 Q개에서 회수되는 현금(매출 − 운송·보관·폐기 처리비 + 잔존가치)이다.
 - 이미 매입한 원가는 세 전략에서 같으므로 비교에 넣지 않는다. 미판매 재고의 가치는 정상가 기준으로 한 번만 세고, 폐기에는 처리비만 더한다.
 - 이동의 출발 점포 판매기회 손실은 정상 판매 대비 차이(bridge)로 보고하며 손실 항목에 다시 더하지 않는다.
-- 가격·수요·잔여 유통기한이 없거나, 대리지표(proxy)이거나, 단위·통화·데이터셋이 섞이면 금액 비교를 하지 않는다. 할인 판매는 관측·사용자 입력·명시 설정의 판매 증가율이 있을 때만 계산하며, 기존 프로모션 분석의 기본값(20%, 80%)은 쓰지 않는다.
+- 가격·수요·잔여 유통기한이 없거나, 대리지표(proxy)이거나, 단위·통화·데이터셋이 섞이면 금액 비교를 하지 않는다. 할인 판매는 관측값이나 판매자가 입력한 판매 증가율이 있을 때만 계산한다. 기존 프로모션 분석의 기본값(20%, 80%)과 config의 프로모션 설정은 실제 운영 판단에 쓰지 않는다.
 - 보관비·폐기 처리비·잔존가치가 없으면 0으로 두지 않고 미상으로 둔다. 허용 범위의 어떤 값에서도 순위가 같을 때만 추천한다.
-- 실제 데이터 검증 산출물은 `C:\VARO_V2_REAL_DATA\_SELLER_LOSS_VALIDATION`에만 저장한다(`python -m services.seller_decision_validation`).
+- 실제 데이터 검증 산출물은 `C:\VARO_V2_REAL_DATA\_SELLER_LOSS_VALIDATION`에만 저장한다(`python -m services.seller_decision_validation`, `python -m services.seller_loss_input_validation`).
+
+### 실제 데이터 + 판매자 입력 (seller_loss_inputs)
+
+Varo Seller Loss Engine은 실제 데이터에 있는 값은 그대로 쓴다. 데이터에 없는 사업장 값은 판매자가 직접 입력할 수 있다. 입력이 부족하면 Varo는 값을 추정해 추천하지 않고 `PARTIAL` 또는 `COMPARISON_UNAVAILABLE`을 반환한다.
+
+- 판매자 입력은 `uploaded_data["seller_loss_inputs"]`나 업로드 workbook의 선택 시트 `seller_loss_inputs`로 받는다(`services/seller_loss_inputs.py`). 시트가 없으면 기존처럼 업로드 데이터만 쓴다. 시트가 잘못되어도 분석은 멈추지 않고, 오류는 `seller_loss_analysis.seller_loss_inputs`에 행·열 단위로 기록된다.
+- 점포 값(`normal_price`, `holding_cost_per_unit_day`, `disposal_cost_per_unit`, `daily_demand`, `remaining_shelf_life_days`, `discount_rate`, `promotion_uplift`, `salvage_value_per_unit`, `unit_cost`)은 `store_id`로 입력한다. 같은 값이 그 점포가 출발지일 때와 도착지일 때 모두 쓰인다. 경로 값(`transfer_cost` 1회 운송비, `transfer_cost_per_unit`, `transit_time_days`)은 `source_store_id`·`target_store_id` 또는 `route_id`로 입력한다.
+- `scope`(ROUTE > PRODUCT_STORE > PRODUCT > STORE > GLOBAL)는 반드시 명시한다. 가장 구체적인 입력이 쓰인다. 같은 구체성에서 값이 다르면 CONFLICT가 되어 그 값을 쓰지 않으며, 첫 행이나 마지막 행을 고르지 않는다.
+- 우선순위: 실제값(DIRECT_REAL, DERIVED_REAL)과 업로드 데이터 행의 값이 먼저다. 판매자 입력은 비어 있는 값(MISSING)을 채우거나 대리지표(PROXY)를 대신할 때만 쓴다. 데이터 값과 다르면 데이터 값을 유지하고 충돌로 기록한다. 실제 운송비가 있으면 판매자 운송비로 덮어쓰지 않는다.
+- 모드: `ACTUAL_OPERATION`(기본)은 실제 데이터와 판매자의 실제 사업장 값만 쓴다. `SCENARIO`(`seller_loss_decision_mode`)에서는 `input_type=SCENARIO` 행과 config 프로모션 설정을 가정값으로 쓴다. 이 결과는 항상 `SCENARIO_ONLY`이며 실제 추천과 섞이지 않는다.
+- 통화는 환산하지 않는다. 통화가 다르면 해당 전략이나 비교 전체가 불가가 된다. `price_unit`(예: `KRW/EA`)을 쓰면 재고 수량 단위와 맞아야 하며, 재고 단위를 모르면 `quantity_unit`도 함께 명시해야 한다.
+- 결과마다 다음을 기록한다.
+  - `decision_mode`
+  - `evidence_level`: REAL_ONLY / REAL_PLUS_USER_INPUT / USER_INPUT_ONLY / SCENARIO / INSUFFICIENT
+  - `recommendation_readiness`: RECOMMENDABLE / NOT_ROBUST / SCENARIO_ONLY / UNAVAILABLE
+  - 전략별 준비 상태
+  - 실제·판매자·누락·충돌 필드
+  - 판매자 입력 감사 기록: 행·scope·적용 결과, 그리고 그 입력을 빼면 추천이 바뀌는지
+- 실제 action 승격 후보는 RECOMMENDABLE뿐이다. 이번 단계에서는 승격하지 않는다(legacy action 유지).
+- 입력 예시는 `samples/seller_loss_inputs_TEMPLATE_SAMPLE.csv`에 있다. 모든 값은 형식을 보여 주는 SAMPLE이며 기본값이 아니다.
 
 재고 시뮬레이션은 추천 알고리즘을 다시 실행하지 않는다. 기존 추천 순서를 그대로 받아 실제 재고·수요 한도 안에서 실행 가능한 이동량을 복사본에 순차 적용한다. 따라서 시뮬레이션 결과가 원본 추천이나 업로드 데이터를 덮어쓰지 않는다.
 
