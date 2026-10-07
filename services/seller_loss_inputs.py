@@ -72,6 +72,15 @@ KEY_COLUMNS = ("product_id", "store_id", "source_store_id", "target_store_id", "
 COLUMN_ALIASES = {"location_id": "store_id", "source_location_id": "source_store_id",
                   "target_location_id": "target_store_id"}
 META_COLUMNS = ("scope", "input_type", "currency", "quantity_unit", "price_unit", "note")
+PROMOTION_LABEL_COLUMNS = ("is_sample", "is_test", "synthetic_fixture", "data_kind", "source_file")
+
+
+def promotion_data_labels(record):
+    """Retain nonproduction declarations without changing any economic value."""
+    labels = tuple(str(record[c]).strip() for c in ("note", "data_kind", "source_file", "profile_source")
+                   if not _blank(record.get(c)))
+    return labels + tuple(c for c in ("is_sample", "is_test", "synthetic_fixture")
+                          if str(record.get(c, "")).lower() in ("true", "1", "yes"))
 
 # Store attributes: the value of a product at one store. The same row serves that store as decision source or target.
 STORE_FIELDS: dict[str, dict[str, str]] = {
@@ -161,6 +170,10 @@ class SellerInputCell:
     currency_basis: str = ""
     unit: str | None = None        # declared quantity unit of a per-unit value (None = not declared on the row)
     basis: str | None = None       # transfer cost basis
+    input_source: str = "seller_loss_inputs"
+    effective_until: str | None = None
+    profile_source: str | None = None
+    data_labels: tuple[str, ...] = ()
 
     @property
     def key_map(self) -> dict[str, str]:
@@ -173,11 +186,12 @@ class SellerInputCell:
     @property
     def specificity(self) -> tuple[int, int, int]:
         keys = self.key_map
-        return SCOPE_RANK[self.scope], int(bool(keys.get("route_id"))), len(keys)
+        count = len([k for k in keys if k != "effective_date"]) if self.input_source == "seller_business_profile" else len(keys)
+        return SCOPE_RANK[self.scope], int(bool(keys.get("route_id"))), count
 
     def label(self) -> str:
         keys = ", ".join(f"{k}={v}" for k, v in self.keys)
-        return f"seller_loss_inputs[row {self.row}].{self.column} (scope {self.scope}{'; ' + keys if keys else ''})"
+        return f"{self.input_source}[row {self.row}].{self.column} (scope {self.scope}{'; ' + keys if keys else ''})"
 
 
 @dataclass
@@ -300,7 +314,7 @@ def parse_seller_loss_inputs(source: Any, *, upload_currency: str, upload_curren
     frame = frame.loc[:, ~pd.Index(frame.columns).duplicated()]
     frame = frame[[not all(_blank(v) for v in row) for row in frame.itertuples(index=False)]] if len(frame) else frame
     validation["rows"] = int(len(frame))
-    known_columns = {*KEY_COLUMNS, *META_COLUMNS, *VALUE_COLUMNS}
+    known_columns = {*KEY_COLUMNS, *META_COLUMNS, *VALUE_COLUMNS, *PROMOTION_LABEL_COLUMNS}
     for column in frame.columns:
         if column not in known_columns:
             hint = ENGINE_NAME_HINTS.get(column)
@@ -372,6 +386,7 @@ def parse_seller_loss_inputs(source: Any, *, upload_currency: str, upload_curren
             validation["rejected_cells"] += sum(1 for c in value_columns if not _blank(record.get(c)))
             continue
         key_tuple = tuple(sorted(keys.items()))
+        labels = promotion_data_labels(record)
         row_currency = currency or price_currency
         row_unit = quantity_unit or price_unit
         both_costs = not _blank(record.get("transfer_cost")) and not _blank(record.get("transfer_cost_per_unit"))
@@ -398,11 +413,12 @@ def parse_seller_loss_inputs(source: Any, *, upload_currency: str, upload_curren
                 currency_basis=("ROW" if currency else "PRICE_UNIT" if price_currency else upload_currency_basis) if money else "",
                 unit=row_unit if column in UNIT_BOUND_COLUMNS else None,
                 basis=ROUTE_FIELDS[column][1] if column in ROUTE_FIELDS else None,
+                data_labels=labels,
             ))
             row_cells += 1
         if quantity_unit and scope in STORE_SCOPES:
             cells.append(SellerInputCell(row=position, column="quantity_unit", value=quantity_unit, scope=scope,
-                                         keys=key_tuple, input_type=input_type))
+                                         keys=key_tuple, input_type=input_type, data_labels=labels))
         elif not row_cells:
             validation["warnings"].append({"row": position, "column": None, "code": "EMPTY_ROW",
                                            "message": "적용할 입력값이 없는 행입니다"})
@@ -443,7 +459,10 @@ class DecisionKey:
 
 def _matches(cell: SellerInputCell, key: DecisionKey, role: str | None) -> bool:
     keys = cell.key_map
-    if keys.get("effective_date") and keys["effective_date"] != key.decision_date:
+    if cell.input_source == "seller_business_profile" and keys.get("effective_date"):
+        if not key.decision_date or not (keys["effective_date"] <= key.decision_date <= cell.effective_until):
+            return False
+    elif keys.get("effective_date") and keys["effective_date"] != key.decision_date:
         return False
     if keys.get("product_id") and keys["product_id"] != key.product_id:
         return False
@@ -481,9 +500,13 @@ def resolve_cells(cells: Iterable[SellerInputCell]) -> Resolution:
     matching = sorted(cells, key=lambda c: (c.specificity, c.row), reverse=True)
     if not matching:
         return Resolution("NONE")
+    overridden = []
+    if any(c.input_source == "seller_loss_inputs" for c in matching):
+        overridden = [c for c in matching if c.input_source == "seller_business_profile"]
+        matching = [c for c in matching if c.input_source != "seller_business_profile"]
     top = matching[0].specificity
     winners = tuple(sorted((c for c in matching if c.specificity == top), key=lambda c: (c.row, c.column)))
-    shadowed = tuple(sorted((c for c in matching if c.specificity != top), key=lambda c: (c.row, c.column)))
+    shadowed = tuple(sorted([c for c in matching if c.specificity != top] + overridden, key=lambda c: (c.row, c.column)))
     status = "RESOLVED" if all(_same(winners[0], other) for other in winners[1:]) else "CONFLICT"
     return Resolution(status, winners, shadowed)
 
@@ -511,6 +534,8 @@ def _seller_item(cell: SellerInputCell, unit: str | None, dataset: str | None) -
             "explicit seller business input")
     if cell.currency_basis and cell.currency_basis not in ("ROW", "PRICE_UNIT"):
         note += f"; currency from {cell.currency_basis}"
+    if cell.data_labels:
+        note += "; input labels: " + " | ".join(cell.data_labels)
     return known(cell.value, cell.provenance, cell.label(), unit=unit, currency=cell.currency,
                  dataset=None if scenario else dataset, note=note)
 
@@ -547,6 +572,19 @@ def merge_seller_inputs(
             record["fields"]["quantity_unit"] = {"origin": "SELLER_LOSS_INPUTS", "outcome": "APPLIED",
                                                  "provenance": "USER_INPUT", "value": declared,
                                                  "source": unit_resolution.cell.label()}
+            if unit_resolution.cell.input_source == "seller_business_profile":
+                cell = unit_resolution.cell
+                record["fields"]["quantity_unit"].update(origin="SELLER_BUSINESS_PROFILE", scope=cell.scope,
+                    input_scope=cell.scope, profile_source=cell.profile_source or cell.label(), effective_value=declared)
+                record["audit"].append({"field": "quantity_unit", "column": cell.column, "row": cell.row,
+                    "scope": cell.scope, "input_scope": cell.scope, "source": cell.input_source,
+                    "profile_source": cell.profile_source or cell.label(), "provenance": "USER_INPUT",
+                    "input_value": declared, "effective_value": declared, "outcome": "APPLIED",
+                    **({"data_labels": list(cell.data_labels)} if cell.data_labels else {})})
+            elif unit_resolution.cell.data_labels:
+                record["audit"].append({"field": "quantity_unit", "scope": unit_resolution.cell.scope,
+                    "keys": dict(unit_resolution.cell.keys), "outcome": "APPLIED",
+                    "data_labels": list(unit_resolution.cell.data_labels)})
         elif declared.casefold() != str(data_unit).casefold():
             record["conflicts"].append({"field": "quantity_unit", "kind": "DATA_VS_SELLER_INPUT", "data_value": data_unit,
                                         "seller_values": [declared], "rows": [unit_resolution.cell.row], "kept": data_unit})
@@ -586,6 +624,11 @@ def merge_seller_inputs(
                 "keys": dict(cell.keys), "input_type": cell.input_type, "provenance": cell.provenance,
                 "input_value": cell.value, "currency": cell.currency, "unit": cell.unit, "basis": cell.basis,
                 "outcome": cell_outcome,
+                **({"data_labels": list(cell.data_labels)} if cell.data_labels else {}),
+                **({"input_scope": cell.scope, "profile_source": cell.profile_source or cell.label(),
+                    "source": cell.input_source, "effective_value": changes.get(engine_field, base_item).value,
+                    "effective_until": cell.effective_until, "currency_basis": cell.currency_basis}
+                   if cell.input_source == "seller_business_profile" else {}),
             })
 
         if chosen is not None:
@@ -612,10 +655,12 @@ def merge_seller_inputs(
                 for cell in actual.winners:
                     audit(cell, "OVERRIDDEN_BY_SCENARIO")
             record["fields"][engine_field] = {
-                "origin": "SCENARIO" if outcome == "SCENARIO_OVERRIDE" else "SELLER_LOSS_INPUTS", "outcome": outcome,
+                "origin": "SCENARIO" if outcome == "SCENARIO_OVERRIDE" else chosen.input_source.upper(), "outcome": outcome,
                 "provenance": chosen.provenance, "value": chosen.value, "scope": chosen.scope,
                 "rows": [c.row for c in winners], "source": chosen.label(),
                 "replaced": base_item.as_dict() if base_item.present else None,
+                **({"input_scope": chosen.scope, "profile_source": chosen.profile_source or chosen.label(),
+                    "effective_value": chosen.value} if chosen.input_source == "seller_business_profile" else {}),
             }
         elif actual.status == "RESOLVED":   # a data value exists: kept, the seller value is compared with it
             cell = actual.cell
@@ -648,7 +693,10 @@ def merge_seller_inputs(
                                         "seller_values": sorted({c.value for c in scenario.winners}, key=str),
                                         "rows": [c.row for c in scenario.winners], "kept": None})
         for cell in actual.shadowed + (scenario.shadowed if decision_mode == SCENARIO else ()):
-            audit(cell, "SHADOWED_BY_MORE_SPECIFIC_SCOPE")
+            resolution = scenario if cell.input_type == "SCENARIO" else actual
+            override = (cell.input_source == "seller_business_profile"
+                        and any(c.input_source == "seller_loss_inputs" for c in resolution.winners))
+            audit(cell, "OVERRIDDEN_BY_DECISION_INPUT" if override else "SHADOWED_BY_MORE_SPECIFIC_SCOPE")
 
     record["issues"] = issues
     if issues:
@@ -670,7 +718,7 @@ def _class(provenance: str) -> str:
 
 
 def _origin(name: str, item: InputField, fields_info: Mapping[str, Any]) -> str:
-    if name in fields_info and fields_info[name]["origin"] in ("SELLER_LOSS_INPUTS", "SCENARIO"):
+    if name in fields_info and fields_info[name]["origin"] in ("SELLER_LOSS_INPUTS", "SELLER_BUSINESS_PROFILE", "SCENARIO"):
         return fields_info[name]["origin"]
     if not item.present:
         return "NONE"
@@ -806,6 +854,8 @@ def decision_evidence(result: Mapping[str, Any], base: SellerDecisionInput, merg
         sources[name] = {"provenance": item.provenance, "origin": _origin(name, item, fields_info), "value": item.value,
                          "source": item.source, "scope": info.get("scope"), "outcome": info.get("outcome"),
                          "used_in_comparison": name in used}
+        if info.get("profile_source"):
+            sources[name].update({k: info[k] for k in ("input_scope", "profile_source", "effective_value")})
     listed = [name for name in items if name not in DECISION_SCOPE_FIELDS and items[name].usable]
     status = result["comparison_status"]
     return {
@@ -850,6 +900,8 @@ def evaluate_with_seller_inputs(base: SellerDecisionInput, table: SellerInputTab
     result.update(decision_evidence(
         result, base, merged, record, decision_mode=decision_mode,
         remerge=lambda exclude: merge_seller_inputs(base, table, exclude_fields=exclude, **options)[0]))
+    if table and "seller_business_profile" in table.validation and result["comparison_status"] == STATUS_PARTIAL:
+        result["production_promotion_candidate"] = False
     return result
 
 

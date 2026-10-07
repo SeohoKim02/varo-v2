@@ -1193,14 +1193,18 @@ def pipeline_decision_input(
 
 def build_seller_loss_analysis(
     uploaded_data: Mapping[str, Any], analyzed_inventory: Any, recommendations: Sequence[Mapping[str, Any]],
-    candidates: Any = None, *, decision_mode: str | None = None,
+    candidates: Any = None, *, decision_mode: str | None = None, comparison_scope: str | None = None,
 ) -> dict[str, Any]:
     """Seller-loss decisions next to the existing Varo Final results (never modifies them).
 
     Explicit seller business inputs (uploaded_data["seller_loss_inputs"] / workbook sheet) are merged by
-    services.seller_loss_inputs; without them only the production rows are used.
+    services.seller_loss_inputs; without them only the production rows are used. Each decision also carries the
+    minimum seller inputs still needed (services.seller_loss_input_requirements) for the requested comparison scope.
     """
+    from services import seller_loss_input_requirements as requirements
     from services import seller_loss_inputs as seller_inputs
+    from services import seller_business_profile as business_profile
+    from services import seller_loss_promotion_gate as promotion_gate
     from services.inventory_transition_service import build_inventory_baseline, calculate_inventory_transition
 
     data = {key: value for key, value in (uploaded_data or {}).items()}
@@ -1214,10 +1218,13 @@ def build_seller_loss_analysis(
             product_rows.setdefault(_text_id(record.get("product_id")), record)
     config = _config(data.get("config"))
     mode, mode_info = seller_inputs.resolve_decision_mode(decision_mode, data, config)
+    scope, scope_info = requirements.resolve_comparison_scope(comparison_scope, data, config)
     currency_basis = "config.currency" if config.get("currency") else WORKBOOK_CURRENCY_NOTE
     table = seller_inputs.parse_seller_loss_inputs(
         data.get(seller_inputs.SHEET_KEY), upload_currency=str(config.get("currency") or WORKBOOK_CURRENCY),
         upload_currency_basis=currency_basis)
+    profile = business_profile.parse_profile(data.get(business_profile.SHEET_KEY))
+    table = business_profile.combine_inputs(table, profile)
     candidate_rows: dict[str, dict[str, Any]] = {}
     if isinstance(candidates, pd.DataFrame) and "route_id" in candidates.columns:
         for record in candidates.to_dict("records"):
@@ -1234,9 +1241,12 @@ def build_seller_loss_analysis(
             decision_mode=mode,
         )
         source_row = inventory_rows.get((decision_input.source_store_id, decision_input.product_id))
+        date = decision_date(source_row, config)
         decision = seller_inputs.evaluate_with_seller_inputs(
-            decision_input, table, decision_mode=mode, decision_date=decision_date(source_row, config),
-            dataset=WORKBOOK_DATASET)
+            decision_input, table, decision_mode=mode, decision_date=date, dataset=WORKBOOK_DATASET)
+        decision["input_requirements"] = requirements.safe_plan(
+            decision_input, table, decision, comparison_scope=scope, decision_date=date, dataset=WORKBOOK_DATASET,
+            upload_currency=str(config.get("currency") or WORKBOOK_CURRENCY))
         decisions.append(decision)
         rows.append(summary_row(decision))
     counts: dict[str, int] = {}
@@ -1248,6 +1258,12 @@ def build_seller_loss_analysis(
         for row in rows:
             out[row[key]] = out.get(row[key], 0) + 1
         return dict(sorted(out.items()))
+
+    shadow = [promotion_gate.shadow_decision(d, comparison_scope=scope,
+        explicit_scope=scope_info.get("basis") != "default" and not scope_info.get("error"),
+        context={**{k: data[k] for k in ("is_sample", "is_test", "synthetic_fixture", "data_kind", "source_file", "source_path", "label") if k in data},
+                 "decision_date": decision_date(inventory_rows.get((d["source_store_id"], d["product_id"])), config)})
+        for d in decisions]
 
     return {
         "status": "parallel_only",
@@ -1263,11 +1279,19 @@ def build_seller_loss_analysis(
         "decision_mode_basis": mode_info,
         "input_contract_version": seller_inputs.INPUT_CONTRACT_VERSION,
         "seller_loss_inputs": table.validation,
+        **({"seller_business_profile": profile.validation} if business_profile.SHEET_KEY in data else {}),
         "evidence_level_counts": tally("evidence_level"),
         "readiness_counts": tally("recommendation_readiness"),
         "recommendable_count": sum(1 for row in rows if row["recommendation_readiness"] == "RECOMMENDABLE"),
+        "comparison_scope": scope,
+        "comparison_scope_basis": scope_info,
+        "input_requirements_summary": requirements.summarize_plans(
+            [d["input_requirements"] for d in decisions], comparison_scope=scope),
         "rows": rows,
         "decisions": decisions,
+        "shadow_decisions": shadow,
+        "promotion_summary": promotion_gate.summarize_shadow(shadow),
+        "promotion_policy": promotion_gate.policy_document(),
     }
 
 
@@ -1302,6 +1326,8 @@ def summary_row(decision: Mapping[str, Any]) -> dict[str, Any]:
         "seller_input_fields": "|".join(decision.get("seller_input_fields") or []),
         "missing_required_fields": "|".join(decision.get("missing_required_fields") or []),
         "conflicting_fields": "|".join(decision.get("conflicting_fields") or []),
+        "input_planning_status": (decision.get("input_requirements") or {}).get("planning_status"),
+        "required_user_inputs": "|".join(i["field"] for i in (decision.get("input_requirements") or {}).get("required_user_inputs") or []),
     }
 
 

@@ -1,0 +1,6 @@
+scope,product_id,store_id,route_id,effective_date,effective_until,currency,quantity_unit,normal_price,holding_cost_per_unit_day,disposal_cost_per_unit,discount_rate,promotion_uplift,daily_demand,transfer_cost,transit_time_days,profile_source,note
+GLOBAL,,,,,,KRW,,,,,,,,,,SAMPLE_BUSINESS,SAMPLE only - explicit business currency; never auto-loaded
+STORE,,SAMPLE_STORE_A,,2026-07-01,2026-07-31,KRW,,,5,200,,,,,,SAMPLE_POLICY,SAMPLE only - storage and disposal policy within validity window
+PRODUCT,SAMPLE_PRODUCT,,,2026-07-01,2026-07-31,KRW,EA,1000,,,0.3,,,,,SAMPLE_PRICE,SAMPLE only - product price and discount policy; replace before use
+PRODUCT_STORE,SAMPLE_PRODUCT,SAMPLE_STORE_A,,2026-07-31,2026-07-31,KRW,EA,,,,,0.5,3,,,SAMPLE_DEMAND,SAMPLE only - dated demand and measured-effect input; USER_INPUT not observed data
+ROUTE,,,SAMPLE_ROUTE,2026-07-01,2026-07-31,KRW,,,,,,,,1800,0.1,SAMPLE_ROUTE_QUOTE,SAMPLE only - actual route data still wins
