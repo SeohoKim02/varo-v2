@@ -1,0 +1,5 @@
+﻿scope,product_id,store_id,normal_price,remaining_shelf_life_days,daily_demand,discount_rate,promotion_uplift,note
+PRODUCT,SAMPLE_PRODUCT_1,,4900.0,4.0,,,,SAMPLE: 상품 정상 판매가격·남은 판매 가능 기간(점포 공통이면 PRODUCT 한 행). 예시 값이며 기본값이 아님
+PRODUCT_STORE,SAMPLE_PRODUCT_1,SAMPLE_STORE_A,,,12.0,,,SAMPLE: 출발 점포 정상가 기준 하루 판매량(출고량 대리지표를 실제 값으로 대체)
+PRODUCT_STORE,SAMPLE_PRODUCT_1,SAMPLE_STORE_B,,,30.0,,,SAMPLE: 도착 점포 정상가 기준 하루 판매량
+PRODUCT,SAMPLE_PRODUCT_1,,,,,0.2,0.5,"SAMPLE: 할인 판매까지 비교할 때만(0.2=20% 할인, 0.5=할인 중 판매량 +50%)"
