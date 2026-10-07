@@ -1205,6 +1205,7 @@ def build_seller_loss_analysis(
     from services import seller_loss_inputs as seller_inputs
     from services import seller_business_profile as business_profile
     from services import seller_loss_promotion_gate as promotion_gate
+    from services import seller_shadow_outcomes
     from services.inventory_transition_service import build_inventory_baseline, calculate_inventory_transition
 
     data = {key: value for key, value in (uploaded_data or {}).items()}
@@ -1292,6 +1293,8 @@ def build_seller_loss_analysis(
         "shadow_decisions": shadow,
         "promotion_summary": promotion_gate.summarize_shadow(shadow),
         "promotion_policy": promotion_gate.policy_document(),
+        **({"seller_outcomes_validation": seller_shadow_outcomes.parse_seller_outcomes(data["seller_outcomes"])}
+           if "seller_outcomes" in data else {}),
     }
 
 

@@ -841,6 +841,7 @@ def ensure_recommendations(data: Dict[str, Any]) -> tuple[Dict[str, Any], str, D
 
 def build_v2_state(
     data: Dict[str, pd.DataFrame], *, detail_level: str = "core",
+    shadow_ledger_context: Mapping[str, Any] | None = None,
 ) -> Dict[str, object]:
     data, rec_source, candidate_info = ensure_recommendations(data)
     validation = validate_workbook_data(data)
@@ -855,13 +856,25 @@ def build_v2_state(
     result = run_analysis_pipeline(
         data, detail_level=detail_level, validation_report=validation,
     )
-    return {
+    state = {
         "validation": validation,
         "recommendations": result.recommendations,
         "pipeline_result": result.to_dict(),
         "recommendation_source": rec_source,
         "candidate_info": candidate_info,
     }
+    if shadow_ledger_context is not None:
+        # Explicit backend opt-in only. Local history/import failures are
+        # diagnostic information, never a change to recommendations or ranking.
+        from services.seller_shadow_ledger import record_pipeline_run
+        import sqlite3
+        try:
+            state["seller_shadow_ledger"] = record_pipeline_run(state, data, **dict(shadow_ledger_context))
+        except (ValueError, TypeError, OSError, sqlite3.Error) as exc:
+            state["seller_shadow_ledger"] = {"status": "ERROR", "error_type": type(exc).__name__,
+                "error_code": str(exc) if isinstance(exc, ValueError) else "LOCAL_LEDGER_UNAVAILABLE",
+                "production_action_applied": False}
+    return state
 
 
 def sort_recommendations(recommendations: List[Mapping[str, object]]) -> List[Dict[str, object]]:

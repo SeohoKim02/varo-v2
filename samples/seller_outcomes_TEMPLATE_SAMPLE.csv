@@ -1,0 +1,2 @@
+decision_id,decision_version,operator_action,execution_status,data_mode,currency,quantity_unit,recorded_at,executed_at,outcome_provenance,outcome_source,loss_basis,actual_sold_qty,actual_unsold_qty,actual_transfer_qty,actual_transfer_cost,actual_discount_rate,actual_revenue,actual_disposal_qty,actual_disposal_cost,actual_holding_cost,actual_realized_loss,actual_loss_debits,actual_loss_credits
+SAMPLE_REPLACE_WITH_EXPORTED_DECISION_ID,1,,NOT_EXECUTED,SAMPLE,,,2026-07-31T00:00:00+09:00,,MISSING,,,,,,,,,,,,,,

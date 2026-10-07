@@ -22,7 +22,7 @@ from services.column_aliases import (
 # aliases below so DQN workbooks can keep their original naming convention.
 REQUIRED_SHEETS = ("stores", "products", "inventory", "routes")
 OPTIONAL_SHEETS = ("dcs", "recommendations", "transport_modes", "config", "quality_check", "readme", "daily_sales_history",
-                   "seller_loss_inputs", "seller_business_profile")
+                   "seller_loss_inputs", "seller_business_profile", "seller_outcomes")
 SHEET_NAME_ALIASES = {
     "stores": ("stores", "store", "store_master", "점포", "점포목록"),
     "dcs": ("dcs", "dc", "distribution_centers", "distribution_center", "물류센터", "센터"),
@@ -43,6 +43,7 @@ SHEET_NAME_ALIASES = {
     # Values are validated there (never coerced here), so a bad sheet cannot stop the workbook from loading.
     "seller_loss_inputs": ("seller_loss_inputs", "판매자손실입력"),
     "seller_business_profile": ("seller_business_profile",),
+    "seller_outcomes": ("seller_outcomes",),
 }
 SAMPLE_FILENAME = "Varo_V2_네트워크_샘플.xlsx"
 
@@ -228,6 +229,7 @@ _IDENTIFIER_COLUMNS = {
                            "source_location_id", "target_location_id", "route_id"),
     "seller_business_profile": ("product_id", "store_id", "location_id", "source_store_id", "target_store_id",
                                 "source_location_id", "target_location_id", "route_id"),
+    "seller_outcomes": ("decision_id",),
 }
 
 
