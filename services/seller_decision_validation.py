@@ -350,7 +350,8 @@ def _reason_counts(results: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def suhyup_validation(data_root: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def suhyup_seller_decisions(data_root: Path) -> dict[str, Any]:
+    """Strict engine results for the 620 saved Suhyup candidates (real fields only); also read by action consistency."""
     from services.real_transport_enrichment import ROOT_ENV, enrich_real_transport
     from services.suhyup_algorithm_revalidation import _inventory_lookup, enrich_inventory_constraints
 
@@ -398,7 +399,15 @@ def suhyup_validation(data_root: Path) -> tuple[list[dict[str, Any]], dict[str, 
             target_need_cap=known(row["target_need_7d"], "PROXY", "median + 7 x outbound - stock", dataset="suhyup"),
         )
         results.append(evaluate_seller_decision(inp))
+    return {"candidates": candidates, "results": results, "matches": matches, "proxy_vehicles": proxy_vehicles,
+            "applied": applied, "executable_within_caps": executable_within_caps}
 
+
+def suhyup_validation(data_root: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    computed = suhyup_seller_decisions(data_root)
+    candidates, results, matches = computed["candidates"], computed["results"], computed["matches"]
+    proxy_vehicles, applied = computed["proxy_vehicles"], computed["applied"]
+    executable_within_caps = computed["executable_within_caps"]
     rows = [
         _row("suhyup", "S1", "transfer_cost", "Official-tariff transfer cost recomputed from canonical cost matrix, unit weights and vehicle mix equals the benchmark move_cost",
              len(candidates), "exact_matches", matches, len(candidates), "PASS" if matches == len(candidates) else "FAIL",

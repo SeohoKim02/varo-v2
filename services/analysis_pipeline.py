@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 import pandas as pd
 
+from services.action_consistency import CONTEXT_KEYS as ACTION_CONTEXT_KEYS, build_action_consistency
 from services.analysis_provenance import (
     build_greedy_provenance,
     build_vhs_provenance,
@@ -82,6 +83,8 @@ class PipelineResult:
     seller_loss_analysis: Dict[str, Any] = field(default_factory=dict)
     # Shared-feasibility Top-N plans next to the Varo Final Top-5; never replaces top5, ranks, actions or KPIs.
     shared_feasibility_selection: Dict[str, Any] = field(default_factory=dict)
+    # Canonical action records (recommendation / plan / execution kept apart); never replaces varo_action or Top-5.
+    action_consistency: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -342,6 +345,24 @@ def _shared_feasibility_selection(
     except Exception as exc:  # defensive isolation of the parallel selector (exercised by its tests)
         return {"status": "error", "error_type": type(exc).__name__, "message": str(exc),
                 "production_action_applied": False, "legacy_top_n_replaced": False, "modes": {}}
+
+
+def _action_consistency(
+    uploaded_data: Mapping[str, Any], recommendations: List[Dict[str, object]], result: PipelineResult,
+    pareto_selected_ids: List[str],
+) -> dict[str, Any]:
+    """Parallel canonical action contract; fault-isolated so it can never alter or break the production result."""
+    try:
+        return build_action_consistency(
+            recommendations, shared_feasibility=result.shared_feasibility_selection,
+            seller_loss=result.seller_loss_analysis, legacy_top_ids=[item.get("route_id") for item in result.top5],
+            pareto_selected_ids=pareto_selected_ids,
+            legacy_rule_connected="varo_hybrid_score.calculate_varo_hybrid_score" in result.connected_algorithms,
+            data_context={key: uploaded_data[key] for key in ACTION_CONTEXT_KEYS if key in uploaded_data},
+        )
+    except Exception as exc:  # defensive isolation of the parallel contract (exercised by its tests)
+        return {"status": "error", "error_type": type(exc).__name__, "message": str(exc),
+                "production_action_applied": False, "legacy_action_replaced": False, "records": []}
 
 
 def _route_type_for_row(row: pd.Series) -> str:
@@ -736,6 +757,9 @@ def run_analysis_pipeline(
     }
     if "services.pareto_service.select_pareto_routes" not in result.connected_algorithms:
         result.connected_algorithms.append("services.pareto_service.select_pareto_routes")
+    result.action_consistency = _action_consistency(
+        uploaded_data, standard_recommendations, result, list(pareto_production.get("selected_route_ids") or []),
+    )
     result.confidence_analysis = (
         confidence_provenance(candidates, confidence_removed_columns)
         if collect_details else {}
