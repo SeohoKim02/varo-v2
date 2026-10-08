@@ -31,6 +31,7 @@ from services.legacy_adapters.loader import (
 from services.recommendation_adapter import normalize_action, recommendations_from_dataframe
 from services.real_transport_enrichment import enrich_real_transport
 from services.seller_loss_engine import build_seller_loss_analysis
+from services.shared_feasibility_selection import build_shared_feasibility_analysis
 from services.v2_summaries import (
     V2_SUMMARY_FUNCTIONS,
     recommendation_reasons,
@@ -79,6 +80,8 @@ class PipelineResult:
     diagnostics: Dict[str, Any] = field(default_factory=dict)
     # Seller Loss Decision computed next to Varo Final; never changes recommendations, actions, ranks or KPIs.
     seller_loss_analysis: Dict[str, Any] = field(default_factory=dict)
+    # Shared-feasibility Top-N plans next to the Varo Final Top-5; never replaces top5, ranks, actions or KPIs.
+    shared_feasibility_selection: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -328,6 +331,17 @@ def _seller_loss_analysis(
     except Exception as exc:  # pragma: no cover - defensive isolation of the parallel engine
         return {"status": "error", "error_type": type(exc).__name__, "message": str(exc),
                 "legacy_action_replaced": False, "rows": []}
+
+
+def _shared_feasibility_selection(
+    uploaded_data: Mapping[str, Any], candidates: pd.DataFrame, top5: List[Dict[str, object]],
+) -> dict[str, Any]:
+    """Parallel shared-feasibility selection; fault-isolated so it can never alter or break the production result."""
+    try:
+        return build_shared_feasibility_analysis(uploaded_data, candidates, top5)
+    except Exception as exc:  # defensive isolation of the parallel selector (exercised by its tests)
+        return {"status": "error", "error_type": type(exc).__name__, "message": str(exc),
+                "production_action_applied": False, "legacy_top_n_replaced": False, "modes": {}}
 
 
 def _route_type_for_row(row: pd.Series) -> str:
@@ -664,6 +678,7 @@ def run_analysis_pipeline(
     result.seller_loss_analysis = _seller_loss_analysis(
         uploaded_data, analyzed_inventory, standard_recommendations, candidates,
     )
+    result.shared_feasibility_selection = _shared_feasibility_selection(uploaded_data, candidates, result.top5)
     result.vhs_analysis = (
         _vhs_analysis(candidates, runner, vhs_input_columns)
         if collect_details and not candidates.empty and "vhs" in candidates.columns else {}
