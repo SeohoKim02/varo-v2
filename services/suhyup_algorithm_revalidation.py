@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import time
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -168,11 +169,29 @@ def ordered_feasible_selection(frame: pd.DataFrame, order_columns: Sequence[str]
     return pd.DataFrame(selected)
 
 
-def lexicographic_milp(frame: pd.DataFrame) -> dict[str, Any]:
+def _stage_diagnostics(result: Any, elapsed_ms: float, options: Mapping[str, Any]) -> dict[str, Any]:
+    """Raw HiGHS outcome of one stage (read by services.milp_benchmark_integrity; never used for selection)."""
+    def number(name: str) -> float | None:
+        value = getattr(result, name, None)
+        return float(value) if value is not None and math.isfinite(float(value)) else None
+
+    return {
+        "status": int(result.status), "message": str(result.message),
+        "has_solution": result.x is not None, "objective": number("fun"),
+        "dual_bound": number("mip_dual_bound"), "mip_gap": number("mip_gap"),
+        "node_count": int(getattr(result, "mip_node_count", 0) or 0),
+        "elapsed_ms": round(elapsed_ms, 3), "options": dict(options),
+    }
+
+
+def lexicographic_milp(frame: pd.DataFrame, options: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Stage 1 max service, stage 2 min cost at that service. ``options`` adds HiGHS options (default: none)."""
+    solver_options = {"presolve": True, **dict(options or {})}
     rows = _records(frame.reset_index(drop=True))
     n = len(rows)
     if not n:
-        return {"stage1_status": None, "stage2_status": None, "selected": pd.DataFrame(), "optimal": False}
+        return {"stage1_status": None, "stage2_status": None, "selected": pd.DataFrame(), "optimal": False,
+                "diagnostics": {"candidate_count": 0, "stage1": None, "stage2": None, "options": solver_options}}
     qty = np.asarray([_number(row.get("recommended_qty")) for row in rows], dtype=float)
     cost = np.asarray([_number(row.get("move_cost") or row.get("estimated_cost")) for row in rows], dtype=float)
     constraint_rows: list[list[float]] = [[1.0] * n]
@@ -212,21 +231,38 @@ def lexicographic_milp(frame: pd.DataFrame) -> dict[str, Any]:
     constraints = LinearConstraint(matrix, np.asarray(lower), np.asarray(upper))
     bounds = Bounds(np.zeros(n), np.ones(n))
     integrality = np.ones(n)
-    stage1 = milp(c=-qty, integrality=integrality, bounds=bounds, constraints=constraints, options={"presolve": True})
+    started = time.perf_counter()
+    stage1 = milp(c=-qty, integrality=integrality, bounds=bounds, constraints=constraints, options=solver_options)
+    diagnostics: dict[str, Any] = {
+        "candidate_count": n, "options": solver_options,
+        "stage1": _stage_diagnostics(stage1, (time.perf_counter() - started) * 1000.0, solver_options), "stage2": None,
+    }
     if stage1.status != 0 or stage1.x is None:
-        return {"stage1_status": int(stage1.status), "stage2_status": None, "selected": pd.DataFrame(), "optimal": False}
+        return {"stage1_status": int(stage1.status), "stage2_status": None, "selected": pd.DataFrame(), "optimal": False,
+                "diagnostics": diagnostics}
     maximum_service = round(float(qty @ np.rint(stage1.x)), 8)
     service_row = qty.reshape(1, -1)
     stage2_constraints = [constraints, LinearConstraint(service_row, maximum_service - 1e-7, np.inf)]
     route_order = {value: rank for rank, value in enumerate(sorted(str(row.get("route_id") or "") for row in rows), start=1)}
-    deterministic_cost = cost + np.asarray([route_order[str(row.get("route_id") or "")] * 1e-7 for row in rows])
-    stage2 = milp(c=deterministic_cost, integrality=integrality, bounds=bounds, constraints=stage2_constraints, options={"presolve": True})
+    tie_break = np.asarray([route_order[str(row.get("route_id") or "")] * 1e-7 for row in rows])
+    deterministic_cost = cost + tie_break
+    started = time.perf_counter()
+    stage2 = milp(c=deterministic_cost, integrality=integrality, bounds=bounds, constraints=stage2_constraints, options=solver_options)
+    diagnostics["stage2"] = _stage_diagnostics(stage2, (time.perf_counter() - started) * 1000.0, solver_options)
+    diagnostics["stage1_service"] = maximum_service
     selected_indices = [index for index, value in enumerate(stage2.x if stage2.x is not None else []) if value > 0.5]
+    diagnostics["stage2_tie_break"] = round(float(tie_break[selected_indices].sum()), 9)
     selected = frame.reset_index(drop=True).iloc[selected_indices].copy()
     return {
         "stage1_status": int(stage1.status), "stage2_status": int(stage2.status),
         "selected": selected, "optimal": bool(stage1.status == 0 and stage2.status == 0),
+        "diagnostics": diagnostics,
     }
+
+
+def _milp_status_label(daily_status: Any) -> str:
+    """Comparison-row MILP status taken from the MILP daily row, never assumed (was hard-coded "optimal")."""
+    return "optimal" if str(daily_status) == "optimal" else "not_optimal"
 
 
 def _strategy_row(
@@ -463,6 +499,7 @@ def refresh_pareto_validation(data_root: Path, output_dir: Path) -> dict[str, An
             raise ValueError(f"Missing MILP daily row for {date}")
         milp_service = float(milp_daily.iloc[0]["service_qty"])
         milp_cost = float(milp_daily.iloc[0]["total_cost"])
+        milp_status = _milp_status_label(milp_daily.iloc[0].get("status"))
         pareto_daily_rows.append(_strategy_row(
             date,
             "Pareto",
@@ -483,7 +520,7 @@ def refresh_pareto_validation(data_root: Path, output_dir: Path) -> dict[str, An
         pareto_comparison_rows.append({
             "date": date,
             "strategy": "Pareto",
-            "milp_solver_status": "optimal",
+            "milp_solver_status": milp_status,
             "service_qty": service,
             "milp_service_qty": milp_service,
             "service_gap_units": milp_service - service,
@@ -609,7 +646,8 @@ def run_validation(data_root: Path, output_dir: Path, production_episodes: int =
         pareto_selected, pareto_result = pareto_operational_selection(day)
         selections["Pareto"] = pareto_selected
         for strategy, selected in selections.items():
-            status = "optimal" if strategy == "MILP" and milp_result["optimal"] else "feasible"
+            # a MILP run whose optimality was not proven is never labelled "feasible" or "optimal"
+            status = ("optimal" if milp_result["optimal"] else "not_optimal") if strategy == "MILP" else "feasible"
             extra = None
             if strategy == "Pareto":
                 extra = {
@@ -677,7 +715,7 @@ def run_validation(data_root: Path, output_dir: Path, production_episodes: int =
         daily_rows.append(_strategy_row(date, "DQN", day, selected, float(milp_daily["service_qty"]), "saved_model_forward"))
         dqn_row = next(row for row in daily_rows if row["date"] == date and row["strategy"] == "DQN")
         comparison_rows.append({
-            "date": date, "strategy": "DQN", "milp_solver_status": "optimal",
+            "date": date, "strategy": "DQN", "milp_solver_status": _milp_status_label(milp_daily["status"]),
             "service_qty": dqn_row["service_qty"], "milp_service_qty": milp_daily["service_qty"],
             "service_gap_units": milp_daily["service_qty"] - dqn_row["service_qty"],
             "cost": dqn_row["total_cost"], "milp_cost": milp_daily["total_cost"],

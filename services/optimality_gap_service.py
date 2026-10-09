@@ -541,6 +541,7 @@ def _milp_search(
         "nodes": int(getattr(result, "mip_node_count", 0) or 0), "prunes": 0,
         "upper_bound": upper_bound, "bound_reliable": upper_bound is not None,
         "solver_gap": _number(getattr(result, "mip_gap", None)),
+        "has_incumbent": result.x is not None, "time_limit_s": float(time_limit),
         "validation": reason,
         "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
     }
@@ -889,6 +890,13 @@ def run_optimality_gap(
             "original_recommendations_mutated": False,
         },
     }
+    # Parallel scope/status/gap contract; existing keys above keep their meaning (services.milp_benchmark_integrity).
+    try:
+        from services.milp_benchmark_integrity import app_gap_benchmark_integrity
+
+        result["benchmark_integrity"] = app_gap_benchmark_integrity(result)
+    except Exception as exc:  # fault-isolated: never breaks the existing gap result
+        result["benchmark_integrity"] = {"contract_status": "ERROR", "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
     _RESULT_CACHE[cache_key] = copy.deepcopy(result)
     _RESULT_CACHE.move_to_end(cache_key)
     while len(_RESULT_CACHE) > _CACHE_LIMIT:
