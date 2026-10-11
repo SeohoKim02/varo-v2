@@ -1,0 +1,5 @@
+﻿network_id,source_id,target_id,allowed,effective_from,evidence_class,evidence_source,product_id,product_group,effective_to,verification_status,transport_mode,temperature_requirement,route_capacity_qty,quantity_unit,cost_basis,cost_value,currency,note
+SAMPLE_NETWORK,SAMPLE_CENTER_A,SAMPLE_CENTER_B,true,2026-07-01,VERIFIED_OPERATOR_INPUT,SAMPLE_CONTRACT,,,2026-12-31,VERIFIED,,FROZEN,,,,,,SAMPLE: A→B 모든 상품 운송 허용(냉동). 실제 계약·운영 규칙으로 바꾸세요
+SAMPLE_NETWORK,SAMPLE_CENTER_A,SAMPLE_CENTER_B,true,2026-07-01,VERIFIED_OPERATOR_INPUT,SAMPLE_CONTRACT,SAMPLE_PRODUCT_1,,,VERIFIED,,,400.0,BOX,FIXED_PER_TRIP,150000.0,KRW,"SAMPLE: 상품 단위 허용·1회 최대 400 BOX·회당 계약 운임 150,000원"
+SAMPLE_NETWORK,SAMPLE_CENTER_B,SAMPLE_CENTER_C,false,2026-07-15,VERIFIED_OPERATOR_INPUT,SAMPLE_POLICY,,,,VERIFIED,,,,,,,,SAMPLE: B→C 운송 금지(7/15부터). 금지 규칙은 거리 정보보다 우선
+SAMPLE_NETWORK,SAMPLE_CENTER_C,SAMPLE_CENTER_A,true,2026-07-01,USER_ESTIMATE,SAMPLE_INTERVIEW,,,,ESTIMATE,,,,,,,,SAMPLE: 확인되지 않은 추정 허용 — STRICT 검증에는 쓰이지 않음
