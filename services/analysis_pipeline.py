@@ -33,6 +33,7 @@ from services.recommendation_adapter import normalize_action, recommendations_fr
 from services.real_transport_enrichment import enrich_real_transport
 from services.seller_loss_engine import build_seller_loss_analysis
 from services.shared_feasibility_selection import build_shared_feasibility_analysis
+from services.target_need_contract import build_operational_evidence_analysis
 from services.v2_summaries import (
     V2_SUMMARY_FUNCTIONS,
     recommendation_reasons,
@@ -85,6 +86,8 @@ class PipelineResult:
     shared_feasibility_selection: Dict[str, Any] = field(default_factory=dict)
     # Canonical action records (recommendation / plan / execution kept apart); never replaces varo_action or Top-5.
     action_consistency: Dict[str, Any] = field(default_factory=dict)
+    # Target need contract and operator evidence intake (P1-C); never changes recommendations, caps, plans or actions.
+    operational_evidence: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -345,6 +348,15 @@ def _shared_feasibility_selection(
     except Exception as exc:  # defensive isolation of the parallel selector (exercised by its tests)
         return {"status": "error", "error_type": type(exc).__name__, "message": str(exc),
                 "production_action_applied": False, "legacy_top_n_replaced": False, "modes": {}}
+
+
+def _operational_evidence(uploaded_data: Mapping[str, Any], candidates: pd.DataFrame) -> dict[str, Any]:
+    """Parallel target need contract and evidence intake; fault-isolated so it can never alter or break the result."""
+    try:
+        return build_operational_evidence_analysis(uploaded_data, candidates)
+    except Exception as exc:  # defensive isolation of the parallel contract (exercised by its tests)
+        return {"status": "error", "error_type": type(exc).__name__, "message": str(exc),
+                "production_action_applied": False, "legacy_top_n_replaced": False, "candidates": []}
 
 
 def _action_consistency(
@@ -700,6 +712,7 @@ def run_analysis_pipeline(
         uploaded_data, analyzed_inventory, standard_recommendations, candidates,
     )
     result.shared_feasibility_selection = _shared_feasibility_selection(uploaded_data, candidates, result.top5)
+    result.operational_evidence = _operational_evidence(uploaded_data, candidates)
     result.vhs_analysis = (
         _vhs_analysis(candidates, runner, vhs_input_columns)
         if collect_details and not candidates.empty and "vhs" in candidates.columns else {}

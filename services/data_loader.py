@@ -22,7 +22,12 @@ from services.column_aliases import (
 # aliases below so DQN workbooks can keep their original naming convention.
 REQUIRED_SHEETS = ("stores", "products", "inventory", "routes")
 OPTIONAL_SHEETS = ("dcs", "recommendations", "transport_modes", "config", "quality_check", "readme", "daily_sales_history",
-                   "seller_loss_inputs", "seller_business_profile", "seller_outcomes")
+                   "seller_loss_inputs", "seller_business_profile", "seller_outcomes",
+                   "operational_route_evidence", "operational_demand_evidence", "operational_inventory_evidence")
+# Optional operator evidence sheets (services.target_need_contract intake).  An unreadable one is kept as a marker frame
+# so the intake reports VALIDATION_ERROR while the rest of the workbook loads and is analysed as before.
+OPERATIONAL_EVIDENCE_SHEETS = ("operational_route_evidence", "operational_demand_evidence", "operational_inventory_evidence")
+LOAD_ERROR_COLUMN = "__load_error__"
 SHEET_NAME_ALIASES = {
     "stores": ("stores", "store", "store_master", "점포", "점포목록"),
     "dcs": ("dcs", "dc", "distribution_centers", "distribution_center", "물류센터", "센터"),
@@ -44,6 +49,9 @@ SHEET_NAME_ALIASES = {
     "seller_loss_inputs": ("seller_loss_inputs", "판매자손실입력"),
     "seller_business_profile": ("seller_business_profile",),
     "seller_outcomes": ("seller_outcomes",),
+    "operational_route_evidence": ("operational_route_evidence", "운영경로근거"),
+    "operational_demand_evidence": ("operational_demand_evidence", "운영수요근거"),
+    "operational_inventory_evidence": ("operational_inventory_evidence", "운영재고근거"),
 }
 SAMPLE_FILENAME = "Varo_V2_네트워크_샘플.xlsx"
 
@@ -230,6 +238,9 @@ _IDENTIFIER_COLUMNS = {
     "seller_business_profile": ("product_id", "store_id", "location_id", "source_store_id", "target_store_id",
                                 "source_location_id", "target_location_id", "route_id"),
     "seller_outcomes": ("decision_id",),
+    "operational_route_evidence": ("source_id", "target_id", "product_id"),
+    "operational_demand_evidence": ("location_id", "product_id"),
+    "operational_inventory_evidence": ("location_id", "product_id"),
 }
 
 
@@ -530,6 +541,9 @@ def load_excel_data(
                     with _suppress_excel_style_warnings():
                         loaded[key] = _clean_columns(pd.read_excel(excel, sheet_name=sheet))
                 except Exception as exc:
+                    if key in OPERATIONAL_EVIDENCE_SHEETS:
+                        loaded[key] = pd.DataFrame({LOAD_ERROR_COLUMN: [f"{type(exc).__name__}: {exc}"]})
+                        continue
                     raise DataLoadError("엑셀 데이터를 읽는 중 오류가 발생했습니다.") from exc
         result = normalize_loaded_data(loaded, collect_report=return_report)
         if return_report:
