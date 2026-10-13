@@ -181,6 +181,9 @@ def _normalize_products(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_inventory(df: pd.DataFrame) -> pd.DataFrame:
+    # Metadata only: retain the original columns so the shadow semantics path can
+    # distinguish a supplied observation from a compatibility alias. No values change.
+    df.attrs.setdefault("sales_input_columns", tuple(df.columns))
     df = _ensure_alias(df, "store_id", ("node_id",))
     df = _ensure_alias(df, "product_id", ("item_id",))
     df = _ensure_alias(df, "stock_qty", ("current_stock", "quantity", "inventory_qty", "stock"))

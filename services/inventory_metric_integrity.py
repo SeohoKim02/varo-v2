@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date, timedelta
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -1663,6 +1663,392 @@ FIELD_INVENTORY = (
 )
 
 
+# --------------------------------------------------------------------------------------- T4-B normalization (shadow)
+
+SEMANTICS_MODES = ("LEGACY", "VALIDATED")
+# Names describe roles; the evidence still travels in the existing SalesSignal.
+NORMALIZED_ROLES = {
+    "daily_retail_sales": (OBSERVED_RETAIL_SALES, DAILY_QUANTITY, 1),
+    "weekly_retail_sales": (OBSERVED_RETAIL_SALES, WINDOW_SUM, 7),
+    "monthly_retail_sales": (OBSERVED_RETAIL_SALES, WINDOW_SUM, 30),
+    "daily_outbound": (OBSERVED_OUTBOUND_FLOW, DAILY_QUANTITY, 1),
+    "weekly_outbound": (OBSERVED_OUTBOUND_FLOW, WINDOW_SUM, 7),
+    "monthly_outbound": (OBSERVED_OUTBOUND_FLOW, WINDOW_SUM, 30),
+    "average_daily_sales": (OBSERVED_RETAIL_SALES, DAILY_MEAN, None),
+    "average_daily_outbound": (OBSERVED_OUTBOUND_FLOW, DAILY_MEAN, None),
+    "forecast_daily_demand": (FORECAST_DEMAND, DAILY_MEAN, None),
+    "forecast_7day_demand": (FORECAST_DEMAND, FORECAST_SUM, 7),
+    "unknown_quantity": (UNKNOWN_SIGNAL, PERIOD_UNDECLARED, None),
+}
+_NEGATIVE_LABELS = {"DOCUMENTED_RETURN": RETURN_DOCUMENTED, "ADJUSTMENT": SETTLEMENT_ADJUSTMENT,
+                    "SOURCE_ANOMALY": SOURCE_ERROR, "UNKNOWN_NEGATIVE": NEGATIVE_UNKNOWN}
+
+
+def _signal_record(signal: SalesSignal, *, status: str, reasons: Sequence[str] = (),
+                   value: Any = None, state: str | None = None) -> dict[str, Any]:
+    """Extend, do not duplicate, the T4 SalesSignal serialization."""
+    return {**signal.to_dict(), "value": _finite(value),
+            "period": {"aggregation": signal.aggregation, "days": signal.period_days,
+                       "start": signal.observation_start, "end": signal.observation_end},
+            "source": signal.source_lineage, "validation_status": status,
+            "day_state": state or ("NULL_VALUE" if signal.quantity is None else
+                                   OBSERVED_ZERO if signal.quantity == 0 else OBSERVED_VALUE),
+            "reason_codes": sorted(set(reasons))}
+
+
+def _declared_signal(row: Mapping[str, Any], name: str, *, source: str) -> tuple[SalesSignal, str, list[str]]:
+    """Read explicit row-level meaning/coverage. A sales header alone is not evidence."""
+    text = f"{_text(row.get(name + '_semantics'))} {_text(row.get(name + '_provenance'))}".lower()
+    role = name if name in NORMALIZED_ROLES else _text(row.get(name + "_semantics")).lower()
+    if role in NORMALIZED_ROLES:
+        kind, aggregation, days = NORMALIZED_ROLES[role]
+    elif "outbound" in text or DAILY_PROXY_SEMANTICS in text:
+        kind = OBSERVED_OUTBOUND_FLOW
+        aggregation, days = (DAILY_QUANTITY, 1) if name in ("sales_qty", "outbound_qty") else FIELD_PERIODS.get(name, (PERIOD_UNDECLARED, None))
+    elif any(word in text for word in ("retail", "pos_sales", "observed_sales")):
+        kind = OBSERVED_RETAIL_SALES
+        aggregation, days = FIELD_PERIODS.get(name, (PERIOD_UNDECLARED, None))
+    else:
+        kind, aggregation, days = UNKNOWN_SIGNAL, PERIOD_UNDECLARED, None
+    explicit_days = _finite(row.get(name + "_period_days"))
+    if explicit_days is not None and explicit_days > 0 and explicit_days.is_integer():
+        days = int(explicit_days)
+        if aggregation == PERIOD_UNDECLARED:
+            aggregation = DAILY_QUANTITY if days == 1 else WINDOW_SUM
+    if _text(row.get(name + "_aggregation")) == CALENDAR_MONTH_SUM:
+        aggregation, days = CALENDAR_MONTH_SUM, None
+    start = _day(row.get(name + "_observation_start"))
+    end = _day(row.get(name + "_observation_end"))
+    as_of = _day(row.get("as_of_date", row.get("snapshot_date", row.get("date"))))
+    if aggregation == DAILY_QUANTITY:
+        end = end or as_of
+        start = start or end
+    reasons = []
+    if start and end:
+        calendar_days = (end - start).days + 1
+        if calendar_days <= 0 or (days is not None and days != calendar_days):
+            reasons.append("PERIOD_NOT_ALIGNED")
+        elif days is None:
+            days = calendar_days
+    observed = _finite(row.get(name + "_observed_days"))
+    observed_days = int(observed) if observed is not None and observed >= 0 and observed.is_integer() else None
+    if aggregation == DAILY_QUANTITY and end and _finite(row.get(name)) is not None:
+        observed_days = 1
+    complete = bool(days and observed_days == days)
+    if name + "_is_complete_observation" in row:
+        declared = row[name + "_is_complete_observation"]
+        complete = complete and (declared is True or _text(declared).lower() == "true")
+    negative = _text(row.get(name + "_negative_semantics")) or NO_NEGATIVES
+    negative = _NEGATIVE_LABELS.get(negative, negative)
+    if negative not in NEGATIVE_SEMANTICS:
+        negative = NEGATIVE_UNKNOWN
+    quantity = _finite(row.get(name))
+    if quantity is not None and quantity < 0 and negative == NO_NEGATIVES:
+        negative = NEGATIVE_UNKNOWN
+    unit = _text(row.get(name + "_quantity_unit")) or _text(row.get("quantity_unit")) or None
+    signal = SalesSignal(dataset_id=_text(row.get("dataset_id")) or None,
+                         location_id=_text(row.get("store_id", row.get("location_id"))) or None,
+                         product_id=_text(row.get("product_id")) or None, quantity=quantity,
+                         signal_type=kind, aggregation=aggregation, period_days=days,
+                         observation_start=_iso(start), observation_end=_iso(end), as_of_date=_iso(as_of),
+                         quantity_unit=unit, observed_days=observed_days, is_complete_observation=complete,
+                         negative_semantics=negative, semantics_evidence=DECLARED_SEMANTICS if kind != UNKNOWN_SIGNAL else NO_EVIDENCE,
+                         provenance=_text(row.get(name + "_provenance")), source_lineage=source)
+    if kind == UNKNOWN_SIGNAL:
+        reasons.append("SIGNAL_TYPE_UNKNOWN")
+    if days is None or start is None or end is None:
+        reasons.append("PERIOD_UNDECLARED")
+    if name in ("sales_7d", "sales_30d", "sales_30") and days != FIELD_PERIODS[name][1]:
+        reasons.append("PERIOD_NOT_ALIGNED")
+    if as_of is None:
+        reasons.append("AS_OF_UNDECLARED")
+    elif end and end > as_of:
+        reasons.append("FUTURE_DATA_EXCLUDED")
+    if unit is None:
+        reasons.append("UNIT_UNKNOWN")
+    if observed_days is None or observed_days == 0:
+        reasons.append("NO_OBSERVATION")
+    if observed_days is not None and days is not None and observed_days > days:
+        reasons.append("OBSERVED_DAYS_EXCEED_PERIOD")
+    if aggregation in (WINDOW_SUM, CALENDAR_MONTH_SUM) and not complete:
+        reasons.append("PARTIAL_OBSERVATION")
+    if quantity is None:
+        reasons.append("SALES_MISSING")
+    if quantity is not None and quantity < 0 and negative not in NETTABLE_NEGATIVES:
+        reasons.append("NEGATIVE_UNRESOLVED")
+    state = _text(row.get(name + "_day_state"))
+    if state in (NOT_CARRIED, NOT_SELLABLE, "MISSING_RECORD", "OUTSIDE_PERIOD", "UNKNOWN"):
+        reasons.append(state)
+    return signal, state, reasons
+
+
+def _history_window(history: pd.DataFrame, row: Mapping[str, Any], *, days: int,
+                    signal_type: str) -> dict[str, Any] | None:
+    """Select an exact business/location/product series before the existing T4 window reducer."""
+    end = _day(row.get("as_of_date", row.get("snapshot_date", row.get("date"))))
+    if end is None or history.empty:
+        return None
+    selected = history.copy()
+    for key, alternate in (("product_id", "product_id"), ("location_id", "store_id"),
+                           ("dataset_id", "dataset_id"), ("business_id", "business_id")):
+        expected = _text(row.get(alternate, row.get(key)))
+        column = key if key in selected else alternate
+        if column not in selected or not expected:
+            if key != "business_id" or column in selected or expected:
+                return None  # no unkeyed histories are trusted
+        else:
+            selected = selected[selected[column].map(_text) == expected]
+    if "signal_type" not in selected or "quantity_unit" not in selected:
+        return None
+    selected = selected[selected["signal_type"] == signal_type]
+    expected_unit = _text(row.get("quantity_unit")) or None
+    records = selected.rename(columns={"sales_qty": "quantity"}).to_dict("records")
+    declared_states = Counter(_text(r.get("day_state")) for r in records)
+    for record in records:
+        if _text(record.get("day_state")) in ("MISSING_RECORD", "NULL_VALUE", "UNKNOWN", "OUTSIDE_PERIOD"):
+            record["quantity"] = None  # evidence is unavailable, never an invented zero
+    negative_kinds = {_NEGATIVE_LABELS.get(_text(r.get("negative_semantics")), _text(r.get("negative_semantics")))
+                      for r in records if (_finite(r.get("quantity")) or 0) < 0
+                      and _day(r.get("date")) is not None
+                      and end - timedelta(days=days - 1) <= _day(r["date"]) <= end}
+    negative = next(iter(negative_kinds)) if len(negative_kinds) == 1 else NEGATIVE_UNKNOWN
+    window = aggregate_daily_window(records, window_end=end, window_days=days, as_of=end,
+                                  dataset_id=_text(row.get("dataset_id")),
+                                  location_id=_text(row.get("store_id", row.get("location_id"))),
+                                  product_id=_text(row.get("product_id")), signal_type=signal_type,
+                                  quantity_unit=_text(row.get("quantity_unit")) or None,
+                                  negative_semantics=negative if negative_kinds else NO_NEGATIVES,
+                                  semantics_evidence=history.attrs.get("semantics_evidence", DECLARED_SEMANTICS),
+                                  provenance="keyed daily observations with declared semantics", source_lineage="daily_sales_history")
+    if expected_unit is not None and window["quantity_unit"] != expected_unit:
+        window.update(quantity=None, daily_rate=None, gate_status=UNIT_MISMATCH,
+                      reason_codes=sorted(set(window["reason_codes"] + ["UNIT_MISMATCH"])))
+    window["declared_day_states"] = dict(declared_states)
+    in_period = [r for r in records if _day(r.get("date")) is not None
+                 and _day(window["window_start"]) <= _day(r["date"]) <= end]
+    stockout_zero = sum(_finite(r.get("quantity")) == 0 and (_finite(r.get("stockout_hours")) or 0) > 0 for r in in_period)
+    window["stockout_zero_days"] = stockout_zero
+    window["availability_basis"] = "OBSERVED_STOCKOUT_HOURS" if "stockout_hours" in selected else "UNAVAILABLE"
+    if stockout_zero:
+        window["reason_codes"] = sorted(set(window["reason_codes"] + ["ZERO_DURING_STOCKOUT"]))
+        window["gate_status"] = combine_gate(window["gate_status"], VALID_WITH_LIMITATION)
+    return window
+
+
+def normalize_sales_signals(input_data: Mapping[str, Any], *, semantics_mode: str = "LEGACY") -> dict[str, Any]:
+    """Normalize in isolation. LEGACY replays current adapters; VALIDATED never fills sales with another meaning.
+
+    Returns records, not production DataFrames. Nothing is fed back into the legacy pipeline.
+    Aggregate uploads must declare their dates, observed days, unit and semantics.
+    """
+    if semantics_mode not in SEMANTICS_MODES:
+        raise ValueError(f"unsupported semantics_mode: {semantics_mode}")
+    upload = _inventory_frame(input_data)
+    if upload is None:
+        return {"semantics_mode": semantics_mode, "rows": [], "legacy_input_audit": []}
+    from services.legacy_adapters.data_adapter import prepare_legacy_data
+    legacy = prepare_legacy_data(input_data)["inventory"]
+    raw_columns = upload.attrs.get("sales_input_columns", tuple(upload.columns))
+    origins = resolve_loader_aliases(raw_columns)
+    audit = [{"field": name, **info} for name, info in origins.items()]
+    rows = []
+    history = input_data.get("daily_sales_history")
+    for position, row in enumerate(upload.to_dict("records")):
+        signals = {}
+        for name in list(NORMALIZED_ROLES) + ["sales_qty", "sales_30d", "sales_30", "sales_7d", "avg_daily_sales", "outbound_qty"]:
+            if name not in row:
+                continue
+            origin = origins.get(name, {}).get("raw_source_column", name)
+            signal, state, reasons = _declared_signal(row, name, source=f"inventory.{origin}")
+            if origin != name:
+                reasons.append("ALIAS_COPY_ACROSS_PERIODS")
+            status = "DATA_UNAVAILABLE" if reasons else PROXY_ONLY if signal.signal_type != OBSERVED_RETAIL_SALES else VALID
+            signals[name] = _signal_record(signal, status=status, reasons=reasons,
+                                           value=signal.quantity if not reasons else None, state=state or None)
+        # History takes precedence, but only complete windows can claim a 7/30-day total.
+        windows = {}
+        if isinstance(history, pd.DataFrame):
+            for kind, prefix in ((OBSERVED_RETAIL_SALES, "retail"), (OBSERVED_OUTBOUND_FLOW, "outbound")):
+                for days in (7, 30):
+                    window = _history_window(history, row, days=days, signal_type=kind)
+                    if window is None:
+                        continue
+                    windows[f"{prefix}_{days}d"] = window
+                    usable = window["gate_status"] not in (INVALID_VALUE, UNIT_MISMATCH, NOT_COMPARABLE) and window["quantity_unit"] is not None
+                    full = usable and window["observed_days"] == days and window["is_complete_observation"]
+                    role = ("weekly_" if days == 7 else "monthly_") + ("retail_sales" if prefix == "retail" else "outbound")
+                    signals[role] = _signal_record(window_signal(window), status=window["gate_status"] if full else "PARTIAL_PERIOD",
+                                                   reasons=window["reason_codes"], value=window["quantity"] if full else None)
+        retail = [s for s in signals.values() if s["signal_type"] == OBSERVED_RETAIL_SALES and s["value"] is not None]
+        retail.sort(key=lambda s: s["observed_days"] or 0, reverse=True)
+        total30 = next((s for s in retail if s["aggregation"] == WINDOW_SUM and s["period_days"] == 30
+                        and s["observed_days"] == 30 and s["is_complete_observation"]), None)
+        total7 = next((s for s in retail if s["aggregation"] == WINDOW_SUM and s["period_days"] == 7
+                       and s["observed_days"] == 7 and s["is_complete_observation"]), None)
+        rate = None
+        rate_basis = None
+        if retail:
+            chosen = retail[0]
+            if chosen["aggregation"] in PER_DAY_AGGREGATIONS:
+                rate = chosen["value"]
+            elif chosen["observed_days"]:
+                rate = chosen["value"] / chosen["observed_days"]
+            rate_basis = chosen
+        elif "retail_30d" in windows:
+            win = windows["retail_30d"]
+            if win["gate_status"] not in (INVALID_VALUE, UNIT_MISMATCH, NOT_COMPARABLE) and win["quantity_unit"] is not None:
+                rate, rate_basis = win["daily_rate"], {**win, "source": "daily_sales_history", "validation_status": PARTIAL_PERIOD}
+        if "retail_30d" in windows and windows["retail_30d"]["gate_status"] in (INVALID_VALUE, UNIT_MISMATCH, NOT_COMPARABLE):
+            # Do not hide an unresolved return/unit defect with a shorter, apparently clean window.
+            rate, rate_basis = None, None
+        if rate is not None and rate_basis is not None:
+            mean = SalesSignal(dataset_id=_text(row.get("dataset_id")) or None,
+                               location_id=_text(row.get("store_id", row.get("location_id"))) or None,
+                               product_id=_text(row.get("product_id")) or None, quantity=rate,
+                               signal_type=OBSERVED_RETAIL_SALES, aggregation=DAILY_MEAN,
+                               period_days=rate_basis.get("period_days"), observed_days=rate_basis.get("observed_days"),
+                               observation_start=rate_basis.get("observation_start", rate_basis.get("window_start")),
+                               observation_end=rate_basis.get("observation_end", rate_basis.get("window_end")),
+                               as_of_date=_text(row.get("as_of_date", row.get("snapshot_date", row.get("date")))),
+                               quantity_unit=_text(row.get("quantity_unit")) or None,
+                               is_complete_observation=rate_basis.get("is_complete_observation"),
+                               negative_semantics=rate_basis.get("negative_semantics", NO_NEGATIVES),
+                               semantics_evidence=DECLARED_SEMANTICS,
+                               provenance="observed total / actual observed days (or declared observed daily mean)",
+                               source_lineage=rate_basis.get("source", "daily_sales_history"))
+            signals["average_daily_sales"] = _signal_record(mean, status=rate_basis.get("validation_status", VALID_WITH_LIMITATION), value=rate)
+        outbound_window = windows.get("outbound_30d")
+        if outbound_window and outbound_window["daily_rate"] is not None and outbound_window["quantity_unit"] is not None and outbound_window["gate_status"] not in (INVALID_VALUE, UNIT_MISMATCH, NOT_COMPARABLE):
+            flow_mean = replace(window_signal(outbound_window), aggregation=DAILY_MEAN,
+                                quantity=outbound_window["daily_rate"])
+            signals["average_daily_outbound"] = _signal_record(flow_mean, status=PROXY_ONLY, value=flow_mean.quantity,
+                                                               reasons=outbound_window["reason_codes"])
+        legacy_row = legacy.iloc[position].to_dict() if position < len(legacy) else {}
+        values = {"sales_30d": total30["value"] if total30 else None,
+                  "sales_7d": total7["value"] if total7 else None, "avg_daily_sales": _round(rate)}
+        if semantics_mode == "LEGACY":
+            values = {key: _finite(legacy_row.get(key)) for key in values}
+        rows.append({"store_id": _text(row.get("store_id", row.get("location_id"))),
+                     "product_id": _text(row.get("product_id")), "dataset_id": _text(row.get("dataset_id")),
+                     "business_id": _text(row.get("business_id")),
+                     "as_of_date": _text(row.get("as_of_date", row.get("snapshot_date", row.get("date")))),
+                     "quantity_unit": _text(row.get("quantity_unit")) or None, **values,
+                     "signals": signals, "windows": windows, "retail_30d": total30,
+                     "rate_basis": rate_basis, "legacy_values": {key: _finite(legacy_row.get(key)) for key in values},
+                     "reason_codes": [] if total30 else ["INSUFFICIENT_SALES_EVIDENCE"],
+                     "production_values_applied": False})
+    return {"semantics_mode": semantics_mode, "rows": rows, "legacy_input_audit": audit}
+
+
+def _validated_row_turnover(normalized: Mapping[str, Any], row: Mapping[str, Any],
+                            input_data: Mapping[str, Any]) -> dict[str, Any]:
+    total = normalized.get("retail_30d")
+    unavailable = {"turnover_value": None, "turnover_status": TURNOVER_UNAVAILABLE,
+                   "turnover_classification": "UNKNOWN", "reason_codes": ["INSUFFICIENT_SALES_EVIDENCE"],
+                   "quantity_unit": normalized["quantity_unit"], "period": None, "source": None}
+    if not total:
+        return unavailable
+    if total["quantity_unit"] == "normalized_sales_amount":
+        return {**unavailable, "reason_codes": ["NON_PHYSICAL_UNIT"]}
+    history = input_data.get("inventory_history")
+    if not isinstance(history, pd.DataFrame):
+        return {**unavailable, "reason_codes": ["NO_SNAPSHOT"], "period": total["period"]}
+    selected = history
+    if "quantity_unit" not in selected:
+        return {**unavailable, "reason_codes": ["INVENTORY_UNIT_UNVERIFIABLE"]}
+    for key, expected in (("dataset_id", normalized["dataset_id"]), ("location_id", normalized["store_id"]),
+                           ("product_id", normalized["product_id"]), ("business_id", _text(row.get("business_id")))):
+        column = "store_id" if key == "location_id" and key not in selected else key
+        if not expected or column not in selected:
+            if key != "business_id" or column in selected or expected:
+                return {**unavailable, "reason_codes": ["INVENTORY_KEY_UNVERIFIABLE"]}
+        else:
+            selected = selected[selected[column].map(_text) == expected]
+    snapshots = selected.rename(columns={"stock_qty": "quantity"}).to_dict("records")
+    inventory = average_inventory(snapshots, period_start=total["period"]["start"],
+                                  period_end=total["period"]["end"], as_of=normalized["as_of_date"],
+                                  dataset_id=normalized["dataset_id"], quantity_unit=normalized["quantity_unit"])
+    if inventory["snapshot_count"] != 30 or inventory["quantity_unit"] != total["quantity_unit"]:
+        return {**unavailable, "reason_codes": inventory["reason_codes"] or ["UNIT_MISMATCH"],
+                "inventory": inventory, "period": total["period"]}
+    signal = SalesSignal(**{k: total[k] for k in SalesSignal.__dataclass_fields__})
+    # signal_window deliberately disallows negative singleton inputs; documented net history was already vetted.
+    window = {**signal_window(signal), "gate_status": total["validation_status"], "reason_codes": total["reason_codes"]}
+    result = physical_turnover(window, inventory, end_stock=row.get("stock_qty"))
+    if result["days_of_supply"] is not None and math.isinf(result["days_of_supply"]):
+        result["days_of_supply"] = "INF"  # same JSON-safe convention as the existing T4 rows
+    if result["turnover_value"] is None or result["days_of_supply_status"] not in CLASSIFIABLE_DOS:
+        result["turnover_classification"] = "UNKNOWN"
+    return {**result, "inventory": inventory, "quantity_unit": total["quantity_unit"],
+            "period": total["period"], "source": total["source"]}
+
+
+def build_sales_normalization_analysis(input_data: Mapping[str, Any], analyzed: pd.DataFrame | None = None,
+                                       candidates: pd.DataFrame | None = None) -> dict[str, Any]:
+    """T4-B fields in the existing integrity contract. Never replaces its T4 fields or production values."""
+    normalized = normalize_sales_signals(input_data, semantics_mode="VALIDATED")
+    upload = _inventory_frame(input_data)
+    raw = upload.to_dict("records") if upload is not None else []
+    turns = [_validated_row_turnover(n, r, input_data) for n, r in zip(normalized["rows"], raw)]
+    abc_rows = [{"product_id": n["product_id"], "period_sales": n["sales_30d"],
+                 "unit_price": r.get("unit_price"), "unit_cost": r.get("unit_cost"),
+                 "signal_type": OBSERVED_RETAIL_SALES, "quantity_unit": n["quantity_unit"]}
+                for n, r in zip(normalized["rows"], raw)]
+    scope = {(n["dataset_id"], r.get("business_id"), n["quantity_unit"],
+              str(n["retail_30d"]["period"]) if n["retail_30d"] else None) for n, r in zip(normalized["rows"], raw)}
+    abc = validated_abc(abc_rows) if len(scope) <= 1 else {"basis": ABC_NOT_VERIFIABLE, "grades": {},
+                                                         "gate_status": NOT_COMPARABLE, "reason_codes": ["ABC_SCOPE_MISMATCH"]}
+    abc["display_basis"] = "QUANTITY_BASED_ABC" if abc["basis"] == ABC_QUANTITY_PROXY else abc["basis"]
+    by_key = {(n["store_id"], n["product_id"]): (n, t) for n, t in zip(normalized["rows"], turns)}
+    key_counts = Counter((n["store_id"], n["product_id"]) for n in normalized["rows"])
+    by_key = {key: value for key, value in by_key.items() if key_counts[key] == 1}
+    impacts = []
+    for cand in candidates.to_dict("records") if isinstance(candidates, pd.DataFrame) else []:
+        n, turn = by_key.get((_text(cand.get("source_id")), _text(cand.get("product_id"))), ({}, {}))
+        destination, _ = by_key.get((_text(cand.get("target_id")), _text(cand.get("product_id"))), ({}, {}))
+        comparable_destination = bool(n and destination) and all(destination.get(key) == n.get(key)
+                                    for key in ("dataset_id", "business_id", "quantity_unit", "as_of_date"))
+        destination_rate = destination.get("avg_daily_sales") if comparable_destination else None
+        impacts.append({"route_id": _text(cand.get("route_id")), "product_id": _text(cand.get("product_id")),
+                        "source_id": _text(cand.get("source_id")), "target_id": _text(cand.get("target_id")),
+                        "legacy_action": _text(cand.get("varo_action")), "validated_action": None,
+                        "status": "VALIDATED_ACTION_UNAVAILABLE", "validated_canonical_action": None,
+                        "destination_daily_demand": destination_rate,
+                        "matching_status": "DESTINATION_DEMAND_AVAILABLE" if destination_rate is not None else "DESTINATION_DEMAND_UNAVAILABLE",
+                        "reason_codes": sorted(set(n.get("reason_codes", []) + turn.get("reason_codes", [])
+                                                   + ["DOWNSTREAM_INPUTS_NOT_FULLY_VALIDATED"])),
+                        "production_action_applied": False})
+    risk = []
+    safety = []
+    matching = []
+    forecast = []
+    for pos, (n, row) in enumerate(zip(normalized["rows"], raw)):
+        legacy_row = analyzed.iloc[pos].to_dict() if isinstance(analyzed, pd.DataFrame) and pos < len(analyzed) else {}
+        risk.append({"risk_score": _finite(legacy_row.get("disposal_risk_score")),
+                     "risk_basis": DISPOSAL_MEANING, "risk_signal_type": (n["rate_basis"] or {}).get("signal_type", UNKNOWN_SIGNAL),
+                     "risk_score_source": "unchanged legacy analyzer (not a validated recomputation)",
+                     "risk_is_probability": False, "risk_validation_status": "HEURISTIC_ONLY_NOT_RECOMPUTED",
+                     "validated_risk_score": None, "actual_disposal_probability": None, "expected_disposal_qty": None})
+        safety.append({"validated_daily_mean": n["avg_daily_sales"], "mean_evidence": n["rate_basis"],
+                       "configured_demand_std": _finite(row.get("demand_std")),
+                       "legacy_fallback": "0.3 * legacy daily mean when demand_std absent",
+                       "formula_changed": False, "validated_safety_stock": None})
+        matching.append({"status": "DESTINATION_DEMAND_UNAVAILABLE", "validated_score": None,
+                         "source_sales_as_destination": False, "reason_codes": ["DESTINATION_KEYED_SALES_REQUIRED"]})
+        forecast.append({"retail_sales_history_available": bool(n.get("retail_30d")),
+                         "signal_evidence": n["rate_basis"], "outbound_as_retail_history": False,
+                         "forecast_model_changed": False, "aggregate_fallback": n["rate_basis"] is not None
+                         and n["rate_basis"].get("source") != "daily_sales_history"})
+    return {"semantics_mode": "LEGACY", "normalization_version": "T4-B.1",
+            "legacy_input_audit": normalized["legacy_input_audit"],
+            "validated_sales_signals": normalized["rows"], "validated_turnover": turns,
+            "validated_abc": abc, "validated_risk_basis": risk, "validated_action_impact": impacts,
+            "validated_safety_stock_input": safety, "validated_matching_input": matching,
+            "validated_route_matching_input": [{k: a[k] for k in ("route_id", "source_id", "target_id", "product_id",
+                                                                  "matching_status", "destination_daily_demand")} for a in impacts],
+            "validated_forecast_input": forecast, "production_replacement_ready": False}
+
+
 # ------------------------------------------------------------------------------------------------ pipeline field (§32)
 
 
@@ -1815,6 +2201,7 @@ def build_inventory_metric_integrity(uploaded_data: Mapping[str, Any], analyzed_
     }
     return {
         **base,
+        **build_sales_normalization_analysis(uploaded_data, analyzed_inventory, candidates),
         "sales_fields": {name: {k: v for k, v in item.items()} for name, item in fields.items()},
         "rows": rows,
         "counts": counts,
