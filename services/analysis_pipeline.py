@@ -16,6 +16,7 @@ from services.analysis_provenance import (
 from services.data_validator import ValidationReport, validate_workbook_data
 from services.demand_forecast_router import DAILY_SALES_HISTORY_KEY, route_demand_forecast
 from services.dqn_guard import dqn_exclusion_report, is_dqn_column, strip_dqn_columns
+from services.inventory_metric_integrity import build_inventory_metric_integrity
 from services.legacy_adapters.data_adapter import (
     add_cluster_context,
     build_candidate_frame,
@@ -88,6 +89,8 @@ class PipelineResult:
     action_consistency: Dict[str, Any] = field(default_factory=dict)
     # Target need contract and operator evidence intake (P1-C); never changes recommendations, caps, plans or actions.
     operational_evidence: Dict[str, Any] = field(default_factory=dict)
+    # Sales semantics / turnover / inventory risk metric integrity (T4); never replaces legacy metrics, grades or actions.
+    inventory_metric_integrity: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -357,6 +360,17 @@ def _operational_evidence(uploaded_data: Mapping[str, Any], candidates: pd.DataF
     except Exception as exc:  # defensive isolation of the parallel contract (exercised by its tests)
         return {"status": "error", "error_type": type(exc).__name__, "message": str(exc),
                 "production_action_applied": False, "legacy_top_n_replaced": False, "candidates": []}
+
+
+def _inventory_metric_integrity(
+    uploaded_data: Mapping[str, Any], analyzed_inventory: pd.DataFrame, candidates: pd.DataFrame,
+) -> dict[str, Any]:
+    """Parallel sales-semantics / turnover integrity; fault-isolated so it can never alter or break the result."""
+    try:
+        return build_inventory_metric_integrity(uploaded_data, analyzed_inventory, candidates)
+    except Exception as exc:  # defensive isolation of the parallel contract (exercised by its tests)
+        return {"status": "error", "error_type": type(exc).__name__, "message": str(exc),
+                "production_action_applied": False, "legacy_metrics_replaced": False, "rows": []}
 
 
 def _action_consistency(
@@ -713,6 +727,7 @@ def run_analysis_pipeline(
     )
     result.shared_feasibility_selection = _shared_feasibility_selection(uploaded_data, candidates, result.top5)
     result.operational_evidence = _operational_evidence(uploaded_data, candidates)
+    result.inventory_metric_integrity = _inventory_metric_integrity(uploaded_data, analyzed_inventory, candidates)
     result.vhs_analysis = (
         _vhs_analysis(candidates, runner, vhs_input_columns)
         if collect_details and not candidates.empty and "vhs" in candidates.columns else {}
