@@ -144,6 +144,50 @@ Streamlit Community Cloud에서 `app_v2.py`를 진입점으로 지정하고 루�
 - 제한 탐색 기반 Gap은 동일 후보와 적용 가능한 제약 안의 비교값이다.
 - Cloud 로컬 파일은 영구 저장소로 간주하지 않는다.
 
+## 최종 의사결정 병렬 계약 v0.1
+
+`PipelineResult.final_decision_integration`은 기존 추천/순위/Top-5/KPI와 독립적인 결과다.
+UI/production action을 교체하지 않으며, DB 기록이나 outcome를 자동 생성하지 않는다.
+원본 inventory의 dataset/business/점포/상품 키를 모두 포함하고, inventory에 없는
+상품 master도 점포 NULL 행으로 남긴다. 같은 상품의 다른 점포는 별도 결과다.
+중복 재고 입력은 합산하지 않고 충돌로, 중복 route는 수량을 중복 합산하지 않고 검토 대상으로 표시한다.
+
+`products`는 상품-점포 요약, `routes`는 경로별 상세, `coverage`는 누락/중복 검사다.
+각 결과에 mode/status, legacy/canonical/operator 행동, 선택 경로, 계획량/계산 운송비,
+Seller Loss 비교 범위/예상 손실/근거/승격 상태, 부족 입력, lineage와 한국어 설명이 있다.
+`display`는 향후 UI용 상품·상황·추천/계획·예상 효과·확인사항·근거 상태를 제공한다.
+정렬 키는 상태와 식별자의 사전식 순서이며 새로운 가중치나 Varo Final 점수가 아니다.
+
+최종 추천은 기존 Seller Loss Engine과 Promotion Gate가 허용한 요청 범위 안에서만 가능하다.
+이동 추천에는 실제 제약 계획과 운영 경로 근거가 추가로 필요하다. PROXY 계획, legacy 할인,
+금액 기반 최소손실 전략은 서로 다르다. 보류(HOLD)를 정상판매(NORMAL_SALE)로 바꾸지 않는다.
+SCENARIO/TEST 비교 결과는 실제 운영 추천과 분리되며 production_action_applied는 항상 False다.
+모르는 손실/통화/단위/실제 성과는 NULL이다. 여러 경로의 손실을 상품 손실로 합산하지 않는다.
+
+후보 없는 상품도 기존 엔진/입력 Planner/Profile로 비교 문맥을 확인한다.
+결정 수량이나 도착점이 없으면 재고 전체를 임의로 결정 수량으로 삼지 않는다.
+필요한 업로드 문맥과 판매자 입력을 구분해 안내하고, 이미 제공된 유효 입력은 다시 묻지 않는다.
+Validated sales를 우선 확인하며 출고량을 실제 소매 판매로 간주하지 않는다.
+예측/ABC/회전율/폐기위험은 근거와 제한을 함께 표시하는 참고 정보다. 폐기위험은 확률이 아니다.
+
+```powershell
+python -m services.final_decision_integration_validation
+python -m services.release_validation --mode quick
+python -m services.release_validation --mode full
+```
+
+통합 검증은 수협 31일에서 새 필드만 비활성화한 기존 결과와 모든 이전 필드를 비교한다.
+새 `_FINAL_DECISION_INTEGRATION_<시각>_<고유값>` 폴더에 상품/경로/부족입력/비교상태/설명/
+summary/validation 보고서를 저장하며, 기존 결과나 Golden을 덮어쓰지 않는다.
+현재 pipeline은 재고와 7일 수요 부족량을, 별도 offline benchmark는 중앙 재고와 출고 proxy를
+포함한 source surplus/target need를 사용한다. 서로 다른 cap 계약이므로 계획량을 동일하다고 가정하지 않는다.
+T5 QUICK에도 통합 테스트를 추가했으며, 기존 G1 보호 검사는 유지한다.
+G1은 기존 `PROTECTED_PATHS`에 등록된 파일의 변경만 검사한다. `analysis_pipeline.py`는
+현재 그 목록에 없으므로 병렬 연결 변경만으로 G1이 BLOCKED가 되지는 않는다.
+Git dirty 상태는 별도로 기록하며, G1 통과도 변경 승인이나 운영 승인을 의미하지 않는다.
+검증 통과와 production 교체 승인은 별개다. 실제 판매·수요·가격·정책·운영 근거·outcome 확보와
+사용자 승인 후에만 별도 UI/production 연결 작업을 진행한다.
+
 ## T5 통합 회귀 검증 (로컬 전용)
 
 ```powershell

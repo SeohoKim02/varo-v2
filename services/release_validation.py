@@ -29,6 +29,7 @@ QUICK_TESTS = (
     "test_seller_loss_input_requirements.py", "test_seller_business_profile.py",
     "test_seller_loss_promotion_gate.py", "test_seller_shadow_ledger.py", "test_sales_input_normalization.py",
     "test_canonical_data.py", "test_canonical_integrity.py", "test_target_need_contract.py", "test_release_validation.py",
+    "test_final_decision_integration.py",
 )
 RESULT_FILES = ("release_validation_summary.json", "release_validation_matrix.csv", "release_validation_failures.csv",
                 "golden_regression_by_day.csv", "golden_regression_by_strategy.csv", "validation_runtime.csv",

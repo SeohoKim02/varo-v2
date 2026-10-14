@@ -17,6 +17,7 @@ from services.data_validator import ValidationReport, validate_workbook_data
 from services.demand_forecast_router import DAILY_SALES_HISTORY_KEY, route_demand_forecast
 from services.dqn_guard import dqn_exclusion_report, is_dqn_column, strip_dqn_columns
 from services.inventory_metric_integrity import build_inventory_metric_integrity
+from services.final_decision_integration import safe_build_final_decision_integration
 from services.legacy_adapters.data_adapter import (
     add_cluster_context,
     build_candidate_frame,
@@ -91,6 +92,8 @@ class PipelineResult:
     operational_evidence: Dict[str, Any] = field(default_factory=dict)
     # Sales semantics / turnover / inventory risk metric integrity (T4); never replaces legacy metrics, grades or actions.
     inventory_metric_integrity: Dict[str, Any] = field(default_factory=dict)
+    # UI-ready product/route decisions next to all existing production fields; never applied automatically.
+    final_decision_integration: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -596,6 +599,7 @@ def run_analysis_pipeline(
     collect_details = detail_level == "full"
     result = PipelineResult(excluded_dqn_artifacts=dqn_exclusion_report())
     if not uploaded_data:
+        result.final_decision_integration = safe_build_final_decision_integration(uploaded_data, result.to_dict())
         return result
 
     validation = validation_report or validate_workbook_data(uploaded_data)
@@ -603,6 +607,7 @@ def run_analysis_pipeline(
     if validation.has_errors:
         result.status = "validation_error"
         result.diagnostics = {"status": "validation_error", "validation": validation.to_dict()}
+        result.final_decision_integration = safe_build_final_decision_integration(uploaded_data, result.to_dict())
         return result
 
     try:
@@ -610,6 +615,7 @@ def run_analysis_pipeline(
     except ValueError as exc:
         result.status = "adapter_error"
         result.warnings.append(str(exc))
+        result.final_decision_integration = safe_build_final_decision_integration(uploaded_data, result.to_dict())
         return result
 
     source_dqn_columns = [
@@ -883,6 +889,7 @@ def run_analysis_pipeline(
         ],
         "algorithm_errors": list(runner.technical_errors),
     }
+    result.final_decision_integration = safe_build_final_decision_integration(uploaded_data, result.to_dict(), analyzed_inventory)
     return result
 
 
@@ -913,10 +920,12 @@ def build_v2_state(
     data, rec_source, candidate_info = ensure_recommendations(data)
     validation = validate_workbook_data(data)
     if validation.has_errors:
+        empty_result = PipelineResult(status="validation_error")
+        empty_result.final_decision_integration = safe_build_final_decision_integration(data, empty_result.to_dict())
         return {
             "validation": validation,
             "recommendations": [],
-            "pipeline_result": PipelineResult(status="validation_error").to_dict(),
+            "pipeline_result": empty_result.to_dict(),
             "recommendation_source": rec_source,
             "candidate_info": candidate_info,
         }
