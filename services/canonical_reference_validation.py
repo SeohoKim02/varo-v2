@@ -17,7 +17,7 @@ from services.legacy_adapters._local_modules.heuristic_optimizer import add_heur
 from services.vhs_score_engine import apply_auto_vhs
 
 
-def validate_reference(root=DATA_ROOT):
+def validate_reference(root=DATA_ROOT, *, output_path=None):
     root = Path(root)
     folder = root / DATASETS["suhyup"]
     snapshot = pd.read_parquet(folder / "processed/canonical_inventory_snapshot.parquet")
@@ -107,7 +107,9 @@ def validate_reference(root=DATA_ROOT):
               "aggregate": summary, "dqn": "existing seed17 saved-model forward only; no training or model writes",
               "identifier_crosswalks": crosswalks,
               "limitations": "Same existing proxy-constrained benchmark; does not promote proxies to actual unmet demand."}
-    (folder / "results/canonical_reference_regression.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    # The release runner redirects only the report; all comparison logic is unchanged.
+    target = Path(output_path) if output_path is not None else folder / "results/canonical_reference_regression.json"
+    target.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return result
 
 

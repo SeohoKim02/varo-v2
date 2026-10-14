@@ -143,3 +143,59 @@ Streamlit Community Cloud에서 `app_v2.py`를 진입점으로 지정하고 루�
 - 부분 이동 시 기존 예상 절감액을 비례 추정하지 않는다.
 - 제한 탐색 기반 Gap은 동일 후보와 적용 가능한 제약 안의 비교값이다.
 - Cloud 로컬 파일은 영구 저장소로 간주하지 않는다.
+
+## T5 통합 회귀 검증 (로컬 전용)
+
+```powershell
+python -m services.release_validation --mode quick
+python -m services.release_validation --mode full
+# 선택 사항: 저장된 M5 v2 개발 선택을 그대로 사용한 final 재실행
+python -m services.release_validation --mode full --rerun-m5
+```
+
+기본 데이터 경로는 `C:\VARO_V2_REAL_DATA`이며 `--data-root`로 변경할 수 있다. 원본,
+canonical, 이전 검증 보고서와 수협 seed 17 / 300 episodes 저장 모델이 필요하다.
+모델은 `outputs/dqn`의 기존 결과 JSON이 가리키는 파일을 읽기만 한다. 재학습하지 않는다.
+일부 기존 단위 테스트의 작은 학습 fixture는 별도의 임시 출력 폴더에서 실행된다.
+
+QUICK은 핵심 계약·입력·행동·판매자 검증 테스트, 필수 reference/model 존재 여부,
+고정 지문, Git 보호/공백 검사다. 수협 실제 benchmark는 **NOT_RUN**이며 FULL의 대체가 아니다.
+FULL은 전체 pytest, canonical 수협 bridge, 31일 × 6전략 Golden, T1/T2/T3,
+T4-B 실제 일별 재생, 판매자 입력·planner·profile·promotion 및 격리 SQLite 검증을 실행한다.
+P1/P1-B/P1-C와 M5/외부 예측은 고정된 기존 보고서·CSV 지문 및 기존 unit test로 검사한다.
+이 항목은 **REUSED_FROZEN_RESULT**이며 실제 benchmark 재실행으로 표시하지 않는다.
+M5 추가 실행도 새 보고서 폴더의 frozen selection 복사본을 사용하며 기존 선택을 재학습/재선정하지 않는다.
+
+실행 순서는 환경/보호 지문 → 테스트 → canonical → Golden → T1/T2/T3 →
+P1 고정 결과 → T4-B → 판매자 → 예측 → 실행 후 보호 지문이다.
+QUICK의 보호 해시 검사도 OneDrive 파일 내려받기 상태에 따라 시간이 걸린다.
+FULL은 전체 테스트만 기존 환경에서 약 6분이며 데이터 재생·파일 검사 시간이 추가된다.
+각 실행의 실제 시간은 `validation_runtime.csv`에 기록한다. 측정하지 않은 메모리는 NULL이다.
+
+결과는 새 `_RELEASE_VALIDATION_<시각>_<고유값>` 폴더에만 저장된다.
+summary/matrix/failures, 날짜·전략별 Golden 비교, runtime, reference_integrity,
+release_readiness 및 검증기 목록/상세 로그를 생성한다. 기존 폴더 덮어쓰기는 거부한다.
+실제 데이터와 보고서를 Git/CI에 업로드하지 않는다.
+
+`services/release_reference_manifest.json`은 T5 도입 당시 기존 기준의 SHA-256,
+Golden schema/날짜/전략, 저장 모델 지문을 등록한 읽기 전용 목록이다. 실행 중 갱신 기능은 없다.
+기준 변경은 기존 보존 → 신규 결과 별도 생성 → 차이 전수 검토 → 근거 검증 →
+사용자 승인 → 별도 버전 등록 순서로만 한다. hash만 등록하며 원시 데이터는 포함하지 않는다.
+숫자는 계획 이동량/추정 운송비/예상 절감이며 실제 판매·지출·확정 절감이 아니다.
+규칙 기반 폐기 위험 점수는 폐기 확률이 아니다.
+
+FAIL은 계산/기준 변경, BLOCKED는 필수 입력·모델·보호 코드 승인 부족,
+ENVIRONMENT_ERROR는 파일 잠금/읽기 실패로 구분한다. NOT_RUN/INSUFFICIENT_DATA는 PASS로 세지 않는다.
+실데이터가 없으면 전체 회귀 성공을 주장하지 않는다. 실패해도 독립 검증은 계속하고,
+Golden 실패는 최종 회귀 FAIL/출시 BLOCKED로 남긴다. 대표 실패 30건과 전체 실패 수를 기록한다.
+T2 G1 Git 보호 검사는 계산 회귀와 별도 항목이며 기존 검증기의 기준은 완화하지 않는다.
+
+OneDrive cloud-only/잠금 파일은 사용자가 동기화 상태를 확인해야 한다. 검증기가 캐시 폴더나
+`.git`를 삭제/수정하지 않는다. 기존 모델·DB·canonical·archive는 전후 SHA-256으로 확인하고,
+읽지 않는 raw 파일은 크기/수정 시각으로 보호한다(전체 raw 내용 재검증은 아니다).
+운영 SQLite 대신 관리된 임시 SQLite를 쓴다.
+
+코드 회귀 안전성, 실제 운영 근거, Seller 실제 적용, 시연 준비도를 별도로 판정한다.
+STRICT_ACTUAL cap/소매판매 근거/실제 outcome가 부족하므로 테스트 통과는 운영 승인이 아니다.
+production action은 이번 검증으로 교체되지 않는다. 최종 통합·추천 교체 승인·UI 최종 수정·
+제출 전에 FULL을 실행하고, 변경 근거와 Golden 영향 검토 후 사용자 승인을 받아야 한다.
