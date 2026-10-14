@@ -46,6 +46,22 @@ def apply_global_styles() -> None:
             background: var(--varo-bg);
             color: var(--varo-text);
         }}
+        section[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] {{ display: none !important; }}
+        [data-testid="stHeader"] {{ display: none !important; }}
+        .st-key-site_header {{ border-bottom: 1px solid var(--varo-line); padding-bottom: .7rem; margin-bottom: 1.2rem; }}
+        .st-key-site_header .stButton button {{ border: none !important; background: transparent !important; box-shadow: none !important; color: var(--varo-text) !important; }}
+        .st-key-brand_home button {{ font-size: 1.55rem !important; font-weight: 850 !important; padding-left: 0 !important; letter-spacing: -.04em; }}
+        .st-key-brand_home button p {{ font-size: 2rem !important; font-weight: 850 !important; color: var(--varo-accent) !important; margin: 0; line-height: 1.1; }}
+        .st-key-site_header [data-testid="stPopover"] button {{ border-radius: 7px; box-shadow: none; min-height: 2.6rem; }}
+        .st-key-site_header [data-testid="stHorizontalBlock"] {{ flex-wrap: nowrap !important; }}
+        .st-key-site_header [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {{ flex: 1 1 0 !important; min-width: 0 !important; }}
+        .st-key-site_header [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {{ flex: 0 0 140px !important; width: 140px !important; min-width: 140px !important; }}
+        .st-key-site_header [data-testid="stPopover"] button p {{ white-space: nowrap !important; }}
+        @media (max-width: 700px) {{
+            .st-key-site_header [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap !important; }}
+            .st-key-site_header [data-testid="stColumn"] {{ flex: 1 1 115px !important; min-width: 0 !important; width: auto !important; }}
+            .st-key-site_header [data-testid="stColumn"]:first-child {{ flex: 1 1 160px !important; }}
+        }}
         section[data-testid="stSidebar"],
         section[data-testid="stSidebar"] > div,
         [data-testid="stSidebarContent"],
@@ -153,7 +169,7 @@ def apply_global_styles() -> None:
         .stApp .stButton button,
         .stApp .stDownloadButton button {{
             min-height: 2.62rem;
-            white-space: nowrap;
+            white-space: normal;
         }}
         .stApp [data-testid="stVerticalBlockBorderWrapper"] {{
             background: #ffffff;
@@ -464,7 +480,7 @@ def apply_global_styles() -> None:
             min-height: 620px;
             border: 1px solid #dce6f2;
             border-radius: var(--varo-radius-card);
-            background: radial-gradient(circle at 52% 46%, #ffffff 0, #f7faff 58%, #eff5fc 100%);
+            background: #f8fbff;
             overflow: hidden;
         }}
         .v2-network-placeholder {{
@@ -475,23 +491,24 @@ def apply_global_styles() -> None:
             text-align: center;
             padding: 1rem;
         }}
-        .v2-network-svg {{ display: block; width: 100%; height: 570px; margin-top: 0; }}
+        .v2-network-viewport {{ max-width: 100%; overflow-x: auto; }}
+        .v2-network-svg {{ display: block; width: 100%; min-width: 800px; height: 640px; margin-top: 0; }}
         .v2-network-svg text {{ font-family: inherit; fill: var(--varo-text); }}
         .v2-network-svg .node-label {{
-            font-size: 14px;
+            font-size: 20px;
             font-weight: 780;
             paint-order: stroke;
             stroke: rgba(255, 255, 255, 0.92);
             stroke-width: 2.4px;
             stroke-linejoin: round;
         }}
-        .v2-network-svg .dc-label {{ font-size: 16.4px; font-weight: 820; }}
+        .v2-network-svg .dc-label {{ font-size: 18px; font-weight: 820; }}
         .v2-network-svg .node-type {{ font-size: 10.5px; fill: var(--varo-muted); }}
-        .v2-network-svg .inventory-status-text {{ font-size: 9.6px; font-weight: 820; }}
-        .v2-network-svg .inventory-product {{ font-size: 10.8px; font-weight: 760; fill: #344154; }}
-        .v2-network-svg .inventory-stock {{ font-size: 10.4px; font-weight: 760; }}
-        .v2-network-svg .inventory-movement {{ font-size: 9.4px; fill: #46566a; }}
-        .v2-network-svg .inventory-state-change {{ font-size: 9.2px; font-weight: 720; fill: #46566a; }}
+        .v2-network-svg .inventory-status-text {{ font-size: 13px; font-weight: 820; }}
+        .v2-network-svg .inventory-product {{ font-size: 18px; font-weight: 760; fill: #344154; }}
+        .v2-network-svg .inventory-stock {{ font-size: 17px; font-weight: 760; }}
+        .v2-network-svg .inventory-movement {{ font-size: 17px; font-weight: 760; fill: #46566a; }}
+        .v2-network-svg .inventory-state-change {{ font-size: 12px; font-weight: 720; fill: #46566a; }}
         .v2-network-svg .compact-stock {{ font-size: 8.5px; fill: #596574; }}
         .v2-network-svg .dc-node-id {{ font-size: 10px; font-weight: 720; fill: #6b570c; }}
         .v2-network-svg .dc-node-work {{ font-size: 10px; font-weight: 760; fill: #594608; }}
@@ -691,15 +708,15 @@ def apply_global_styles() -> None:
         .v3-result-list {{ display: grid; gap: 0.08rem; }}
         .v3-result-row {{
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 0.7rem;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 0.28rem;
             align-items: center;
             padding: 0.72rem 0;
             border-bottom: 1px solid #edf1f6;
         }}
         .v3-result-row:last-child {{ border-bottom: 0; }}
         .v3-result-row small {{ color: var(--varo-muted); }}
-        .v3-result-row strong {{ color: var(--varo-text); font-size: 0.96rem; text-align: right; }}
+        .v3-result-row strong {{ color: var(--varo-text); font-size: 1.15rem; text-align: left; overflow-wrap: anywhere; }}
         .v3-strategy-card {{ min-height: 230px; position: relative; overflow: hidden; }}
         .v3-strategy-card::before {{
             content: "";
@@ -736,7 +753,35 @@ def apply_global_styles() -> None:
             color: #344154 !important;
             font-weight: 700 !important;
         }}
+        .st-key-seller_summary [data-testid="stMetricValue"] {{ font-size: 1.6rem; }}
+        [class*="st-key-seller_scenario_form"] [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; }}
+        [class*="st-key-seller_scenario_form"] [data-testid="stColumn"] {{ min-width: min(240px, 100%); }}
+        .st-key-seller_strategy_cards [data-testid="stMetricValue"],
+        .st-key-seller_compare_strategy_cards [data-testid="stMetricValue"],
+        .st-key-seller_history_strategy_cards [data-testid="stMetricValue"],
+        .st-key-seller_scenario_strategy_cards [data-testid="stMetricValue"] {{
+            font-size: 1.15rem; white-space: normal; overflow-wrap: anywhere;
+        }}
+        [data-testid="stMetricLabel"] {{ white-space: normal; overflow-wrap: anywhere; }}
         @media (max-width: 1200px) {{
+            .st-key-seller_filters [data-testid="stHorizontalBlock"],
+            .st-key-seller_compare_filters [data-testid="stHorizontalBlock"],
+            .st-key-seller_history_filters [data-testid="stHorizontalBlock"],
+            .st-key-seller_summary [data-testid="stHorizontalBlock"],
+            .st-key-seller_strategy_cards [data-testid="stHorizontalBlock"],
+            .st-key-seller_compare_strategy_cards [data-testid="stHorizontalBlock"],
+            .st-key-seller_history_strategy_cards [data-testid="stHorizontalBlock"],
+            .st-key-seller_scenario_strategy_cards [data-testid="stHorizontalBlock"],
+            .st-key-simulation_history_workspace [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap !important; }}
+            .st-key-seller_filters [data-testid="stColumn"],
+            .st-key-seller_compare_filters [data-testid="stColumn"],
+            .st-key-seller_history_filters [data-testid="stColumn"],
+            .st-key-seller_summary [data-testid="stColumn"] {{ flex: 1 1 240px !important; min-width: 0 !important; }}
+            .st-key-seller_strategy_cards [data-testid="stColumn"],
+            .st-key-seller_compare_strategy_cards [data-testid="stColumn"],
+            .st-key-seller_history_strategy_cards [data-testid="stColumn"],
+            .st-key-seller_scenario_strategy_cards [data-testid="stColumn"] {{ flex: 1 1 270px !important; min-width: 0 !important; }}
+            .st-key-simulation_history_workspace [data-testid="stColumn"] {{ flex: 1 1 100% !important; min-width: 0 !important; }}
             .st-key-simulation_workspace [data-testid="stHorizontalBlock"],
             .st-key-history_workspace [data-testid="stHorizontalBlock"],
             .st-key-settings_grid [data-testid="stHorizontalBlock"] {{
@@ -806,9 +851,7 @@ def apply_global_styles() -> None:
             .v2-detail-row {{ grid-template-columns: 1fr; gap: 0.2rem; }}
             .v2-recommendation-info {{ grid-template-columns: 1fr; }}
             .v2-network-shell {{ min-height: 360px; }}
-            .v2-network-svg {{ height: 360px; }}
-            .v2-network-svg .node-label {{ font-size: 11.4px; }}
-            .v2-network-svg .dc-label {{ font-size: 12.6px; }}
+            .v2-network-svg {{ height: 500px; }}
             .v2-sim-route-summary {{ grid-template-columns: 1fr; }}
             .v2-sim-steps {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
             .stTabs [data-baseweb="tab-list"] {{

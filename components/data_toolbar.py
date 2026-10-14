@@ -89,16 +89,56 @@ def _render_feedback() -> None:
     pending_validation = st.session_state.get("pending_varo_validation")
     if load_error or validation_error:
         st.error(load_error or validation_error)
+        if st.session_state.get("varo_data"):
+            st.warning("새 파일을 적용하지 못했습니다. 화면에는 이전에 정상 적용한 데이터가 유지됩니다.")
+        st.caption("파일·시트·필수 열을 확인하고 파일을 다시 선택하세요. 설정에서 상세 검증 결과를 확인할 수 있습니다.")
     elif pending_validation and getattr(pending_validation, "has_errors", False):
         st.error("데이터를 적용할 수 없습니다.")
     elif st.session_state.get("data_apply_message"):
         st.success(st.session_state["data_apply_message"])
+        contract = (st.session_state.get("varo_pipeline_result") or {}).get("final_decision_integration") or {}
+        summary = contract.get("summary") or {}
+        if summary:
+            st.caption(f"{st.session_state.get('uploaded_filename') or '적용 파일'} · 상품 {summary.get('unique_products', 0):,}개 · "
+                       f"상품·점포 결과 {summary.get('product_location_count', 0):,}개 · 전체 상품 분석 완료")
 
 
 def render_data_source_controls(key_prefix: str = "data_source") -> None:
     """Render the existing upload/sample flow inside a product page."""
     _render_load_controls(key_prefix)
     _render_feedback()
+
+
+def render_home_analysis_inputs() -> None:
+    """Upload then explicitly analyze, using the existing load/apply contract."""
+    from services.data_application import load_and_apply
+    active = bool(st.session_state.get("varo_data"))
+    if active:
+        st.caption(f"현재 결과: {st.session_state.get('uploaded_filename') or '불러온 데이터'}")
+    with st.expander("데이터 업로드 · 분석 실행", expanded=not active):
+        uploaded = st.file_uploader("분석할 엑셀 파일", type=["xlsx"], key="home_source_uploader")
+        pending = st.session_state.get("_home_pending_upload")
+        if uploaded is not None:
+            identity = (getattr(uploaded, "file_id", None), uploaded.name, getattr(uploaded, "size", None))
+            if not pending or pending.get("identity") != identity:
+                pending = {"identity": identity, "name": uploaded.name, "content": uploaded.getvalue(),
+                           "signature": st.session_state.get("data_signature")}
+                st.session_state["_home_pending_upload"] = pending
+        if pending and uploaded is None:
+            st.caption(f"선택한 파일: {pending['name']}")
+        controls = st.columns(2, gap="small")
+        if controls[0].button("분석 실행", type="primary", key="home_analyze", disabled=not pending, width="stretch"):
+            if _run_with_load_status(lambda callback: load_and_apply(
+                st.session_state, pending["content"], pending["name"], "업로드된 추천 결과", progress_callback=callback,
+            )):
+                st.session_state.pop("_home_pending_upload", None)
+                st.rerun()
+        if controls[1].button("샘플로 시작", key="home_sample", width="stretch"):
+            if _run_with_load_status(_load_sample):
+                st.rerun()
+        if active and pending:
+            st.caption("선택한 파일은 ‘분석 실행’을 누르면 반영됩니다. 그전까지 기존 결과를 유지합니다.")
+        _render_feedback()
 
 
 def render_quick_data_bar() -> None:

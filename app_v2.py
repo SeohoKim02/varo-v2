@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from components.navigation import render_app_shell
+from components.navigation import _restore_inputs, render_app_shell
 from router import render_current_page
 from styles import apply_global_styles
 
@@ -66,14 +66,11 @@ def initialize_session_state() -> None:
         "home_sim_run_nonce": 0,
         "simulation_history_last_key": None,
         "strategy_dqn_view": None,
-        "simulation_node_filter": "전체 센터/점포",
-        "simulation_product_filter": "전체 상품",
-        "strategy_product_filter": "전체 상품",
-        "strategy_node_filter": "전체 센터/점포",
         "settings_saved": False,
         "settings_default_episodes": 80,
         "settings_default_learning_rate": 0.001,
         "settings_default_candidate_count": 20,
+        "navigation_history": [],
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -88,8 +85,9 @@ def initialize_session_state() -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="VARO V2", page_icon="V2", layout="wide", initial_sidebar_state="expanded",
+        page_title="VARO V2", page_icon="V2", layout="wide", initial_sidebar_state="collapsed",
     )
+    _restore_inputs()
     initialize_session_state()
     apply_global_styles()
     render_app_shell()

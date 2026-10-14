@@ -80,8 +80,8 @@ class OverviewSpeedContractTests(unittest.TestCase):
 
     def test_toolbar_and_legend_match_home_contract(self):
         source = (Path(__file__).resolve().parents[1] / "pages" / "overview.py").read_text(encoding="utf-8")
-        self.assertIn("workspace.columns([0.92, 2.65, 0.95]", source)
-        for text in ("시뮬레이션 설정", "재고 이동 흐름", "핵심 결과", "시뮬레이션 실행"):
+        self.assertIn("workspace.columns([3.4, 1]", source)
+        for text in ("시뮬레이션 조건", "재고 이동 흐름", "핵심 결과", "시뮬레이션 실행"):
             self.assertIn(text, source)
         for text in (
             "실선: 직접 이동", "점선: 물류센터 경유",

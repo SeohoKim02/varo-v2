@@ -6,7 +6,7 @@ import json
 import math
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 import streamlit as st
@@ -23,7 +23,9 @@ from services.simulation_history import (
     get_run_routes,
     history_storage_info,
     list_simulation_runs,
+    history_db_path,
 )
+from components.seller_decisions import current_contract, render_product_results, render_summary
 
 
 def _number(value: object) -> float | None:
@@ -203,11 +205,18 @@ def _simulation_frame(runs: list[dict[str, Any]]) -> pd.DataFrame:
         "최종 전략": row.get("final_strategy") or "-",
         "최종 선택 건수": int(row.get("selected_count") or 0),
         "총 이동수량": _number(row.get("total_moved_quantity")) or 0,
-        "예상 절감액": _number(row.get("total_expected_saving")) or 0,
+        "예상 절감액": _history_saving_display(row),
         "부족재고 감소": _number(row.get("shortage_reduction")) or 0,
         "서비스 충족률(%)": _number(row.get("service_fill_rate")),
         "상태": row.get("status") or "-",
     } for row in runs])
+
+
+def _history_saving_display(run: Mapping[str, Any]) -> str:
+    value = _number(run.get("total_expected_saving"))
+    if "샘플" not in str(run.get("data_source_type") or "") or value is None:
+        return "미산정 · 비교 근거 미기록"
+    return f"{value:,.0f}원 · 예시 조건"
 
 
 def _render_simulation_detail(run: dict[str, Any]) -> None:
@@ -225,9 +234,9 @@ def _render_simulation_detail(run: dict[str, Any]) -> None:
         ("조건 적용 후보 수", f"{int(run.get('scoped_candidate_count') or 0):,}건"),
         ("실행 가능 후보 수", f"{int(run.get('feasible_candidate_count') or 0):,}건"),
         ("최종 선택 건수", f"{int(run.get('selected_count') or 0):,}건"),
-        ("총 이동수량", f"{_number(run.get('total_moved_quantity')) or 0:,.0f}"),
+        ("시뮬레이션 반영 이동량", f"{_number(run.get('total_moved_quantity')) or 0:,.0f}"),
         ("총 예상 이동비용", f"{_number(run.get('total_move_cost')) or 0:,.0f}원"),
-        ("총 예상 절감액", f"{_number(run.get('total_expected_saving')) or 0:,.0f}원"),
+        ("총 예상 절감액", _history_saving_display(run)),
         ("초과재고 감소", f"{_number(run.get('excess_reduction')) or 0:,.0f}"),
         ("부족재고 감소", f"{_number(run.get('shortage_reduction')) or 0:,.0f}"),
         (
@@ -277,7 +286,7 @@ def _render_simulation_detail(run: dict[str, Any]) -> None:
             "VARO 순위": _number(row.get("varo_final_rank")),
             "VHS 순위": _number(row.get("vhs_rank")),
             "Greedy 순위": _number(row.get("greedy_rank")),
-            "실행": "실행" if row.get("executed") else "건너뜀",
+            "시뮬레이션 반영": "반영" if row.get("executed") else "건너뜀",
             "건너뛴 사유": row.get("skipped_reason") or "-",
         } for row in routes]),
         hide_index=True,
@@ -298,12 +307,11 @@ def _render_simulation_history() -> None:
         st.caption(f"저장 위치: {storage['path']}")
         return
     completed = [row for row in runs if str(row.get("status")) != STATUS_FAILED]
-    savings = [_number(row.get("total_expected_saving")) or 0.0 for row in completed]
     columns = st.columns(3, gap="medium")
     values = (
         ("총 실행 건수", f"{len(runs):,}건", "로컬에 저장된 시뮬레이션 실행"),
         ("정상 완료", f"{len(completed):,}건", "최종 결과가 확정된 실행"),
-        ("누적 예상 절감액", f"{sum(savings):,.0f}원", "정상 완료 실행 합계"),
+        ("실제 절감 성과", "미확인", "계산 이력만으로 실제 성과를 판단하지 않습니다"),
     )
     for column, (title, value, caption) in zip(columns, values):
         with column:
@@ -360,13 +368,52 @@ def render_results_history_page() -> None:
         "결과 이력",
         "로컬에 저장된 시뮬레이션 실행과 DQN 학습 결과를 구분해 확인하세요.",
     )
-    simulation_tab, dqn_tab = st.tabs(["시뮬레이션 이력", "DQN 학습/저장 결과"])
+    current_tab, simulation_tab, dqn_tab = st.tabs(["현재 상품 결과", "시뮬레이션 이력", "DQN 학습/저장 결과"])
+    with current_tab:
+        contract = current_contract()
+        if contract:
+            render_summary(contract)
+            render_product_results(contract, "seller_history")
+        else:
+            st.info("현재 적용된 상품별 분석이 없습니다. 홈에서 데이터를 분석해 주세요.")
     with simulation_tab:
+        st.caption("저장된 시뮬레이션은 계산 실행 이력입니다. 판매자의 실제 재고 이동·판매 완료를 의미하지 않습니다.")
         _render_simulation_history()
+        with st.expander("판매자 판단·실제 결과 기록 (Shadow Ledger)", expanded=False):
+            _render_shadow_history()
         with st.expander("현재 시뮬레이션 상세", expanded=False):
             _render_current_result()
     with dqn_tab:
         _render_dqn_history()
+
+
+def _render_shadow_history() -> None:
+    """Read the existing ledger without creating tables or migrating the database."""
+    import sqlite3
+    path = history_db_path()
+    if not path.exists():
+        st.info("저장된 판매자 판단 기록이 없습니다.")
+        return
+    try:
+        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1) as db:
+            tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if "seller_shadow_decisions" not in tables:
+                st.info("저장된 판매자 판단 기록이 없습니다.")
+                return
+            rows = db.execute("SELECT decision_at,product_id,source_store_id,data_mode,decision_version,payload_json "
+                              "FROM seller_shadow_decisions ORDER BY recorded_at DESC LIMIT 500").fetchall()
+            count = db.execute("SELECT COUNT(*) FROM seller_shadow_decisions").fetchone()[0]
+            outcomes = db.execute("SELECT COUNT(*) FROM seller_shadow_outcomes").fetchone()[0] if "seller_shadow_outcomes" in tables else 0
+        st.caption(f"실제 저장된 판단 {count:,}개 버전 · outcome 기록 {outcomes:,}개 · 최근 500개 표시. TEST/SCENARIO는 운영 실적이 아닙니다.")
+        frame = pd.DataFrame([{"판단일": r[0], "상품": r[1], "출발 점포": r[2], "자료 구분": r[3], "버전": r[4]} for r in rows])
+        if not frame.empty:
+            st.dataframe(frame, hide_index=True, width="stretch")
+            st.download_button("저장된 판매자 판단 JSON", json.dumps([json.loads(r[5]) for r in rows], ensure_ascii=False, default=str).encode("utf-8"),
+                               file_name="varo_saved_seller_decisions.json", mime="application/json", key="history_shadow_download")
+        else:
+            st.info("저장된 판매자 판단 기록이 없습니다.")
+    except (sqlite3.Error, OSError, ValueError):
+        st.warning("판매자 기록을 지금 읽을 수 없습니다. 다른 실행이 끝난 뒤 다시 조회하세요. 기존 기록은 변경하지 않았습니다.")
 
 
 def _render_dqn_history() -> None:

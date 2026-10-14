@@ -62,7 +62,7 @@ def render_settings_page() -> None:
                 key="settings_inventory_view",
             )
     with sections[1]:
-        with st.container(border=True):
+        with st.expander("보조 모델·의사결정 기본값", expanded=False):
             st.markdown('<div class="v3-panel-title">모델·의사결정 설정</div>', unsafe_allow_html=True)
             st.markdown(
                 badge_html(
@@ -105,6 +105,25 @@ def render_settings_page() -> None:
     data = st.session_state.get("varo_data")
     validation = st.session_state.get("varo_validation")
     if data:
+        with st.container(border=True):
+            render_section_header(st, "사업장 공통 입력", "유효기간과 적용 범위를 가진 기존 입력 시트를 재사용합니다.")
+            from services.seller_business_profile import parse_profile
+            from services.seller_loss_inputs import template_frame
+            import pandas as pd
+            profile = data.get("seller_business_profile")
+            parsed = parse_profile(profile)
+            st.caption("적용 범위: 전체 사업장 / 점포 / 상품 / 상품·점포 / 경로. 실제 입력과 예시 입력은 구분하며, 적용 범위·유효기간·출처를 유지합니다.")
+            if isinstance(profile, pd.DataFrame) and not profile.empty:
+                st.dataframe(profile, hide_index=True, width="stretch", height=230)
+                st.caption(f"유효한 입력 셀 {parsed.validation.get('accepted_cells', 0):,}개")
+            else:
+                st.info("등록된 사업장 공통 입력이 없습니다. 엑셀의 seller_business_profile 시트를 추가해 데이터를 다시 불러오세요.")
+            if parsed.validation.get("errors"):
+                st.warning("일부 공통 입력을 적용할 수 없습니다. 범위·유효기간·중복값을 확인하세요.")
+                st.dataframe(pd.DataFrame(parsed.validation["errors"]), hide_index=True, width="stretch")
+            st.download_button("판매자 개별 입력 양식 CSV", template_frame().to_csv(index=False).encode("utf-8-sig"),
+                               file_name="seller_loss_inputs_template.csv", mime="text/csv", key="settings_seller_input_template")
+            st.caption("CSV 양식은 seller_loss_inputs용입니다. 공통 프로필에는 잔여 유통기한·현재 재고·결정 수량을 저장하지 않습니다.")
         with st.expander("현재 데이터 상태", expanded=False):
             _render_sheet_summary(data, validation)
             _render_upload_quality()

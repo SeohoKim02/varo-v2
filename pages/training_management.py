@@ -10,6 +10,7 @@ from services.dqn_service import get_torch_runtime_info
 
 
 def render_training_management_page() -> None:
+    st.caption("DQN 학습은 선택 사항입니다. 상품 분석의 필수 단계가 아니며, 현재는 보조·비교 전략으로 사용합니다.")
     runtime = get_torch_runtime_info()
     render_page_header(
         st,

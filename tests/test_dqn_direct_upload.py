@@ -171,11 +171,18 @@ class DqnDirectUploadPageTests(unittest.TestCase):
         app.run()
         self.assertFalse(app.exception)
         blob = " ".join(element.value for element in app.markdown)
-        self.assertIn("추천 후보", blob)
+        self.assertNotIn("전체 상품 확인", blob)
+        self.assertFalse(app.dataframe)
+        summary = state["varo_pipeline_result"]["final_decision_integration"]["summary"]
         self.assertIn("재고 이동 흐름", blob)
         self.assertNotIn("추천 Top 5", blob)
         self.assertEqual(blob.count('class="network-node dc-node"'), 1)
         self.assertEqual(blob.count('class="network-node store-node'), 4)
+        next(b for b in app.button if b.key == "home_results").click().run()
+        self.assertFalse(app.exception)
+        frames = [frame.value for frame in app.dataframe if "상품 코드" in frame.value]
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(len(frames[0]), summary["product_location_count"])
 
     def test_samples_01_02_10_render_default_route_top3_mode_and_keep_upload_across_pages(self):
         expected_dcs = {"01": 1, "02": 1, "10": 2}
@@ -200,7 +207,7 @@ class DqnDirectUploadPageTests(unittest.TestCase):
                 self.assertEqual(top3_blob.count('class="v2-vehicle '), expected_top_count)
 
                 for menu in self.MENUS:
-                    button = next(item for item in app.sidebar.button if item.key == f"nav_{menu}")
+                    button = next(item for item in app.button if item.key == f"nav_{menu}")
                     button.click().run()
                     self.assertFalse(app.exception, msg=f"{path.name} / {menu}: {list(app.exception)}")
                     self.assertEqual(app.session_state["uploaded_filename"], path.name)

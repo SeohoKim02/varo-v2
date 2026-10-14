@@ -7,7 +7,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 DC = "DC"
 STORE = "STORE"
-SIMULATION_LAYOUT_VERSION = "dynamic-layout-2026-07-20.2"
+SIMULATION_LAYOUT_VERSION = "dynamic-layout-2026-10-14.direct"
 
 ID_KEYS = ("node_id", "store_id", "dc_id", "id")
 NAME_KEYS = ("node_name", "store_name", "dc_name", "name")
@@ -425,7 +425,9 @@ def compute_dynamic_layout(
             deduped.append(row)
     dcs = _sort(row for row in deduped if classify_node(row) == DC)
     stores = _sort(row for row in deduped if classify_node(row) == STORE)
-    if not dcs:
+    declared_direct = bool(stores) and all(str(row.get("network_mode") or "").upper() == "DIRECT_NETWORK" for row in stores)
+    direct_routes = all(normalize_route_type(row) == "DIRECT" for row in recommendation_rows)
+    if not dcs and not (declared_direct and direct_routes):
         return DynamicLayout(False, canvas={"width": width, "height": height}, errors=["네트워크 시뮬레이션에 표시할 DC가 없습니다."])
 
     recommended = _recommended_ids(recommendation_rows, limit=5)

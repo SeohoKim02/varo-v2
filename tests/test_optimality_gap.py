@@ -232,7 +232,7 @@ class OptimalityGapAppTests(unittest.TestCase):
         with patch("pages.validation.run_optimality_gap") as gap_runner:
             app = AppTest.from_file("app_v2.py", default_timeout=120)
             app.run()
-            next(button for button in app.button if button.key == "quick_empty_sample").click().run()
+            next(button for button in app.button if button.key == "home_sample").click().run()
             app.session_state["current_menu"] = "분석 및 검증"
             app.run()
             self.assertFalse(app.exception)

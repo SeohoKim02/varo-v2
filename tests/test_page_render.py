@@ -83,7 +83,7 @@ class PageRenderTests(unittest.TestCase):
                 self.assertFalse(app.exception, msg=f"empty {menu}: {list(app.exception)}")
                 self.assertIn(menu, self._markdown_blob(app))
                 self.assertEqual(
-                    {item.key for item in app.sidebar.button},
+                    {item.key for item in app.button if item.key and item.key.startswith("nav_")},
                     {f"nav_{item}" for item in MENUS},
                 )
 
@@ -118,13 +118,17 @@ class PageRenderTests(unittest.TestCase):
         self.assertFalse(app.exception)
         blob = self._markdown_blob(app)
         for required in (
-            "시뮬레이션", "총 후보 수", "예상 절감액", "실행 가능 건수",
-            "시뮬레이션 설정", "재고 이동 흐름", "핵심 결과",
+            "시뮬레이션", "예상 비용 절감액",
+            "재고 이동 흐름", "핵심 결과",
             "실선: 직접 이동", "점선: 물류센터 경유",
             "초과재고", "적정재고", "부족재고", "데이터 부족",
         ):
             self.assertIn(required, blob, f"simulation must contain: {required}")
-        sidebar_nav = {b.key: b.label for b in app.sidebar.button}
+        # Detailed seller counts and all products live in results, not the home.
+        summary = self.payload["varo_pipeline_result"]["final_decision_integration"]["summary"]
+        self.assertFalse(app.metric)
+        self.assertFalse(app.sidebar.button)
+        sidebar_nav = {b.key: b.label for b in app.button if b.key and b.key.startswith("nav_")}
         self.assertEqual(set(sidebar_nav), {f"nav_{menu}" for menu in MENUS})
         for menu in MENUS:
             self.assertIn(menu, sidebar_nav[f"nav_{menu}"])
@@ -154,7 +158,7 @@ class PageRenderTests(unittest.TestCase):
         self.assertNotIn("추천 결과 CSV", button_labels)
         for removed_section in ("현재 실행 경로 Top 3", "추천 Top 5", "선택 경로 요약", "추천 결과 Top 5"):
             self.assertNotIn(removed_section, blob)
-        self.assertFalse(app.dataframe, "simulation must not contain recommendation or validation tables")
+        self.assertFalse(app.dataframe, "home must not regain detailed product tables")
         self.assertIn('class="network-node dc-node"', blob)
         self.assertIn('class="network-node store-node', blob)
         self.assertEqual(blob.count('class="v2-vehicle'), 1)
@@ -163,13 +167,22 @@ class PageRenderTests(unittest.TestCase):
         # 전체 경로 보기 defaults OFF (representative Top 3 only)
         self.assertFalse(app.session_state["show_all_routes"])
         self.assertEqual(app.session_state["simulation_speed"], "보통")
+        next(b for b in app.button if b.key == "home_results").click().run()
+        self.assertFalse(app.exception)
+        metrics = {m.label: m.value for m in app.metric}
+        for label, field in (("분석 상품", "unique_products"), ("이동 계획 검토", "selected_transfer_routes"),
+                             ("검증 조건 충족 추천", "minimum_loss_recommendations"), ("추가 입력 필요", "additional_input_products")):
+            self.assertEqual(metrics[label], f"{summary[field]:,}")
+        product_frames = [element.value for element in app.dataframe if "상품 코드" in element.value]
+        self.assertEqual(len(product_frames), 1)
+        self.assertEqual(len(product_frames[0]), summary["product_location_count"])
 
     def test_sidebar_nav_navigates_to_every_page(self):
         for menu in MENUS:
             app = self._new_app()
             app.session_state["current_menu"] = "시뮬레이션"
             app.run()
-            button = next(item for item in app.sidebar.button if item.key == f"nav_{menu}")
+            button = next(item for item in app.button if item.key == f"nav_{menu}")
             button.click().run()
             self.assertEqual(app.session_state["current_menu"], menu)
             self.assertFalse(app.exception)
@@ -239,6 +252,11 @@ class PageRenderTests(unittest.TestCase):
         ):
             next(item for item in app.selectbox if item.key == "home_speed_select").set_value("빠름").run()
             next(item for item in app.toggle if item.key == "home_show_all").set_value(True).run()
+            product = next(item for item in app.selectbox if item.key == "simulation_product_filter")
+            selected_product = product.options[1]
+            product.set_value(selected_product).run()
+            next(item for item in app.button if item.key == "nav_전략 비교").click().run()
+            next(item for item in app.button if item.key == "ui_back").click().run()
         pipeline.assert_not_called()
         loader.assert_not_called()
         self.assertFalse(app.exception)
@@ -246,6 +264,7 @@ class PageRenderTests(unittest.TestCase):
         self.assertEqual(dict(app.session_state["pipeline_summary"]), summary)
         self.assertEqual(app.session_state["simulation_speed"], "빠름")
         self.assertTrue(app.session_state["show_all_routes"])
+        self.assertEqual(next(item for item in app.selectbox if item.key == "simulation_product_filter").value, selected_product)
 
     def test_home_has_no_quick_navigation_buttons(self):
         app = self._new_app()
@@ -262,7 +281,7 @@ class PageRenderTests(unittest.TestCase):
         app.session_state["current_menu"] = "홈"
         app.run()
         for menu in ("전략 비교", "학습 관리", "결과 이력", "설정", "시뮬레이션"):
-            button = next(item for item in app.sidebar.button if item.key == f"nav_{menu}")
+            button = next(item for item in app.button if item.key == f"nav_{menu}")
             button.click().run()
             self.assertFalse(app.exception, msg=f"{menu}: {list(app.exception)}")
             self.assertEqual(app.session_state["current_menu"], menu)
@@ -577,7 +596,7 @@ class PageRenderTests(unittest.TestCase):
     def test_data_management_owns_samples_and_compact_summary(self):
         app = AppTest.from_file(APP_PATH, default_timeout=120)
         app.run()
-        sample_button = next(button for button in app.button if button.key == "quick_empty_sample")
+        sample_button = next(button for button in app.button if button.key == "home_sample")
         sample_button.click().run()
         app.session_state["current_menu"] = "데이터 관리"
         app.run()
@@ -683,7 +702,7 @@ class PageRenderTests(unittest.TestCase):
     def test_sample_load_shows_current_data_summary(self):
         app = AppTest.from_file(APP_PATH, default_timeout=120)
         app.run()
-        buttons = [b for b in app.button if b.key == "quick_empty_sample"]
+        buttons = [b for b in app.button if b.key == "home_sample"]
         self.assertTrue(buttons)
         buttons[0].click().run()
         app.session_state["current_menu"] = "데이터 관리"
@@ -696,7 +715,7 @@ class PageRenderTests(unittest.TestCase):
         """The live '기본 샘플 불러오기' flow runs the self-contained pipeline."""
         app = AppTest.from_file(APP_PATH, default_timeout=120)
         app.run()
-        buttons = [b for b in app.button if b.key == "quick_empty_sample"]
+        buttons = [b for b in app.button if b.key == "home_sample"]
         self.assertTrue(buttons, "기본 샘플 불러오기 버튼을 찾지 못했습니다")
         buttons[0].click().run()
         self.assertFalse(app.exception)

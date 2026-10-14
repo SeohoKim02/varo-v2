@@ -64,9 +64,12 @@ class SimulationInventoryViewTests(unittest.TestCase):
         self.assertIn('class="inventory-stock-bar"', blob)
         self.assertIn('class="v2-sim-steps"', blob)
         self.assertIn("출고 준비", blob)
-        self.assertIn("재고 반영 완료", blob)
+        self.assertIn("시뮬레이션 재고 반영", blob)
         self.assertIn("핵심 결과", blob)
-        self.assertIn("이동 수량", blob)
+        self.assertIn("시뮬레이션 반영 이동량", blob)
+        self.assertIn("시뮬레이션상 부족재고 감소", blob)
+        self.assertNotIn("제약 수량으로 실행", blob)
+        self.assertNotIn("재고 반영 완료", blob)
         self.assertNotIn("TOP" + "1", blob)
 
     def test_inventory_view_and_top3_controls_render_without_reanalysis(self):
@@ -84,6 +87,38 @@ class SimulationInventoryViewTests(unittest.TestCase):
         self.assertEqual(app.session_state["home_sim_inventory_view"], "이동 후")
         self.assertEqual(app.session_state["home_sim_display_mode"], "상위 3개")
         self.assertEqual(self._blob(app).count('class="v2-vehicle'), 3)
+
+    def test_plan_status_is_presentation_only_and_never_claims_execution(self):
+        import copy
+        route = {"route_id": "r", "route_type": "DIRECT", "recommended_qty": 50}
+        scenario = {"transitions": [{"route_id": "r", "status": "제약 수량으로 실행",
+                                      "requested_quantity": 50, "applied_quantity": 46}]}
+        before = copy.deepcopy(scenario)
+        html = overview._route_summary_html([route], scenario, "r")
+        self.assertIn("제약을 적용한 이동 계획", html)
+        self.assertIn("실제 실행 미확인", html)
+        self.assertIn("단위 미확인", html)
+        self.assertIn("46 / 추천 50", html)
+        self.assertNotIn("제약 수량으로 실행", html)
+        self.assertEqual(scenario, before)
+
+    def test_missing_saving_is_not_rendered_as_zero(self):
+        with patch.object(overview, "current_contract", return_value=None), \
+             patch.object(overview.st, "markdown") as markdown, \
+             patch.object(overview.st, "caption"):
+            overview._render_core_results({"kpis": {}}, [])
+        html = markdown.call_args.args[0]
+        self.assertIn("미산정 · 비교 자료 부족", html)
+        self.assertNotIn("0원", html)
+        from pages import strategy_comparison
+        with patch.object(strategy_comparison, "current_contract", return_value=None):
+            self.assertEqual(strategy_comparison._saving_display([{}]), "미산정 · 자료 부족")
+            self.assertEqual(strategy_comparison._saving_display([{"expected_saving": 0}]), "0원")
+        from pages import results_history
+        self.assertEqual(results_history._history_saving_display({"total_expected_saving": 0}),
+                         "미산정 · 비교 근거 미기록")
+        self.assertEqual(results_history._history_saving_display({"total_expected_saving": 0,
+                         "data_source_type": "샘플 추천 데이터"}), "0원 · 예시 조건")
 
     def test_inventory_view_change_reuses_static_layout(self):
         recommendations = list(self.payload["varo_recommendations"][:1])
@@ -148,7 +183,17 @@ class SimulationInventoryViewTests(unittest.TestCase):
         blob = self._blob(app)
         for removed in ("추천 Top 5", "현재 실행 경로 Top 3", "상세 비교표", "분석 결과 다운로드"):
             self.assertNotIn(removed, blob)
-        self.assertFalse(app.dataframe)
+        self.assertFalse(app.dataframe, "home must keep the simulation and summary only")
+        next(b for b in app.button if b.key == "home_results").click().run()
+        self.assertFalse(app.exception)
+        frames = [element.value for element in app.dataframe]
+        product_frames = [frame for frame in frames if "상품 코드" in frame]
+        self.assertEqual(len(product_frames), 1)
+        contract = app.session_state["varo_pipeline_result"]["final_decision_integration"]
+        self.assertEqual(len(product_frames[0]), len(contract["products"]))
+        for frame in product_frames:
+            self.assertTrue({"route_id", "VHS 순위", "VARO 최종 순위"}.isdisjoint(frame.columns))
+            self.assertIn("상품 코드", frame)
 
 
 if __name__ == "__main__":

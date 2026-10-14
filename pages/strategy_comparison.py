@@ -11,6 +11,8 @@ import streamlit as st
 from components.cards import render_empty_state, render_page_header, render_section_header
 from components.status import badge_html, user_status_label
 from components.tables import format_currency
+from components.seller_decisions import current_contract, render_product_results, render_scenario_demo
+from components.seller_decisions import amount, quantity
 from services.analysis_pipeline import sort_recommendations
 from services.app_state import current_data_status, has_app_data
 from services.dqn_service import ACTION_CONCENTRATION_LIMIT, dqn_inference_view
@@ -38,6 +40,17 @@ def _cost(item: Mapping[str, object]) -> float:
 
 def _saving(item: Mapping[str, object]) -> float:
     return _number(item.get("expected_saving")) or 0.0
+
+
+def _saving_display(rows: Sequence[Mapping[str, object]]) -> str:
+    """Do not present legacy default zeros as measured or supported savings."""
+    if not rows:
+        return "비교 불가"
+    if current_contract() and "샘플" not in str(st.session_state.get("data_source_type") or ""):
+        return "미산정 · 자료 부족"
+    if any(_number(item.get("expected_saving")) is None for item in rows):
+        return "미산정 · 자료 부족"
+    return format_currency(sum(_saving(item) for item in rows))
 
 
 def _strategy_sets(recommendations: Sequence[Mapping[str, object]]) -> dict[str, list[dict]]:
@@ -164,7 +177,7 @@ def _strategy_card(name: str, rows: Sequence[Mapping[str, object]]) -> str:
     variant = "success" if rows else "warning"
     count = f"{len(rows):,}건" if rows else "-"
     cost = format_currency(sum(_cost(item) for item in rows)) if rows else "-"
-    saving = format_currency(sum(_saving(item) for item in rows)) if rows else "-"
+    saving = _saving_display(rows)
     return f"""
       <div class="v2-wrap v2-card v3-strategy-card" style="--strategy-color:{color};">
         <div class="v3-strategy-name">{html.escape(name)}</div>
@@ -182,8 +195,8 @@ def _comparison_frame(strategy_sets: Mapping[str, Sequence[Mapping[str, object]]
     for label, getter in (
         ("선택/평가 건수", lambda rows: f"{len(rows):,}건" if rows else "비교 불가"),
         ("총 이동 비용", lambda rows: format_currency(sum(_cost(item) for item in rows)) if rows else "비교 불가"),
-        ("예상 절감액", lambda rows: format_currency(sum(_saving(item) for item in rows)) if rows else "비교 불가"),
-        ("실행 상태", lambda rows: "비교 가능" if rows else "비교 불가"),
+        ("예상 절감액", _saving_display),
+        ("비교 상태", lambda rows: "비교 가능" if rows else "비교 불가"),
     ):
         metrics.append({"지표": label, **{name: getter(rows) for name, rows in strategy_sets.items()}})
     return pd.DataFrame(metrics)
@@ -237,7 +250,14 @@ def render_strategy_comparison_page() -> None:
         badge=badge_html(current_data_status(st.session_state), "accent" if data_available else "neutral"),
     )
     if not data_available:
+        contract = current_contract()
+        if contract.get("products"):
+            st.info("이동 후보가 없어 알고리즘별 경로 비교는 불가능합니다. 상품별 판매 전략과 추가 입력을 확인하세요.")
+            render_product_results(contract, "seller_compare")
+            render_scenario_demo()
+            return
         render_empty_state(st, "비교할 데이터가 없습니다", "설정에서 데이터를 불러온 뒤 다시 확인해주세요.")
+        render_scenario_demo()
         return
 
     dqn_view = _dqn_view(recommendations)
@@ -256,7 +276,30 @@ def render_strategy_comparison_page() -> None:
     render_section_header(st, "전략별 핵심 비교", "현재 계산 결과에 공통으로 존재하는 값만 표시합니다.")
     st.dataframe(_comparison_frame(strategy_sets), hide_index=True, width="stretch")
     _render_dqn_status(dqn_view)
+    st.caption("위 카드는 기존 알고리즘의 평가·선택 후보 기준입니다. 후보 수와 이동 수량이 다르면 비용만으로 우열을 판단하지 않습니다. 절감액은 기존 입력의 참고 값이며 실제 지출·성과가 아닙니다.")
+    pipeline = st.session_state.get("varo_pipeline_result") or {}
+    plans = (pipeline.get("shared_feasibility_selection") or {}).get("modes") or {}
+    if plans:
+        render_section_header(st, "공유 제약 이동 계획", "동일 상품의 재고·도착 한도·경로 제약을 함께 적용한 계획입니다.")
+        plan_rows = []
+        for mode, plan in plans.items():
+            selected = [r for r in plan.get("rows") or [] if r.get("selection_status") == "SELECTED"]
+            costs = [_number(r.get("allocated_move_cost")) for r in selected]
+            plan_rows.append({"근거": "추정 제약" if mode == "BENCHMARK_PROXY" else "운영 근거 확인",
+                              "계획 상태": {"SELECTED": "계획 선택 완료", "INSUFFICIENT_CAP_DATA": "운영 제약 근거 부족", "NO_CANDIDATES": "후보 없음"}.get(plan.get("plan_status"), "계획 검토 필요"), "선택 경로": len(selected),
+                              "계획 수량": quantity(sum(_number(r.get("allocated_qty")) or 0 for r in selected)),
+                              "계산 운송비": amount(sum(costs) if costs and all(c is not None for c in costs) else None),
+                              "제약 위반": (plan.get("validation") or {}).get("violation_count")})
+        st.dataframe(pd.DataFrame(plan_rows), hide_index=True, width="stretch")
     with st.expander("후보별 상세 판단", expanded=False):
         render_section_header(st, "후보별 판단 차이", "최종 VARO 순위는 서비스 우선·비용 우선·VHS tie-break 원칙을 유지합니다.")
         st.dataframe(_candidate_frame(filtered), hide_index=True, width="stretch", height=310)
     _render_advanced_tools(st.session_state.get("varo_pipeline_result") or {}, filtered)
+    st.caption("MILP는 제한된 후보와 추정된 제약조건에서의 비교 기준입니다. 전체 물류망의 절대 최적해를 의미하지 않습니다.")
+    with st.expander("상품별 정상판매·할인판매·이동 비교", expanded=False):
+        contract = current_contract()
+        if contract:
+            render_product_results(contract, "seller_compare")
+        else:
+            st.info("상품별 결정 계약이 없습니다. 데이터를 다시 불러와주세요.")
+    render_scenario_demo()

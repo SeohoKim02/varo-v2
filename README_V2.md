@@ -243,3 +243,42 @@ OneDrive cloud-only/잠금 파일은 사용자가 동기화 상태를 확인해�
 STRICT_ACTUAL cap/소매판매 근거/실제 outcome가 부족하므로 테스트 통과는 운영 승인이 아니다.
 production action은 이번 검증으로 교체되지 않는다. 최종 통합·추천 교체 승인·UI 최종 수정·
 제출 전에 FULL을 실행하고, 변경 근거와 Golden 영향 검토 후 사용자 승인을 받아야 한다.
+
+### 판매자 중심 결과 화면 (읽기 전용 v0.1)
+
+상단 VARO 로고와 작은 `전체 기능` 팝업으로 시뮬레이션 / 전략 비교 / 학습 관리 / 결과 이력 / 설정에 접근한다.
+홈에는 업로드·분석 실행·재고 흐름 시뮬레이션·핵심 결과만 표시한다.
+전체 상품 검색·필터·정렬·상세·다운로드는 결과 이력의 `현재 상품 결과`에 모으고,
+예시 A/B/C 비교는 전략 비교에 배치한다. 다른 화면의 `홈으로`와 `뒤로 가기`는 분석 결과와 화면 입력을 보존한다.
+데이터를 불러오면 기존 파이프라인을 실행하고, `final_decision_integration`을 병렬로 표시한다.
+화면 필터·상품 선택·다운로드는 분석 재실행이나 생산용 action 교체를 하지 않는다.
+이동 후보가 없는 상품도 전체 상품·점포 결과에 포함한다. Top-5는 경로 선택 제한이지 상품 표시 제한이 아니다.
+
+| 화면 정보 | 기존 결과 계약 |
+| --- | --- |
+| 상단 상품/계획/추천/추가 입력 수 | `summary.unique_products/selected_transfer_routes/minimum_loss_recommendations/additional_input_products` |
+| 전체 상품·점포 행 및 상세 선택 | `products[]`, `decision_id`, 원자료 `source_lineage`의 기준일 |
+| 쉬운 상태와 설명 | `decision_status`, `display.recommendation_or_plan`, `explanation_ko` |
+| 계획 수량·계산 운송비 | `routes[].allocated_qty/calculated_transfer_cost/transfer_cost/plan_mode/plan_validation` |
+| 정상판매/할인판매/이동 예상 손실 | `expected_loss_by_strategy`, `expected_loss_values`, `available_strategies`, `comparison_scope` |
+| 추가 입력 안내 | Requirement Planner의 `missing_required_inputs` |
+| 프로필과 근거 | 기존 `seller_business_profile`, `input_quality`, `seller_comparisons`, `promotion_status` |
+| 참고 지표와 예측 | `reference_metrics`, `forecast` (점수는 확률이 아님) |
+| 실제 행동·결과 | `operator_action`, `execution_status`, `outcome`, `actual_*` (기록이 없으면 미확인) |
+
+상품명·코드·점포 검색, 상태/근거 필터, 입력 부족/이동 계획 필터, 정렬을 제공한다.
+모든 CSV/JSON은 전체 결과의 원래 자료 모드와 근거를 보존하며, 모르는 금액은 0으로 만들지 않는다.
+입력 양식의 SAMPLE 숫자는 예시이므로 실제 값으로 교체하거나 해당 행을 지워야 한다.
+공통 프로필은 범위·유효기간·출처를 유지한다. 잔여 유통기한/현재 재고/결정 수량은 공통 프로필 값이 아니다.
+
+시연 순서: 기본 샘플 → 전체 상품 검색/상세 → 입력 부족 확인 → 예시 A/B/C 계산 → 별도 실제 자료 업로드.
+예시 계산은 기존 controlled scenario와 Seller Loss 엔진만 사용하며 SCENARIO로 격리한다.
+실제 자료 기반의 추정 이동 계획과 예시 최소손실 전략은 같은 실증 결과가 아니다.
+기존 재고 흐름 시뮬레이션은 복사본 전이이며, 상품 상세의 공유 제약 계획과 실행 기록을 대신하지 않는다.
+DC 없는 시각화는 명시된 DIRECT_NETWORK에서 DIRECT 경로만 지원하며 가짜 DC를 만들지 않는다.
+이력은 기존 SQLite/Shadow Ledger를 재사용한다. Shadow 조회는 읽기 전용이며 새 테이블을 만들지 않는다.
+일반 상품별 통합 결과의 영구 이력 저장은 추가하지 않고 현재 결과 다운로드를 제공한다.
+
+검증용 모델·이력이 사용자 로컬 `outputs`를 덮어쓰지 않도록 pytest 시작 전에 임시 저장소를 연결한다.
+T5가 명시한 격리 저장소는 그대로 재사용한다. 작은 학습 fixture는 기존 테스트의 일부이며 운영 재학습이 아니다.
+UI 수정 중 Git 보호 항목의 BLOCKED는 유지하고, 계산 회귀 통과와 별도로 보고한다.

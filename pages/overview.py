@@ -11,6 +11,7 @@ import streamlit as st
 
 from components.cards import render_empty_state, render_kpi_card, render_page_header
 from components.tables import format_currency, format_number
+from components.seller_decisions import current_contract
 from services.analysis_pipeline import calculate_overview_kpis, sort_recommendations, top_recommendations
 from services.app_state import has_app_data, resolve_selected_route_id
 from services.inventory_transition_service import (
@@ -68,9 +69,12 @@ def _qty(value: object) -> str:
     number = _number(value)
     if number is None:
         return "데이터 없음"
+    # The graph aggregates routes and has no per-value verified unit contract.
+    # Keep quantities neutral instead of inferring pieces from the dataset type.
+    suffix = ""
     if abs(number - round(number)) <= 1e-9:
-        return f"{int(round(number)):,}개"
-    return f"{number:,.1f}개"
+        return f"{int(round(number)):,}{suffix}"
+    return f"{number:,.1f}{suffix}"
 
 
 def _recommendations() -> list[dict]:
@@ -104,6 +108,7 @@ def _layout_node_payload(nodes: Sequence[Mapping[str, object]]) -> list[dict[str
         "node_id", "node_name", "node_type", "store_id", "store_name", "store_type",
         "dc_id", "dc_name", "region", "latitude", "longitude", "lat", "lon",
         "capacity", "dc_capacity_qty", "throughput_capacity",
+        "network_mode",
     )
     return [{field: node.get(field) for field in fields if field in node} for node in nodes]
 
@@ -215,8 +220,7 @@ def _view_for_transition(
         display_stock, status = after_stock, after_status
     movement = endpoint.get("outbound_qty") if role == "source" else endpoint.get("inbound_qty")
     movement_label = (
-        f"{'출고' if role == 'source' else '입고'} {_qty(movement)}"
-        f" · 수요 {_qty(endpoint.get('demand_qty'))}"
+        f"{'출고' if role == 'source' else '입고'} 계획 {_qty(movement)}"
     )
     return {
         "detail": True,
@@ -340,9 +344,9 @@ def _svg_label(value: object, css_class: str, y: float, chars_per_line: int) -> 
         if len(text) > chars_per_line * 2:
             second = second[:-1] + "…"
         lines = [text[:chars_per_line], second]
-    start_y = y - 7 if len(lines) == 2 else y
+    start_y = y - 12 if len(lines) == 2 else y
     spans = "".join(
-        f'<tspan x="0" y="{start_y + index * 15:.2f}">{_safe(line)}</tspan>'
+        f'<tspan x="0" y="{start_y + index * 18:.2f}">{_safe(line)}</tspan>'
         for index, line in enumerate(lines)
     )
     return f'<text class="{css_class}" text-anchor="middle">{spans}</text>'
@@ -374,7 +378,7 @@ def _dc_node_svg(node: Mapping[str, object]) -> str:
         f'<g class="network-node dc-node" data-active="{str(active).lower()}" transform="translate({x:.2f} {y:.2f})">'
         f'<title>{_safe(name)} · {via_label}</title>'
         f'<rect x="{left:.2f}" y="{top:.2f}" width="{width:.2f}" height="{height:.2f}" rx="10" fill="{fill}" stroke="{stroke}" stroke-width="{3 if active else 1.8}" />'
-        f'{_svg_label(name, "node-label dc-label", top + 24, 13)}'
+        f'{_svg_label(name, "node-label dc-label", top + 24, 10)}'
         f'<text class="dc-node-id" x="0" y="{top + 46:.2f}" text-anchor="middle">{_safe(node_id)} · {_safe(via_label)}</text>'
         f'<text class="dc-node-work" x="0" y="{top + 69:.2f}" text-anchor="middle">추천 {int(view.get("active_count") or 0)}건 · {_qty(view.get("quantity"))}</text>'
         f'<text class="dc-node-capacity" x="0" y="{height / 2 - 9:.2f}" text-anchor="middle">{_safe(capacity_label)}</text>'
@@ -396,22 +400,23 @@ def _store_node_svg(node: Mapping[str, object], total_stores: int) -> str:
     fill = background if emphasized else "#ffffff"
     left, top = -width / 2, -height / 2
     label = name if show_label else str(node.get("node_id") or "-")
-    title = f"{name} · {status} · 재고 {_qty(view.get('display_stock'))}"
+    title = (f"{name} · {view.get('product_name') or ''} · {status}"
+             f" · 재고 {_qty(view.get('before_stock'))} → {_qty(view.get('after_stock'))}"
+             f" · 수요 {_qty(view.get('demand'))} · {view.get('movement_label') or ''}"
+             " · 시뮬레이션 계산값 · 수량 단위 미확인")
 
     if not detailed:
-        name_y = -8 if height >= 58 else -3
-        stock_text = _qty(view.get("display_stock")) if view.get("display_stock") is not None else ""
+        name_y = -2 if height >= 58 else 0
         return (
             f'<g class="network-node store-node store-node-compact" transform="translate({x:.2f} {y:.2f})">'
             f'<title>{_safe(title)}</title>'
             f'<rect x="{left:.2f}" y="{top:.2f}" width="{width:.2f}" height="{height:.2f}" rx="8" fill="{fill}" stroke="{stroke}" stroke-width="{2.5 if emphasized else 1.3}" />'
-            f'{_svg_label(label, "node-label store-label", name_y, 10 if total_stores <= 16 else 8)}'
+            f'{_svg_label(label, "node-label store-label", name_y, 8)}'
             f'{_state_badge(status, height / 2 - 8, 66)}'
-            f'<text class="compact-stock" x="{width / 2 - 8:.2f}" y="{top + 15:.2f}" text-anchor="end">{_safe(stock_text)}</text>'
             '</g>'
         )
 
-    product = _short_label(view.get("product_name"), 17)
+    product = _short_label(view.get("product_name"), 10)
     before, after = view.get("before_stock"), view.get("after_stock")
     view_mode = str(view.get("view_mode") or "전후 비교")
     if view_mode == "전후 비교":
@@ -421,7 +426,7 @@ def _store_node_svg(node: Mapping[str, object], total_stores: int) -> str:
         stock_line = f"현재 재고 {_qty(before)}"
         state_line = str(view.get("before_status") or "데이터 부족")
     else:
-        stock_line = f"이동 후 재고 {_qty(after)}"
+        stock_line = f"계산 후 재고 {_qty(after)}"
         state_line = str(view.get("after_status") or "데이터 부족")
     demand = _number(view.get("demand"))
     stock = _number(view.get("display_stock"))
@@ -431,12 +436,11 @@ def _store_node_svg(node: Mapping[str, object], total_stores: int) -> str:
         f'<g class="network-node store-node store-node-detailed" transform="translate({x:.2f} {y:.2f})">'
         f'<title>{_safe(title)}</title>'
         f'<rect x="{left:.2f}" y="{top:.2f}" width="{width:.2f}" height="{height:.2f}" rx="10" fill="{fill}" stroke="{stroke}" stroke-width="2.8" />'
-        f'{_svg_label(label, "node-label store-label", top + 20, 13)}'
+        f'{_svg_label(_short_label(label, 9), "node-label store-label", top + 24, 9)}'
         f'{_state_badge(status, top + 44, 72)}'
-        f'<text class="inventory-product" x="0" y="{top + 63:.2f}" text-anchor="middle">{_safe(product)}</text>'
-        f'<text class="inventory-stock" x="0" y="{top + 80:.2f}" text-anchor="middle">{_safe(stock_line)}</text>'
-        f'<text class="inventory-movement" x="0" y="{top + 96:.2f}" text-anchor="middle">{_safe(view.get("movement_label") or state_line)}</text>'
-        f'<text class="inventory-state-change" x="0" y="{top + 112:.2f}" text-anchor="middle">{_safe(state_line)}</text>'
+        f'<text class="inventory-product" x="0" y="{top + 69:.2f}" text-anchor="middle">{_safe(product)}</text>'
+        f'<text class="inventory-stock" x="0" y="{top + 91:.2f}" text-anchor="middle">{_safe(stock_line)}</text>'
+        f'<text class="inventory-movement" x="0" y="{top + 113:.2f}" text-anchor="middle">{_safe(view.get("movement_label") or state_line)}</text>'
         f'<rect class="inventory-stock-bar-bg" x="{-bar_width / 2:.2f}" y="{height / 2 - 9:.2f}" width="{bar_width:.2f}" height="5" rx="2.5" fill="#dce2e8" />'
         f'<rect class="inventory-stock-bar" x="{-bar_width / 2:.2f}" y="{height / 2 - 9:.2f}" width="{bar_width * ratio:.2f}" height="5" rx="2.5" fill="{border}" />'
         '</g>'
@@ -566,13 +570,19 @@ def _route_summary_html(
     quantity = _qty(applied) if applied is not None else _qty(requested)
     if applied is not None and requested is not None and float(applied) != float(requested):
         quantity = f"{quantity} / 추천 {_qty(requested)}"
+    # Presentation only: retain the transition service's status and quantities.
+    status = {
+        "실행 가능": "계산된 이동 계획",
+        "제약 수량으로 실행": "제약을 적용한 이동 계획",
+        "현재 상태에서 실행 불가": "현재 조건에서 계획 불가",
+    }.get(transition.get("status"), "데이터 부족")
     return (
         '<div class="v2-sim-route-summary">'
         f'<span><small>선택 경로</small><strong>{_safe(route_label)}</strong></span>'
         f'<span><small>이동 상품</small><strong>{_safe(selected.get("product_name") or selected.get("product_id") or "-")}</strong></span>'
         f'<span><small>출발 → 도착</small><strong>{_safe(selected.get("source_name") or selected.get("source_id") or "-")} → {_safe(selected.get("target_name") or selected.get("target_id") or "-")}</strong></span>'
-        f'<span><small>이동 수량</small><strong>{_safe(quantity)}</strong></span>'
-        f'<span><small>실행 상태</small><strong>{_safe(transition.get("status") or "데이터 부족")}</strong></span>'
+        f'<span><small>계획 이동량 · 단위 미확인</small><strong>{_safe(quantity)}</strong></span>'
+        f'<span><small>계획 상태 · 실제 실행 미확인</small><strong>{_safe(status)}</strong></span>'
         '</div>'
     )
 
@@ -700,6 +710,7 @@ def _network_markup_cached(
         '<span class="v2-legend-item"><span class="v2-state-dot state-shortage"></span>부족재고</span>'
         '<span class="v2-legend-item"><span class="v2-state-dot state-missing"></span>데이터 부족</span>'
         '</div>'
+        '<div class="v2-network-viewport" role="region" aria-label="이동 계획 그래프 · 좁은 화면에서는 좌우로 확인" tabindex="0">'
         f'<svg class="v2-network-svg" viewBox="0 0 {canvas["width"]} {canvas["height"]}" '
         'xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
         'preserveAspectRatio="xMidYMid meet" role="img" aria-label="추천 경로 재고 이동 현황">'
@@ -708,7 +719,7 @@ def _network_markup_cached(
         + "".join(skip_labels)
         + "".join(node_shapes)
         + "".join(vehicles)
-        + "</svg></div>"
+        + "</svg></div></div>"
     )
     return {"ok": True, "errors": [], "html": network_html}
 
@@ -756,7 +767,8 @@ def _set_sim_playing(value: bool) -> None:
     st.session_state["home_sim_run_nonce"] = int(st.session_state.get("home_sim_run_nonce") or 0) + 1
 
 
-def _render_controls(recommendations: Sequence[Mapping[str, object]]) -> dict[str, object]:
+def _render_controls(recommendations: Sequence[Mapping[str, object]], compact: bool = False, execute_target=None) -> dict[str, object]:
+    fields = st.columns([1, 1, 1], gap="small") if compact else [st, st, execute_target if execute_target is not None else st]
     playing = bool(st.session_state.get("home_sim_playing", False))
     rank_options = [f"{index}순위" for index in range(1, min(3, len(recommendations)) + 1)] or ["1순위"]
     current_rank = str(st.session_state.get("home_sim_route_rank") or "1순위")
@@ -765,7 +777,7 @@ def _render_controls(recommendations: Sequence[Mapping[str, object]]) -> dict[st
         st.session_state["home_sim_route_rank"] = current_rank
     if st.session_state.get("home_sim_route_rank_select") not in rank_options:
         st.session_state["home_sim_route_rank_select"] = current_rank
-    rank_label = st.selectbox(
+    rank_label = fields[0].selectbox(
         "표시 경로 선택", rank_options,
         key="home_sim_route_rank_select", help="표시할 추천 순위를 선택합니다.",
     )
@@ -776,11 +788,11 @@ def _render_controls(recommendations: Sequence[Mapping[str, object]]) -> dict[st
         st.session_state["home_sim_display_mode"] = current_display
     if st.session_state.get("home_sim_display_select") not in display_options:
         st.session_state["home_sim_display_select"] = current_display
-    display_mode = st.selectbox(
+    display_mode = fields[1].selectbox(
         "표시 방식", display_options,
         key="home_sim_display_select",
     )
-    st.button(
+    fields[2].button(
         "시뮬레이션 실행", width="stretch", key="sim_start", disabled=playing,
         type="primary", on_click=_set_sim_playing, args=(True,),
     )
@@ -807,8 +819,10 @@ def _render_controls(recommendations: Sequence[Mapping[str, object]]) -> dict[st
             "재고 표시", view_options,
             key="home_inventory_view_select",
         )
+        if "home_show_all" not in st.session_state:
+            st.session_state["home_show_all"] = bool(st.session_state.get("show_all_routes", False))
         show_all = st.toggle(
-            "전체 경로 보기", value=bool(st.session_state.get("show_all_routes", False)),
+            "전체 경로 보기",
             key="home_show_all", help="실행 경로는 유지하고 보조 연결선만 표시합니다.",
         )
         st.button(
@@ -829,7 +843,7 @@ def _render_controls(recommendations: Sequence[Mapping[str, object]]) -> dict[st
     }
 
 
-def _render_scope_filters(recommendations: Sequence[Mapping[str, object]]) -> list[dict]:
+def _render_scope_filters(recommendations: Sequence[Mapping[str, object]], compact: bool = False) -> list[dict]:
     node_values = sorted({
         str(value)
         for item in recommendations
@@ -851,8 +865,9 @@ def _render_scope_filters(recommendations: Sequence[Mapping[str, object]]) -> li
         st.session_state["simulation_node_filter"] = node_options[0]
     if st.session_state.get("simulation_product_filter") not in product_options:
         st.session_state["simulation_product_filter"] = product_options[0]
-    selected_node = st.selectbox("센터/점포", node_options, key="simulation_node_filter")
-    selected_product = st.selectbox("상품 범위", product_options, key="simulation_product_filter")
+    fields = st.columns(2, gap="small") if compact else [st, st]
+    selected_node = fields[0].selectbox("센터/점포", node_options, key="simulation_node_filter")
+    selected_product = fields[1].selectbox("상품 범위", product_options, key="simulation_product_filter")
     filtered = []
     for item in recommendations:
         nodes = {
@@ -872,8 +887,7 @@ def _render_scope_filters(recommendations: Sequence[Mapping[str, object]]) -> li
 def _render_core_results(scenario: Mapping[str, Any], routes: Sequence[Mapping[str, object]]) -> None:
     kpis = scenario.get("kpis") or {}
     scenario_saving = _number(kpis.get("expected_saving"))
-    if scenario_saving is None:
-        scenario_saving = sum(_number(route.get("expected_saving")) or 0.0 for route in routes)
+    is_actual_source = bool(current_contract()) and "샘플" not in str(st.session_state.get("data_source_type") or "")
     affected_nodes = {
         str(value)
         for route in routes
@@ -881,10 +895,11 @@ def _render_core_results(scenario: Mapping[str, Any], routes: Sequence[Mapping[s
         if value
     }
     values = (
-        ("예상 절감액", format_currency(scenario_saving)),
-        ("이동 수량", _qty(kpis.get("moved_quantity"))),
-        ("영향 점포/센터", f"{len(affected_nodes):,}곳"),
-        ("부족재고 감소", _qty(kpis.get("shortage_reduction"))),
+        ("예상 비용 절감액", "미산정 · 비교 자료 부족" if is_actual_source or scenario_saving is None
+         else f"{format_currency(scenario_saving)} · 예시 조건"),
+        ("시뮬레이션 반영 이동량", _qty(kpis.get("moved_quantity"))),
+        ("영향받는 점포/센터", f"{len(affected_nodes):,}곳"),
+        ("시뮬레이션상 부족재고 감소", _qty(kpis.get("shortage_reduction"))),
     )
     rows = "".join(
         '<div class="v3-result-row">'
@@ -896,13 +911,14 @@ def _render_core_results(scenario: Mapping[str, Any], routes: Sequence[Mapping[s
         f'<div class="v3-result-list">{rows}</div>',
         unsafe_allow_html=True,
     )
+    st.caption("계산된 변화이며 실제 이동·성과가 아닙니다. 수량 단위는 원천 자료 확인이 필요합니다.")
 
 
 def _render_steps(route_type: str, playing: bool, inventory_view: str) -> None:
     steps = (
-        ["출고 준비", "물류센터 이동", "물류센터 경유", "도착 점포 이동", "도착 및 입고", "재고 반영 완료"]
+        ["가상 출고 준비", "물류센터 이동 모의", "물류센터 경유 모의", "도착 점포 이동 모의", "가상 입고", "시뮬레이션 재고 반영"]
         if route_type == "VIA_DC"
-        else ["출고 준비", "점포 간 이동", "도착 및 입고", "재고 반영 완료"]
+        else ["가상 출고 준비", "점포 간 이동 모의", "가상 입고", "시뮬레이션 재고 반영"]
     )
     current = len(steps) if inventory_view == "이동 후" else 2 if playing else 1
     items = []
@@ -939,7 +955,7 @@ def _render_scenario_status(scenario: Mapping[str, Any], display_mode: str) -> N
     requested = int(scenario.get("requested_route_count") or 0)
     executed = int(scenario.get("executed_route_count") or 0)
     skipped = int(scenario.get("skipped_route_count") or 0)
-    st.caption(f"순차 적용: 요청 {requested}건 · 실행 {executed}건 · 건너뜀 {skipped}건")
+    st.caption(f"시뮬레이션 순차 적용: 요청 {requested}건 · 반영 {executed}건 · 건너뜀 {skipped}건")
     for item in scenario.get("skipped_reasons") or []:
         st.caption(f"{item.get('route_id') or '경로'}: {item.get('reason') or '현재 상태에서 실행 불가'}")
 
@@ -1024,31 +1040,40 @@ def _render_inventory_basis(scenario: Mapping[str, Any]) -> None:
 def render_overview_page() -> None:
     data = st.session_state.get("varo_data")
     recommendations = _recommendations()
-    data_available = has_app_data(data, recommendations)
+    contract = current_contract()
+    data_available = has_app_data(data, recommendations) or bool(contract.get("products"))
     render_page_header(
         st,
         "시뮬레이션",
-        "조건을 선택하고 재고 이동 흐름과 예상 효과를 한 화면에서 확인하세요.",
+        "재고 이동 흐름과 핵심 결과를 확인하세요.",
     )
-    _render_kpis()
-
-    if not data_available:
-        render_empty_state(
-            st, "데이터를 업로드하면 결과가 표시됩니다",
-            "왼쪽 메뉴 또는 상단에서 엑셀을 업로드하거나 기본 샘플을 불러와주세요.",
-        )
-        return
-
     workspace = st.container(key="simulation_workspace")
-    layout = workspace.columns([0.92, 2.65, 0.95], gap="medium")
+    layout = workspace.columns([3.4, 1], gap="medium")
     with layout[0]:
-        with st.container(border=True):
-            st.markdown('<div class="v3-panel-title">시뮬레이션 설정</div>', unsafe_allow_html=True)
-            filtered = _render_scope_filters(recommendations)
-            if not filtered:
-                render_empty_state(st, "선택 조건에 맞는 경로가 없습니다", compact=True)
-                return
-            controls = _render_controls(filtered)
+        from components.data_toolbar import render_home_analysis_inputs
+        render_home_analysis_inputs()
+        if data_available and recommendations:
+            run_column, conditions_column = st.columns([3, 1], gap="small")
+            with conditions_column.popover("시뮬레이션 조건", width="stretch"):
+                filtered = _render_scope_filters(recommendations)
+                controls = _render_controls(filtered, execute_target=run_column) if filtered else None
+        else:
+            filtered, controls = [], None
+    if not filtered:
+        with layout[0]:
+            render_empty_state(st, "표시할 시뮬레이션이 없습니다",
+                               "데이터를 분석하거나 시뮬레이션 조건을 확인하세요.")
+        with layout[1], st.container(border=True):
+            st.markdown('<div class="v3-panel-title">핵심 결과</div>', unsafe_allow_html=True)
+            if contract:
+                summary = contract.get("summary") or {}
+                st.metric("분석 상품", str(summary.get("unique_products", "미확인")))
+                st.caption("이동 후보가 없는 상품도 전체 결과에 포함됩니다.")
+            else:
+                st.caption("분석을 실행하면 결과가 표시됩니다.")
+            from components.navigation import _navigate_to
+            st.button("전체 결과 보기", key="home_results", on_click=_navigate_to, args=("결과 이력",), width="stretch")
+        return
 
     selected_route_id = resolve_selected_route_id(filtered, st.session_state.get("selected_route_id"))
     if selected_route_id != st.session_state.get("selected_route_id"):
@@ -1074,15 +1099,17 @@ def render_overview_page() -> None:
     playing = bool(st.session_state.get("home_sim_playing", False))
     speed_seconds = animation_duration_seconds(str(controls["speed"]))
     focus_route = next((route for route in sim_routes if str(route.get("route_id")) == focus_id), sim_routes[0] if sim_routes else {})
-    with layout[1]:
+    with layout[0]:
         st.markdown('<div class="v3-panel-title">재고 이동 흐름</div>', unsafe_allow_html=True)
+        st.caption("복사본 시뮬레이션 · 실제 실행 기록과 별개")
         _render_network(
             nodes, sim_routes, all_routes, playing, speed_seconds, bool(controls["show_all"]),
             scenario, str(controls["inventory_view"]), str(controls["display_mode"]), focus_id,
         )
         _render_steps(normalize_route_type(focus_route), playing, str(controls["inventory_view"]))
         _render_scenario_status(scenario, str(controls["display_mode"]))
-    with layout[2]:
+    with layout[1]:
         with st.container(border=True):
             _render_core_results(scenario, sim_routes)
-    _render_inventory_basis(scenario)
+            from components.navigation import _navigate_to
+            st.button("전체 결과 보기", key="home_results", on_click=_navigate_to, args=("결과 이력",), width="stretch")

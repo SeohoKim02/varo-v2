@@ -101,10 +101,12 @@ class SimulationHistoryUiTests(unittest.TestCase):
     def test_simulation_screen_gains_no_history_control(self):
         app = self._new_app()
         self._run_simulation(app, 1)
-        labels = {item.label for item in app.main.button}
+        labels = {item.label for item in app.main.button if item.key != "brand_home" and not (item.key or "").startswith("nav_")}
         self.assertNotIn("이력 저장", labels)
         self.assertNotIn("결과 저장", labels)
-        self.assertEqual(labels, {"시뮬레이션 실행", "다시 실행"})
+        self.assertEqual(labels, {"시뮬레이션 실행", "다시 실행", "분석 실행", "샘플로 시작", "전체 결과 보기"})
+        # New upload/scenario controls do not create extra saved runs.
+        self.assertEqual(len(list_simulation_runs(directory=self.history_dir)), 1)
 
     def test_saved_run_stays_small(self):
         app = self._new_app()
@@ -185,7 +187,7 @@ class SimulationHistoryUiTests(unittest.TestCase):
         ]
         self.assertTrue(frames)
         summary = frames[0].set_index("지표")
-        self.assertEqual(summary.loc["실행 상태", "DQN"], "비교 가능")
+        self.assertEqual(summary.loc["비교 상태", "DQN"], "비교 가능")
         self.assertNotEqual(summary.loc["선택/평가 건수", "DQN"], "비교 불가")
         # DQN must stay an independent strategy, not a copy of Greedy or VHS.
         judgements = [
