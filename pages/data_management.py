@@ -260,5 +260,7 @@ def render_data_management_page() -> None:
     if st.session_state.get("data_apply_message"):
         st.success(st.session_state["data_apply_message"])
     elif candidate_report and candidate_report.has_errors:
-        st.error(st.session_state.get("pending_validation_error") or "데이터를 적용할 수 없습니다.")
+        from components.user_feedback import report_error, user_text
+        error = st.session_state.get("pending_validation_error")
+        report_error("data validation", error, user_text(error, "데이터를 적용하지 못했습니다. 필수 항목·날짜·중복값을 확인한 뒤 다시 업로드하세요."))
     _render_sheet_summary(candidate_data, candidate_report)

@@ -13,6 +13,7 @@ import streamlit as st
 
 from components.cards import render_empty_state, render_kpi_card, render_page_header, render_section_header
 from components.status import badge_html, user_status_label
+from components.user_feedback import logger, report_error, user_text
 from components.tables import build_recommendation_rows, render_recommendation_table
 from pages.recommendations import _render_downloads, _render_selected_recommendation, _render_selection
 from pages.route_detail import _render_route_steps
@@ -43,6 +44,8 @@ def _saved_dqn_runs(directory: str) -> list[dict[str, Any]]:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
+            logger.exception("Cannot read saved learning result: %s", path)
+            st.warning("일부 학습 결과를 읽지 못했습니다. 파일 접근 권한과 저장 상태를 확인한 뒤 다시 조회하세요.")
             continue
         timestamp_text = str(payload.get("timestamp") or "")
         try:
@@ -89,12 +92,22 @@ def _filter_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return []
     dates = [row["timestamp"].date() for row in rows]
     default_start, default_end = min(dates), max(dates)
+    # Navigation restores this key. Session state is the sole initializer;
+    # supplying value= as well triggers Streamlit's duplicate-default warning.
+    maximum = max(default_end, date.today())
+    saved = st.session_state.get("history_period", (default_start, default_end))
+    if isinstance(saved, date):
+        saved = (saved, saved)
+    if not isinstance(saved, (tuple, list)) or len(saved) > 2 or any(not isinstance(v, date) for v in saved):
+        saved = (default_start, default_end)
+    normalized = tuple(sorted(max(default_start, min(maximum, v)) for v in saved))
+    if "history_period" not in st.session_state or st.session_state["history_period"] != normalized:
+        st.session_state["history_period"] = normalized
     controls = st.columns([1.25, 1, 1, 1.45, 0.65], gap="small")
     period = controls[0].date_input(
         "기간",
-        value=(default_start, default_end),
         min_value=default_start,
-        max_value=max(default_end, date.today()),
+        max_value=maximum,
         key="history_period",
     )
     strategy = controls[1].selectbox(
@@ -107,6 +120,9 @@ def _filter_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     controls[4].button("조회", key="history_search_button", type="primary", width="stretch")
     if isinstance(period, (tuple, list)) and len(period) == 2:
         start_date, end_date = period
+    elif isinstance(period, (tuple, list)):
+        st.info("조회할 시작일과 종료일을 모두 선택해 주세요.")
+        return []
     else:
         start_date = end_date = period if isinstance(period, date) else default_end
     needle = str(search or "").strip().lower()
@@ -159,13 +175,14 @@ def _render_selected_history(rows: list[dict[str, Any]]) -> None:
     )
     st.markdown(
         '<div class="v2-wrap v2-card">'
-        f'<div class="v2-card-head"><div class="v2-card-title">선택 결과</div>{badge_html(selected["status"], "success")}</div>'
+        f'<div class="v2-card-head"><div class="v2-card-title">선택 결과</div>{badge_html(selected["status"], "success" if selected["status"] in {"정상", "완료", "검증 통과"} else "warning")}</div>'
         f'{rows_html}</div>',
         unsafe_allow_html=True,
     )
     try:
         payload = Path(selected["path"]).read_bytes()
-    except OSError:
+    except OSError as exc:
+        report_error("history download", exc, "저장 결과를 읽지 못해 다운로드할 수 없습니다. 파일 접근 권한을 확인하고 다시 조회하세요.")
         payload = None
     if payload:
         st.download_button(
@@ -194,7 +211,7 @@ def _filters_label(payload: object) -> str:
         values = json.loads(str(payload or "{}"))
     except (ValueError, TypeError):
         return "-"
-    parts = [f"{key}: {value}" for key, value in values.items() if value not in (None, "")]
+    parts = [f"{user_text(key, '조회 조건')}: {user_text(value, '확인 필요')}" for key, value in values.items() if value not in (None, "")]
     return " · ".join(parts) if parts else "-"
 
 
@@ -202,13 +219,13 @@ def _simulation_frame(runs: list[dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame([{
         "실행일시": str(row.get("created_at") or "")[:19].replace("T", " "),
         "실행 조건": _filters_label(row.get("filters_json")),
-        "최종 전략": row.get("final_strategy") or "-",
+        "기존 분석 판단(참고)": user_status_label(row.get("final_strategy")),
         "최종 선택 건수": int(row.get("selected_count") or 0),
         "총 이동수량": _number(row.get("total_moved_quantity")) or 0,
         "예상 절감액": _history_saving_display(row),
         "부족재고 감소": _number(row.get("shortage_reduction")) or 0,
         "서비스 충족률(%)": _number(row.get("service_fill_rate")),
-        "상태": row.get("status") or "-",
+        "상태": user_status_label(row.get("status")),
     } for row in runs])
 
 
@@ -232,10 +249,9 @@ def _history_cost_display(run: Mapping[str, Any]) -> str:
 def _render_simulation_detail(run: dict[str, Any]) -> None:
     metrics = (
         ("실행일시", str(run.get("created_at") or "-")[:19].replace("T", " ")),
-        ("상태", run.get("status") or "-"),
+        ("상태", user_status_label(run.get("status"))),
         ("데이터", run.get("data_name") or "-"),
         ("데이터 종류", run.get("data_source_type") or "-"),
-        ("데이터 식별자", str(run.get("data_signature") or "-")[:16]),
         ("기준 스냅샷/기간", run.get("snapshot_label") or "데이터에 기준일자 열 없음"),
         ("실행 조건", _filters_label(run.get("filters_json"))),
         ("센터/점포 범위", _scope_label(run.get("node_scope_json"))),
@@ -254,50 +270,51 @@ def _render_simulation_detail(run: dict[str, Any]) -> None:
             f"{_number(run.get('service_fill_rate')):.1f}%"
             if _number(run.get("service_fill_rate")) is not None else "-",
         ),
-        ("최종 전략", run.get("final_strategy") or "-"),
-        ("결과 기준", run.get("strategy_basis") or "-"),
-        ("계산 버전", run.get("calculation_version") or "-"),
+        ("기존 분석 판단(참고)", user_status_label(run.get("final_strategy"))),
+        ("결과 기준", "재고 이동을 가정한 계산 결과 · 실제 실행 아님"),
     )
     if run.get("error_summary"):
-        metrics = (*metrics, ("실패 요약", str(run["error_summary"])))
+        logger.error("Saved simulation failure %s: %s", run.get("run_id"), run["error_summary"])
+        metrics = (*metrics, ("실패 안내", "이전 실행을 완료하지 못했습니다. 입력 자료와 저장 권한을 확인한 뒤 다시 실행하세요."))
     rows_html = "".join(
         '<div class="v2-detail-row">'
         f'<span class="v2-card-caption">{html.escape(str(label))}</span>'
         f'<strong>{html.escape(str(value))}</strong></div>'
         for label, value in metrics
     )
-    variant = "warning" if str(run.get("status")) == STATUS_FAILED else "success"
+    variant = "success" if str(run.get("status")) in {"완료", "COMPLETED", "SUCCESS"} and not run.get("error_summary") else "warning"
     st.markdown(
         '<div class="v2-wrap v2-card">'
         f'<div class="v2-card-head"><div class="v2-card-title">실행 요약</div>'
-        f'{badge_html(str(run.get("status") or "-"), variant)}</div>'
+        f'{badge_html(user_status_label(run.get("status")), variant)}</div>'
         f'{rows_html}</div>',
         unsafe_allow_html=True,
     )
     routes = get_run_routes(str(run.get("run_id") or ""))
-    render_section_header(st, "최종 선택 경로", "최종 Varo가 실제로 선택한 경로만 저장합니다.")
+    st.caption("기존 분석 판단의 할인·보류 등은 상품 처리에 대한 참고 판단입니다. 아래 이동 계획의 실행 방식이나 실제 판매 완료를 뜻하지 않습니다.")
+    render_section_header(st, "최종 선택 경로", "계산으로 선택한 이동 계획입니다. 실제 이동 기록이 아닙니다.")
     if not routes:
         render_empty_state(st, "저장된 최종 선택 경로가 없습니다", compact=True)
         return
     st.dataframe(
         pd.DataFrame([{
             "순서": row.get("sequence"),
-            "route_id": row.get("route_id"),
+            "경로 번호": row.get("route_id"),
             "상품": row.get("product_name") or row.get("product_id"),
             "출발": row.get("source_id"),
             "도착": row.get("target_id"),
             "경유 DC": row.get("dc_id") or "-",
-            "경로 유형": row.get("route_type"),
-            "전략": row.get("action") or "-",
+            "경로 유형": {"DIRECT": "직접 이동", "VIA_DC": "물류센터 경유"}.get(row.get("route_type"), "경로 확인 필요"),
+            "기존 분석 판단(참고)": user_status_label(row.get("action")),
             "추천 수량": _number(row.get("recommended_qty")),
             "적용 수량": _number(row.get("applied_qty")),
             "이동 비용": _number(row.get("move_cost")),
-            "예상 절감액": _number(row.get("expected_saving")),
+            "예상 절감액": _history_saving_display({"total_expected_saving": row.get("expected_saving"), "data_source_type": run.get("data_source_type")}),
             "VARO 순위": _number(row.get("varo_final_rank")),
             "VHS 순위": _number(row.get("vhs_rank")),
             "Greedy 순위": _number(row.get("greedy_rank")),
             "시뮬레이션 반영": "반영" if row.get("executed") else "건너뜀",
-            "건너뛴 사유": row.get("skipped_reason") or "-",
+            "건너뛴 사유": user_text(row.get("skipped_reason"), "조건 확인 필요" if not row.get("executed") else "-"),
         } for row in routes]),
         hide_index=True,
         width="stretch",
@@ -314,9 +331,9 @@ def _render_simulation_history() -> None:
             "저장된 시뮬레이션 이력이 없습니다",
             "시뮬레이션 화면에서 실행을 완료하면 이곳에 자동으로 쌓입니다.",
         )
-        st.caption(f"저장 위치: {storage['path']}")
+        logger.info("Simulation history storage: %s", storage)
         return
-    completed = [row for row in runs if str(row.get("status")) != STATUS_FAILED]
+    completed = [row for row in runs if str(row.get("status")) in {"완료", "COMPLETED", "SUCCESS"} and not row.get("error_summary")]
     columns = st.columns(3, gap="medium")
     values = (
         ("총 실행 건수", f"{len(runs):,}건", "로컬에 저장된 시뮬레이션 실행"),
@@ -340,14 +357,13 @@ def _render_simulation_history() -> None:
             list(by_id),
             format_func=lambda key: (
                 f"{str(by_id[key].get('created_at') or '')[:16].replace('T', ' ')} · "
-                f"{by_id[key].get('final_strategy') or by_id[key].get('status') or '-'}"
+                f"이동 시뮬레이션 · {user_status_label(by_id[key].get('status'))}"
             ),
             key="simulation_history_select",
         )
     _render_simulation_detail(by_id[selected_id])
     st.caption(
-        f"저장 위치: {storage['path']} · 현재 크기 {storage['size_kb']:,.1f}KB · "
-        f"실행 {storage['run_count']:,}건 · 선택 경로 {storage['route_row_count']:,}행"
+        f"저장된 실행 {storage['run_count']:,}건 · 선택 경로 {storage['route_row_count']:,}행"
     )
 
 
@@ -414,16 +430,17 @@ def _render_shadow_history() -> None:
                               "FROM seller_shadow_decisions ORDER BY recorded_at DESC LIMIT 500").fetchall()
             count = db.execute("SELECT COUNT(*) FROM seller_shadow_decisions").fetchone()[0]
             outcomes = db.execute("SELECT COUNT(*) FROM seller_shadow_outcomes").fetchone()[0] if "seller_shadow_outcomes" in tables else 0
-        st.caption(f"실제 저장된 판단 {count:,}개 버전 · outcome 기록 {outcomes:,}개 · 최근 500개 표시. TEST/SCENARIO는 운영 실적이 아닙니다.")
-        frame = pd.DataFrame([{"판단일": r[0], "상품": r[1], "출발 점포": r[2], "자료 구분": r[3], "버전": r[4]} for r in rows])
+        st.caption(f"저장된 판단 {count:,}개 버전 · 실제 결과 기록 {outcomes:,}개 · 최근 500개 표시. 테스트·예시 조건은 운영 실적이 아닙니다.")
+        from components.seller_decisions import mode_label
+        frame = pd.DataFrame([{"판단일": r[0], "상품": r[1], "출발 점포": r[2], "자료 구분": mode_label(r[3])} for r in rows])
         if not frame.empty:
             st.dataframe(frame, hide_index=True, width="stretch")
             st.download_button("저장된 판매자 판단 JSON", json.dumps([json.loads(r[5]) for r in rows], ensure_ascii=False, default=str).encode("utf-8"),
                                file_name="varo_saved_seller_decisions.json", mime="application/json", key="history_shadow_download")
         else:
             st.info("저장된 판매자 판단 기록이 없습니다.")
-    except (sqlite3.Error, OSError, ValueError):
-        st.warning("판매자 기록을 지금 읽을 수 없습니다. 다른 실행이 끝난 뒤 다시 조회하세요. 기존 기록은 변경하지 않았습니다.")
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        report_error("seller history read", exc, "판매자 기록을 읽지 못했습니다. 다른 실행이 끝난 뒤 다시 조회하고, 계속되면 저장 권한을 확인하세요. 기존 기록은 변경하지 않았습니다.")
 
 
 def _render_dqn_history() -> None:

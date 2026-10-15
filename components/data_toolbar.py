@@ -88,7 +88,9 @@ def _render_feedback() -> None:
     validation_error = st.session_state.get("pending_validation_error")
     pending_validation = st.session_state.get("pending_varo_validation")
     if load_error or validation_error:
-        st.error(load_error or validation_error)
+        from components.user_feedback import report_error, user_text
+        report_error("data upload", load_error or validation_error, user_text(load_error or validation_error,
+                     "파일을 불러오거나 검증하지 못했습니다. 파일 형식·필수 시트·열 이름을 확인한 뒤 다시 선택하세요."))
         if st.session_state.get("varo_data"):
             st.warning("새 파일을 적용하지 못했습니다. 화면에는 이전에 정상 적용한 데이터가 유지됩니다.")
         st.caption("파일·시트·필수 열을 확인하고 파일을 다시 선택하세요. 설정에서 상세 검증 결과를 확인할 수 있습니다.")

@@ -10,6 +10,8 @@ import pandas as pd
 import streamlit as st
 
 from components.cards import render_section_header
+from components.status import user_status_label
+from components.user_feedback import diagnostic_details, explanation_text, FIELD_LABELS, user_text
 
 STATUS_LABELS = {
     "RECOMMENDATION_AVAILABLE": "검증 조건을 충족한 추천",
@@ -182,7 +184,8 @@ def render_summary(contract: Mapping[str, Any]) -> None:
     if contract.get("context_errors"):
         st.warning("선택 입력 시트 중 적용할 수 없는 항목이 있습니다. 나머지 결과와 구분해 확인하세요.")
         with st.expander("입력 시트 오류 상세"):
-            st.json(contract["context_errors"])
+            diagnostic_details("seller input errors", contract["context_errors"])
+            st.caption("입력 양식의 필수 항목·날짜·중복된 상품과 점포를 확인해 주세요. 적용하지 못한 항목은 분석 완료로 처리하지 않습니다.")
     if contract.get("coverage") and not contract["coverage"].get("pass", False):
         st.error("상품 결과의 누락·중복 또는 연결 문제를 발견했습니다. 운영 판단 전에 전체 결과를 확인하세요.")
 
@@ -201,12 +204,12 @@ def render_strategy_cards(item: Mapping[str, Any], prefix="seller") -> None:
                 st.caption(("비교 가능 · 예시 조건" if prefix == "seller_scenario" else "비교 가능")
                            if strategy in available and number(value) is not None else "비교 불가 · 추천으로 사용하지 않습니다")
                 if values.get(strategy):
-                    st.caption(f"금액 출처: {values[strategy].get('source') or '미확인'}")
+                    st.caption("금액 출처: " + EVIDENCE_LABELS.get(values[strategy].get('source'), "계산 근거 확인 필요"))
     st.caption("세 전략은 같은 결정 수량·비교 범위에서만 비교합니다. 알 수 없는 손실은 0원으로 바꾸지 않습니다.")
 
 
 def render_product_detail(item: Mapping[str, Any], contract: Mapping[str, Any], prefix="seller") -> None:
-    st.info(item.get("explanation_ko") or "설명을 만들 자료가 부족합니다.")
+    st.info(explanation_text(item.get("explanation_ko")))
     display = item.get("display") or {}
     st.markdown(f"**검토할 내용:** {display.get('recommendation_or_plan') or '추가 자료 확인'}")
     st.caption(f"자료 구분: {mode_label(item.get('decision_mode'), st.session_state.get('data_source_type'))} · "
@@ -233,31 +236,31 @@ def render_product_detail(item: Mapping[str, Any], contract: Mapping[str, Any], 
                 validation = route.get("plan_validation") or {}
                 execution = {"NOT_RECORDED": "미확인", "EXECUTED": "실행 기록 있음"}.get(route.get("execution_status"), "상세 확인 필요")
                 st.caption(f"제약 위반: {validation.get('violation_count', '미확인')} · 실행 기록: {execution}")
-                st.caption(route.get("explanation_ko") or "계획 근거 확인 필요")
+                st.caption(explanation_text(route.get("explanation_ko")))
     render_strategy_cards(item, prefix)
     missing = item.get("missing_required_inputs") or []
     with st.expander("필요한 추가 입력", expanded=bool(missing)):
         if missing:
-            st.dataframe(pd.DataFrame([{"필요한 값": v.get("label") or v.get("field"),
-                                        "입력 항목": v.get("field"), "안내": {
+            st.dataframe(pd.DataFrame([{"필요한 값": user_text(v.get("label") or FIELD_LABELS.get(v.get("field")), "추가 자료 확인"),
+                                        "안내": {
                                             "ENTER_MISSING": "누락된 값 입력", "CONFIRM_OR_REPLACE": "값과 근거 확인",
                                             "RESOLVE_UNKNOWN_FOR_ROBUST_RANKING": "조건에 따라 판단이 달라져 확인 필요",
                                             "RANKING_DEPENDS_ON_DATA": "전략 비교를 위한 근거 확인",
                                         }.get(v.get("kind") or v.get("request_kind"), "자료와 적용 조건 확인")}
                                        for v in missing]), hide_index=True, width="stretch")
-            st.caption("설정의 데이터 교체에서 해당 상품·점포의 seller_loss_inputs 또는 seller_business_profile 시트를 포함하세요. 이미 유효한 값은 다시 요청하지 않습니다.")
+            st.caption("설정의 데이터 교체에서 해당 상품·점포의 판매자 손실 입력 또는 사업장 기본정보 양식을 포함하세요. 이미 유효한 값은 다시 요청하지 않습니다.")
         else:
             st.caption("현재 계약에서 요청하는 추가 입력이 없습니다. 검증 근거 부족과 입력 부족은 서로 다릅니다.")
     with st.expander("근거 · 참고 지표 · 기존 판단"):
         refs = item.get("reference_metrics") or {}
         forecast = item.get("forecast") or {}
         st.markdown("**참고 지표**")
-        st.caption(f"ABC 기준: {refs.get('abc_basis') or '확인 필요'} · 회전율은 검증된 판매와 물류 출고를 구분합니다.")
+        st.caption(f"ABC 기준: {user_text(refs.get('abc_basis'), '근거 확인 필요')} · 회전율은 검증된 판매와 물류 출고를 구분합니다.")
         st.caption(f"폐기 위험: 규칙 기반 점수 {refs.get('legacy_disposal_score') if refs.get('legacy_disposal_score') is not None else '미확인'} · 실제 확률이 아닙니다.")
-        st.caption(f"수요예측 버전: {forecast.get('version') or '미확인'} · fallback: {forecast.get('fallback_reason') or '기록 없음'} · 외부 일반화는 확인되지 않았습니다.")
-        st.caption(f"기존 판단(참고): {item.get('legacy_action') or '단일 판단 없음'} · 운영자 실제 행동: {item.get('operator_action') or '미확인'}")
+        st.caption("수요예측: 기본 방식으로 대체됨 · 자료 조건 확인 필요" if forecast.get('fallback_reason') else "수요예측: 현재 자료 기준 계산 · 외부 자료에 대한 적용성은 확인되지 않았습니다.")
+        st.caption(f"기존 판단(참고): {user_status_label(item.get('legacy_action'), '단일 판단 없음')} · 운영자 실제 행동: {user_status_label(item.get('operator_action'), '미확인')}")
         st.caption("실제 지출·매출·손실·절감액은 실행 및 outcome 기록 없이는 확인할 수 없습니다.")
-        st.json({k: item.get(k) for k in ("input_quality", "seller_loss_status", "promotion_status", "comparison_scope",
+        diagnostic_details("seller decision evidence", {k: item.get(k) for k in ("input_quality", "seller_loss_status", "promotion_status", "comparison_scope",
             "available_strategies", "excluded_strategies", "seller_comparisons", "reference_metrics", "forecast",
             "source_lineage", "reason_codes", "incoming_transfer_routes", "actual_spend", "actual_saving", "outcome")})
 
@@ -367,6 +370,8 @@ def render_scenario_demo() -> None:
         render_strategy_cards(item, "seller_scenario")
         winner = result.get("recommended_strategy")
         st.info(f"예시 조건의 최소손실 전략: {STRATEGIES.get(winner, '비교 불가')}")
-        st.caption(result.get("explanation") or "비교 근거 확인 필요")
+        st.caption(explanation_text(result.get("explanation")))
         with st.expander("예시 입력·계산 근거"):
-            st.json(result)
+            st.dataframe(pd.DataFrame([{"입력 조건": FIELD_LABELS.get(key, "입력 조건"), "값": value} for key, value in values.items()]), hide_index=True)
+            st.caption("입력 출처: 사용자가 지정한 예시 조건 · 실제 관측치가 아닙니다.")
+            diagnostic_details("seller scenario result", result)

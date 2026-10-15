@@ -1007,6 +1007,9 @@ def _persist_simulation_run(
         )
         record_simulation_run(summary, routes, run_key=run_key)
     except Exception as exc:  # pragma: no cover - history never blocks the run
+        from components.user_feedback import logger
+        logger.exception("Simulation history persistence failed")
+        st.warning("계산 결과를 이력에 저장하지 못했습니다. 저장 권한을 확인한 뒤 다시 실행하세요. 현재 화면의 계산 결과는 남아 있습니다.")
         try:
             record_failed_run(
                 run_key=run_key,
@@ -1016,7 +1019,7 @@ def _persist_simulation_run(
                 data_source_type=st.session_state.get("data_source_type"),
             )
         except Exception:
-            pass
+            logger.exception("Could not persist simulation failure record")
 
 
 def _render_inventory_basis(scenario: Mapping[str, Any]) -> None:

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from components.cards import render_empty_state, render_page_header, render_section_header
 from components.status import badge_html, user_status_label
+from components.user_feedback import diagnostic_details, report_error
 from services import export_service, v2_summaries
 from services.analysis_pipeline import run_analysis_pipeline
 from services.app_state import current_result_basis
@@ -167,7 +168,7 @@ def _display_frame(rows) -> pd.DataFrame:
     ):
         if column in frame.columns:
             frame[column] = frame[column].map(user_status_label)
-    return frame
+    return frame.rename(columns={"status": "상태", "final_status": "최종 상태", "stability_status": "안정성 상태"})
 
 
 def _as_number(value):
@@ -485,7 +486,7 @@ def _render_detailed_sensitivity_results(result: dict) -> None:
     with tab_map["전체 시나리오"]:
         st.dataframe(sensitivity_detail_frame(result), hide_index=True, width="stretch")
         with st.expander("내부 메타데이터", expanded=False):
-            st.json(result.get("metadata") or {})
+            diagnostic_details("sensitivity metadata", result.get("metadata") or {})
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     downloads = st.columns(2, gap="small")
@@ -602,7 +603,7 @@ def _render_detailed_sensitivity(pipeline: dict, recommendations: list[dict]) ->
 
     error = st.session_state.get("sensitivity_last_error")
     if error:
-        st.error(f"상세 민감도 계산을 완료하지 못했습니다: {error}")
+        report_error("sensitivity calculation", error, "조건 변화 비교를 완료하지 못했습니다. 입력 자료와 비교 범위를 확인한 뒤 다시 실행하세요.")
     result = st.session_state.get("sensitivity_result")
     if result and str(st.session_state.get("sensitivity_data_signature") or "") == current_signature:
         _render_detailed_sensitivity_results(result)
@@ -1174,7 +1175,7 @@ def _render_dqn() -> None:
     elif notice == "최근 결과 없음":
         st.info("현재 데이터와 선택 유형에 맞는 최근 학습 결과가 없습니다.")
     elif notice:
-        st.error("요청을 완료하지 못했습니다. 기존 추천 결과는 유지됩니다.")
+        report_error("learning request", notice, "학습 요청을 완료하지 못했습니다. 선택한 데이터와 학습 환경을 확인해 주세요. 기존 추천 결과는 유지됩니다.")
     if st.session_state.pop("dqn_storage_notice", False):
         st.warning("파일 저장은 완료되지 않았지만 학습 결과는 현재 세션에서 확인할 수 있습니다.")
 
@@ -1341,12 +1342,13 @@ def _render_validation_report(pipeline: dict) -> None:
     )
     if v2_functions:
         with st.expander("내부 연결 정보", expanded=False):
-            st.caption("연결된 V2 요약 기능: " + " · ".join(v2_functions))
+            diagnostic_details("connected summary functions", v2_functions)
+            st.caption(f"연결된 분석 요약 기능 {len(v2_functions)}개")
     reasons = (pipeline.get("reason_analysis") or {}).get("reasons") or {}
     if reasons:
         reason_rows = [
             {
-                "route_id": route_id,
+                "경로 번호": route_id,
                 "추천 사유": " ".join(detail.get("sentences") or []),
                 "주의사항": detail.get("caution", ""),
             }
@@ -1357,7 +1359,7 @@ def _render_validation_report(pipeline: dict) -> None:
     exclusion = pipeline.get("excluded_dqn_artifacts") or {}
     st.info(exclusion.get("reason", "기존 DQN 학습 결과는 V2에 반영하지 않습니다."))
     with st.expander("DQN 제외 패턴", expanded=False):
-        st.code("\n".join(exclusion.get("blocked_patterns") or []), language=None)
+        diagnostic_details("excluded model patterns", exclusion.get("blocked_patterns") or [])
 
     sources = (pipeline.get("validation_report") or {}).get("calculation_sources") or {}
     if sources:
@@ -1759,7 +1761,7 @@ def _render_optimality_gap() -> None:
 
     error = st.session_state.get("optimality_gap_last_error")
     if error:
-        st.error(f"최적성 Gap 계산을 완료하지 못했습니다: {error}")
+        report_error("optimality gap calculation", error, "최적 결과와의 차이를 계산하지 못했습니다. 이동 후보와 제약 자료를 확인한 뒤 다시 실행하세요.")
     result = st.session_state.get("optimality_gap_result")
     if result and str(st.session_state.get("optimality_gap_data_signature") or "") == current_signature:
         _render_optimality_gap_results(result)
@@ -1962,7 +1964,8 @@ def _render_integrated_results(result: dict) -> None:
         if frames["errors"].empty:
             st.success("치명적 오류나 계산 제외 내역이 없습니다.")
         else:
-            st.dataframe(frames["errors"], hide_index=True, width="stretch")
+            diagnostic_details("integrated validation errors", frames["errors"].to_dict("records"))
+            st.error(f"계산 오류 또는 제외 항목이 {len(frames['errors']):,}건 있습니다. 해당 데이터의 필수 값과 비교 조건을 확인하세요. 검증 완료로 간주하지 마세요.")
 
     with result_tabs[6]:
         sample_rows = list(result.get("samples") or [])
@@ -1974,9 +1977,9 @@ def _render_integrated_results(result: dict) -> None:
             item = labels[selected]
             st.dataframe(integrated_detail_frame({"samples": [item]}), hide_index=True, width="stretch")
             with st.expander("샘플 메타데이터", expanded=False):
-                st.json(item.get("metadata") or {})
+                diagnostic_details("validation sample metadata", item.get("metadata") or {})
             with st.expander("샘플 전체 수집 결과", expanded=False):
-                st.json(item)
+                diagnostic_details("validation sample result", item)
 
     _render_integrated_downloads(result)
 
@@ -2094,7 +2097,7 @@ def _render_integrated_validation() -> None:
 
     error = st.session_state.get("integrated_validation_last_error")
     if error:
-        st.error(f"통합 검증을 완료하지 못했습니다: {error}")
+        report_error("integrated validation", error, "통합 검증을 완료하지 못했습니다. 선택한 데이터와 저장 권한을 확인한 뒤 다시 실행하세요.")
     result = st.session_state.get("integrated_validation_result")
     if result and result.get("version") != INTEGRATED_VALIDATION_VERSION:
         st.warning("검증 코드 버전이 변경되어 이전 통합 결과를 현재 결과로 표시하지 않습니다. 다시 실행해주세요.")

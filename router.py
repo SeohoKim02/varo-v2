@@ -29,5 +29,9 @@ def render_current_page() -> None:
         st.session_state["current_menu"] = MENU_ITEMS[0]
         selected_page = MENU_ITEMS[0]
     module_name, function_name = _PAGE_RENDERERS[selected_page]
-    renderer = getattr(import_module(module_name), function_name)
-    renderer()
+    try:
+        renderer = getattr(import_module(module_name), function_name)
+        renderer()
+    except Exception as exc:
+        from components.user_feedback import report_error
+        report_error(f"page render: {selected_page}", exc)
