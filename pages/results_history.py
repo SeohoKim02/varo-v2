@@ -219,6 +219,16 @@ def _history_saving_display(run: Mapping[str, Any]) -> str:
     return f"{value:,.0f}원 · 예시 조건"
 
 
+def _history_cost_display(run: Mapping[str, Any]) -> str:
+    value = _number(run.get("total_move_cost"))
+    if value is None:
+        return "미산정 · 자료 부족"
+    if "샘플" in str(run.get("data_source_type") or ""):
+        return f"{value:,.0f}원 · 예시 조건"
+    # Saved history has no verified currency field; do not infer KRW.
+    return f"{value:,.0f} (통화 미확인)"
+
+
 def _render_simulation_detail(run: dict[str, Any]) -> None:
     metrics = (
         ("실행일시", str(run.get("created_at") or "-")[:19].replace("T", " ")),
@@ -235,7 +245,7 @@ def _render_simulation_detail(run: dict[str, Any]) -> None:
         ("실행 가능 후보 수", f"{int(run.get('feasible_candidate_count') or 0):,}건"),
         ("최종 선택 건수", f"{int(run.get('selected_count') or 0):,}건"),
         ("시뮬레이션 반영 이동량", f"{_number(run.get('total_moved_quantity')) or 0:,.0f}"),
-        ("총 예상 이동비용", f"{_number(run.get('total_move_cost')) or 0:,.0f}원"),
+        ("총 예상 이동비용", _history_cost_display(run)),
         ("총 예상 절감액", _history_saving_display(run)),
         ("초과재고 감소", f"{_number(run.get('excess_reduction')) or 0:,.0f}"),
         ("부족재고 감소", f"{_number(run.get('shortage_reduction')) or 0:,.0f}"),

@@ -120,6 +120,31 @@ class SimulationInventoryViewTests(unittest.TestCase):
         self.assertEqual(results_history._history_saving_display({"total_expected_saving": 0,
                          "data_source_type": "샘플 추천 데이터"}), "0원 · 예시 조건")
 
+    def test_history_cost_does_not_infer_currency_or_replace_missing_with_zero(self):
+        from pages import results_history
+        run = {"total_move_cost": 35347, "data_source_type": "V2 생성 후보"}
+        original = dict(run)
+        self.assertEqual(results_history._history_cost_display(run), "35,347 (통화 미확인)")
+        self.assertEqual(run, original)
+        self.assertEqual(results_history._history_cost_display({}), "미산정 · 자료 부족")
+        self.assertEqual(results_history._history_cost_display({"total_move_cost": 0}), "0 (통화 미확인)")
+        self.assertEqual(results_history._history_cost_display({"total_move_cost": 35347,
+                         "data_source_type": "샘플 추천 데이터"}), "35,347원 · 예시 조건")
+
+    def test_strategy_cost_keeps_values_without_unverified_currency(self):
+        from pages import strategy_comparison
+        rows = [{"move_cost": 35347}]
+        with patch.object(strategy_comparison.st, "session_state", {"data_source_type": "V2 생성 후보"}):
+            self.assertEqual(strategy_comparison._cost_display(rows), "35,347 (통화 미확인)")
+            self.assertEqual(strategy_comparison._cost_display([{}]), "미산정 · 자료 부족")
+            self.assertEqual(strategy_comparison._cost_display([]), "비교 불가")
+            self.assertEqual(strategy_comparison._cost_display([{"move_cost": 0}]), "0 (통화 미확인)")
+            self.assertIn("35,347 (통화 미확인)", strategy_comparison._strategy_card("Greedy", rows))
+            self.assertEqual(strategy_comparison._comparison_frame({"Greedy": rows}).iloc[1]["Greedy"], "35,347 (통화 미확인)")
+        with patch.object(strategy_comparison.st, "session_state", {"data_source_type": "샘플 추천 데이터"}):
+            self.assertEqual(strategy_comparison._cost_display(rows), "35,347원")
+        self.assertEqual(rows, [{"move_cost": 35347}])
+
     def test_inventory_view_change_reuses_static_layout(self):
         recommendations = list(self.payload["varo_recommendations"][:1])
         data = self.payload["varo_data"]

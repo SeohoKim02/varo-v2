@@ -231,6 +231,30 @@ def test_back_tracks_pages_and_preserves_training_inputs(payload):
     assert fdi.digest(app.session_state["varo_pipeline_result"]) == before
 
 
+def test_restore_reassigns_existing_widget_values_without_overwriting_new_input():
+    from components import navigation
+
+    class WidgetState(dict):
+        assigned = None
+
+        def __setitem__(self, key, value):
+            self.assigned.add(key)
+            super().__setitem__(key, value)
+
+    state = WidgetState(data_signature="same", dqn_single_episodes=42,
+                        seller_history_search="fresh search", _ui_input_memory={
+                            "signature": "same", "values": {
+                                "dqn_single_episodes": 80, "seller_history_search": "old search",
+                                "dqn_learning_rate": 0.002}})
+    state.assigned = set()
+    with patch.object(navigation.st, "session_state", state):
+        navigation._restore_inputs()
+    assert {"dqn_single_episodes", "seller_history_search", "dqn_learning_rate"} <= state.assigned
+    assert state["dqn_single_episodes"] == 42
+    assert state["seller_history_search"] == "fresh search"
+    assert state["dqn_learning_rate"] == 0.002
+
+
 def test_changed_data_signature_does_not_restore_old_filter(payload):
     app = _app(payload, "결과 이력").run()
     app.text_input(key="seller_history_search").set_value("old-filter").run()

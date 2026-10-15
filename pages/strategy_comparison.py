@@ -53,6 +53,18 @@ def _saving_display(rows: Sequence[Mapping[str, object]]) -> str:
     return format_currency(sum(_saving(item) for item in rows))
 
 
+def _cost_display(rows: Sequence[Mapping[str, object]]) -> str:
+    if not rows:
+        return "비교 불가"
+    if any(_number(item.get("move_cost")) is None and
+           _number(item.get("estimated_cost")) is None for item in rows):
+        return "미산정 · 자료 부족"
+    value = sum(_cost(item) for item in rows)
+    if "샘플" in str(st.session_state.get("data_source_type") or ""):
+        return format_currency(value)
+    return f"{value:,.0f} (통화 미확인)"
+
+
 def _strategy_sets(recommendations: Sequence[Mapping[str, object]]) -> dict[str, list[dict]]:
     rows = [dict(item) for item in recommendations]
     dqn_unavailable = {"", "-", "미연결", "학습 필요", "비교 불가", "not connected"}
@@ -176,7 +188,7 @@ def _strategy_card(name: str, rows: Sequence[Mapping[str, object]]) -> str:
     status = "비교 가능" if rows else "비교 불가"
     variant = "success" if rows else "warning"
     count = f"{len(rows):,}건" if rows else "-"
-    cost = format_currency(sum(_cost(item) for item in rows)) if rows else "-"
+    cost = _cost_display(rows) if rows else "-"
     saving = _saving_display(rows)
     return f"""
       <div class="v2-wrap v2-card v3-strategy-card" style="--strategy-color:{color};">
@@ -194,7 +206,7 @@ def _comparison_frame(strategy_sets: Mapping[str, Sequence[Mapping[str, object]]
     metrics = []
     for label, getter in (
         ("선택/평가 건수", lambda rows: f"{len(rows):,}건" if rows else "비교 불가"),
-        ("총 이동 비용", lambda rows: format_currency(sum(_cost(item) for item in rows)) if rows else "비교 불가"),
+        ("총 이동 비용", _cost_display),
         ("예상 절감액", _saving_display),
         ("비교 상태", lambda rows: "비교 가능" if rows else "비교 불가"),
     ):

@@ -105,8 +105,9 @@ def _restore_inputs() -> None:
         st.session_state.pop("_ui_input_memory", None)
         return
     for key, value in (memory.get("values") or {}).items():
-        if key not in st.session_state:
-            st.session_state[key] = deepcopy(value)
+        # Reassign even existing values to detach them from widget cleanup.
+        # Preserve fresh browser input rather than overwriting it with memory.
+        st.session_state[key] = deepcopy(st.session_state[key] if key in st.session_state else value)
 
 
 def render_site_header(current_menu: str) -> None:
