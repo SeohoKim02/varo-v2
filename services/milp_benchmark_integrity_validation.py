@@ -12,11 +12,12 @@ solves the same model on larger pools; it never replaces the benchmark.
 """
 from __future__ import annotations
 
+from services.git_protection import inspect_validator_git, git_validation_check
+
 import argparse
 import json
 import platform
 import re
-import subprocess
 import time
 import tracemalloc
 import warnings
@@ -844,13 +845,6 @@ def claims_audit(repo_root: Path) -> pd.DataFrame:
 # ------------------------------------------------------------------------------------------------ run
 
 
-def _git(repo_root: Path, *args: str) -> str | None:
-    try:
-        return subprocess.run(["git", *args], cwd=repo_root, capture_output=True, text=True, check=True).stdout.rstrip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
-
-
 def _check(check_id: str, description: str, ok: bool, detail: Any = None) -> dict[str, Any]:
     return {"check_id": check_id, "description": description, "status": "PASS" if ok else "FAIL", "detail": detail}
 
@@ -862,6 +856,14 @@ PROTECTED_PATHS = ("services/shared_feasibility_selection.py", "services/shared_
                    "services/dqn_service.py", "services/demand_forecast_router.py", "services/demand_forecast_v2.py",
                    "services/candidate_generator.py", "services/recommendation_adapter.py", "services/analysis_pipeline.py",
                    "services/legacy_adapters", "pages", "components", "app_v2.py")
+
+
+def validation_git_guard(repo_root: Path) -> dict:
+    # Preserve T3's explicit path list, rather than broadening to every tracked file.
+    return inspect_validator_git(repo_root, "services/milp_benchmark_integrity_validation.py",
+                                 protected=PROTECTED_PATHS)
+
+
 PRESENTATION_STATEMENTS = {
     "safe_short": "수협 31일 데이터에서 날마다 같은 후보 20개와 같은 추정 재고 제약, 하루 최대 5경로 조건을 적용했을 때, "
                   "Varo의 이동 계획은 수학적 최적화(MILP) 기준과 같은 총 이동 계획량 7,750과 같은 추정 운송비 13,629,146원을 "
@@ -902,8 +904,7 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
     plan_gap = lambda plan: gaps[gaps["plan"] == plan]
     varo, t1, partial = plan_gap("OFFLINE_VARO_FINAL"), plan_gap("SF_BENCHMARK_ALL_OR_NOTHING"), plan_gap("SF_BENCHMARK_PARTIAL")
     saved_vs_new = plan_gap("SAVED_2026_07_MILP")
-    changed = (_git(repo_root, "status", "--porcelain") or "").splitlines()
-    protected_changed = [line for line in changed if any(line[3:].startswith(path) for path in PROTECTED_PATHS)]
+    git_guard = validation_git_guard(repo_root)
     expected_rows = 186 if "DQN" in set(regression["strategy"]) else 155
     contract = app["benchmark_integrity"]
     checks = [
@@ -949,8 +950,7 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
                contract.get("decision_gap_status") == mbi.GAP_NOT_COMPUTABLE
                and contract.get("optimality_claim") == "NO_OPTIMALITY_CLAIM", contract.get("reason_codes")),
         _check("A2", "no contract claims a global optimum", contract.get("global_optimum_claimable") is False),
-        _check("G1", "no protected path changed (UI, T1 selector/validation, T2, Seller Loss, VHS, Pareto, DQN, forecast, generator, pipeline)",
-               not protected_changed, protected_changed),
+        git_validation_check(git_guard, "no protected path changed (original T3 paths plus validator/policy)"),
     ]
     summary_rows = [
         ("suhyup", "days", len(by_day)), ("suhyup", "candidates", int(by_day["milp_input_pool"].sum())),
@@ -983,11 +983,12 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
                                    f"(HiGHS) / {platform.processor()}"),
     ]
     validation = {
-        "integrity_version": mbi.BENCHMARK_INTEGRITY_VERSION, "git_head": _git(repo_root, "rev-parse", "HEAD"),
+        "integrity_version": mbi.BENCHMARK_INTEGRITY_VERSION, "git_head": git_guard["actual_result"]["head"],
+        "git_protection": git_guard,
         "data_root": str(data_root),
         "inputs": {"candidates": sfv.CANDIDATES, "inventory": sfv.INVENTORY, "reference": sfv.REFERENCE,
                    "saved_milp_daily": SAVED_MILP_DAILY, "saved_milp_routes": SAVED_MILP_ROUTES, "processed_upload": PROCESSED},
-        "checks": checks, "failed_checks": [item["check_id"] for item in checks if item["status"] == "FAIL"],
+        "checks": checks, "failed_checks": [item["check_id"] for item in checks if item["status"] != "PASS"],
         "milp_role": {
             "A_full_operational_optimizer": False,
             "B_exact_within_restricted_pool": True,
@@ -1024,7 +1025,7 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
     return validation
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data-root", type=Path, default=DATA_ROOT)
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -1032,7 +1033,8 @@ def main() -> None:
     result = run_validation(args.data_root, args.output_dir)
     print(json.dumps({"failed_checks": result["failed_checks"], "checks": result["checks"],
                       "cutoff_totals": result["cutoff_totals"]}, ensure_ascii=False, indent=2, default=str))
+    return 0 if not result["failed_checks"] else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

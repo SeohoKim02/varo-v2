@@ -11,12 +11,13 @@ each need definition (separate results; production untouched), and cross-checks 
 """
 from __future__ import annotations
 
+from services.git_protection import inspect_validator_git, git_validation_check
+
 import argparse
 import bisect
 import hashlib
 import json
 import math
-import subprocess
 import time
 import warnings
 from collections import Counter, defaultdict
@@ -93,11 +94,10 @@ PROTECTED_BUNDLES = ("_CANDIDATE_GENERATION_VALIDATION", "_SHARED_FEASIBILITY_VA
 # ------------------------------------------------------------------------------------------------ helpers
 
 
-def _git(repo_root: Path, *args: str) -> str | None:
-    try:
-        return subprocess.run(["git", *args], cwd=repo_root, capture_output=True, text=True, check=True).stdout.rstrip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
+def validation_git_guard(repo_root: Path) -> dict:
+    # Preserve P1-B: tracked files are immutable, new research files permitted.
+    return inspect_validator_git(repo_root, "services/operational_evidence_validation.py",
+                                 protect_all_tracked=True)
 
 
 def _check(check_id: str, description: str, ok: bool, detail: Any = None) -> dict[str, Any]:
@@ -860,8 +860,7 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
     guard_same = oe.join_guard(oe.DataScope(DATASET, NETWORK_ID, "suhyup_product_code", "suhyup_center_code", date="2026-07-16"),
                                oe.DataScope("suhyup_canonical", NETWORK_ID, "suhyup_product_code", "suhyup_canonical_location_id", date="2026-07-16"))
 
-    changed = (_git(repo_root, "status", "--porcelain") or "").splitlines()
-    modified = [line for line in changed if not line.startswith("??")]
+    git_guard = validation_git_guard(repo_root)
     need_rows = need.dropna(subset=["need_benchmark", "need_generator"])
     identity_ok = bool((need.dropna(subset=["formula_gap_on_benchmark_inputs"]).eval("abs(formula_gap_on_benchmark_inputs - identity_gap)") <= 1e-9).all())
     contract_fields = ("candidate_id", "source_id", "target_id", "product_id", "requested_qty", "validated_qty",
@@ -931,12 +930,12 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
         _check("J1", "key namespaces: canonical location ids map to flow center codes by a verified rule; cross-dataset joins blocked",
                mapping_ok and not guard_cross["allowed"] and guard_same["allowed"],
                {"mapping_rule": MAPPING_DOC, "cross": guard_cross, "same_network": guard_same}),
-        _check("G1", "no existing tracked file changed (new files only)", not modified, modified),
+        git_validation_check(git_guard, "no existing tracked file changed; new files permitted except validator/policy"),
     ]
     after = _hashes(data_root, PROTECTED_BUNDLES)
     changed_bundles = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
     checks.append(_check("G2", "no existing data / bundle file changed during the run", not changed_bundles, changed_bundles))
-    failed = [c["check_id"] for c in checks if c["status"] == "FAIL"]
+    failed = [c["check_id"] for c in checks if c["status"] != "PASS"]
 
     totals = {"all_valid": oe.summarize_statuses(all_valid), "legacy_20": oe.summarize_statuses(legacy),
               "all_lanes": oe.summarize_statuses(all_lanes)}
@@ -979,7 +978,8 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
                     *[("need_formula", key, value) for key, value in formula_summary.items() if not isinstance(value, (dict, list))],
                     ("runtime", "wall_seconds", round(time.perf_counter() - started, 3))]
     validation = {
-        "evidence_version": oe.EVIDENCE_VERSION, "git_head": _git(repo_root, "rev-parse", "HEAD"), "data_root": str(data_root),
+        "evidence_version": oe.EVIDENCE_VERSION, "git_head": git_guard["actual_result"]["head"], "data_root": str(data_root),
+        "git_protection": git_guard,
         "network_id": NETWORK_ID, "checks": checks, "failed_checks": failed,
         "inputs": {"flow": sfv.INVENTORY, "processed_upload": mbv.PROCESSED, "candidates": sfv.CANDIDATES,
                    "reference": sfv.REFERENCE, "operator_route_evidence": str(route_path) if route_frame is not None else None,
@@ -1067,7 +1067,7 @@ def _verdicts(failed: Sequence[str], totals: Mapping[str, Mapping[str, int]]) ->
     }
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data-root", type=Path, default=DATA_ROOT)
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -1077,7 +1077,8 @@ def main() -> None:
     result = run_validation(args.data_root, args.output_dir, route_evidence=args.route_evidence, demand_evidence=args.demand_evidence)
     print(json.dumps({"failed_checks": result["failed_checks"], "checks": result["checks"], "verdicts": result["verdicts"]},
                      ensure_ascii=False, indent=2, default=str))
+    return 0 if not result["failed_checks"] else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

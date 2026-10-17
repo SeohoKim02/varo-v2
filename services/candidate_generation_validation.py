@@ -13,10 +13,11 @@ the saved candidates (pipeline VHS) are re-run to keep T1 / T3 / the 186 referen
 """
 from __future__ import annotations
 
+from services.git_protection import inspect_validator_git, git_validation_check
+
 import argparse
 import json
 import platform
-import subprocess
 import time
 import warnings
 from collections import Counter
@@ -635,11 +636,10 @@ def _check(check_id: str, description: str, ok: bool, detail: Any = None) -> dic
     return {"check_id": check_id, "description": description, "status": "PASS" if ok else "FAIL", "detail": detail}
 
 
-def _git(repo_root: Path, *args: str) -> str | None:
-    try:
-        return subprocess.run(["git", *args], cwd=repo_root, capture_output=True, text=True, check=True).stdout.rstrip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
+def validation_git_guard(repo_root: Path) -> dict:
+    # Preserve P1: all tracked changes blocked, new research files permitted.
+    return inspect_validator_git(repo_root, "services/candidate_generation_validation.py",
+                                 protect_all_tracked=True)
 
 
 def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: Path | None = None) -> dict[str, Any]:
@@ -658,8 +658,7 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
     causes = cause_analysis(policies, new_routes, universe, by_day)
     saturation = saturation_analysis(universe, by_day)
     totals = policies.set_index("policy")
-    changed = (_git(repo_root, "status", "--porcelain") or "").splitlines()
-    modified = [line for line in changed if not line.startswith("??")]
+    git_guard = validation_git_guard(repo_root)
     shuffle_columns = [c for c in determinism.columns if c.startswith("shuffle_")]
     uncut_shuffle = [c for c in shuffle_columns if any(c.endswith(f"_{p}_same_pool") for p in (cgr.MULTI_TARGET, cgr.ALL_VALID, cgr.ALL_LANES))
                      or "_all_valid_" in c]
@@ -716,9 +715,9 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
         _check("D2", "shuffled inventory rows: uncut pools (MULTI_TARGET, ALL_VALID, ALL_LANES) and ALL_VALID plan totals identical",
                bool(determinism[[c for c in uncut_shuffle if "same_lanes" not in c]].all().all()),
                {"legacy_20_pool_changed_under_shuffle_days": legacy_shuffle_days, "cut_boundary_tie_days": tie_days}),
-        _check("G1", PROTECTED_NOTE, not modified, modified),
+        git_validation_check(git_guard, PROTECTED_NOTE + "; validator/policy changes also blocked"),
     ]
-    failed = [item["check_id"] for item in checks if item["status"] == "FAIL"]
+    failed = [item["check_id"] for item in checks if item["status"] != "PASS"]
     base = totals.loc[BASELINE]
     verdicts = _verdicts(totals, failed, causes)
     summary_rows = [("suhyup", "days", int(by_day["date"].nunique())),
@@ -736,7 +735,8 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
                      ("runtime", "environment", f"{platform.platform()} / Python {platform.python_version()} / scipy {scipy.__version__}"),
                      *[("verdict", key, value["status"]) for key, value in verdicts.items()]]
     validation = {
-        "research_version": cgr.RESEARCH_VERSION, "git_head": _git(repo_root, "rev-parse", "HEAD"), "data_root": str(data_root),
+        "research_version": cgr.RESEARCH_VERSION, "git_head": git_guard["actual_result"]["head"], "data_root": str(data_root),
+        "git_protection": git_guard,
         "inputs": {"inventory": sfv.INVENTORY, "candidates": sfv.CANDIDATES, "reference": sfv.REFERENCE,
                    "processed_upload": mbv.PROCESSED, "t1_bundle": "_SHARED_FEASIBILITY_VALIDATION/shared_feasibility_by_day.csv",
                    "t3_bundle": f"{mbv.OUTPUT_FOLDER}/milp_benchmark_by_day.csv"},
@@ -917,7 +917,7 @@ def _verdicts(totals: pd.DataFrame, failed: Sequence[str], causes: Mapping[str, 
     }
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data-root", type=Path, default=DATA_ROOT)
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -925,7 +925,8 @@ def main() -> None:
     result = run_validation(args.data_root, args.output_dir)
     print(json.dumps({"failed_checks": result["failed_checks"], "checks": result["checks"], "verdicts": result["verdicts"]},
                      ensure_ascii=False, indent=2, default=str))
+    return 0 if not result["failed_checks"] else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

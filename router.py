@@ -13,6 +13,7 @@ _PAGE_RENDERERS = {
     "학습 관리": ("pages.training_management", "render_training_management_page"),
     "결과 이력": ("pages.results_history", "render_results_history_page"),
     "설정": ("pages.settings", "render_settings_page"),
+    "후보 결과 검토": ("pages.candidate_review", "render_candidate_review_page"),
     # 이전 세션과 기존 회귀 검증이 가진 화면 키는 계속 렌더링한다.
     "홈": ("pages.overview", "render_overview_page"),
     "추천 실행": ("pages.recommendations", "render_recommendations_page"),

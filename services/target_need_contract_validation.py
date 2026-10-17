@@ -15,6 +15,8 @@ OUTPUT_FILES.  The raw, canonical, golden and earlier validation bundles are rea
 """
 from __future__ import annotations
 
+from services.git_protection import inspect_validator_git, git_validation_check
+
 import argparse
 import json
 import math
@@ -66,6 +68,14 @@ TEST_DATE = "2026-07-16"
 WINDOW = ("2026-07-01", "2026-07-31")
 PROTECTED_BUNDLES = (*oev.PROTECTED_BUNDLES, oev.OUTPUT_FOLDER)
 ALLOWED_MODIFIED = ("services/data_loader.py", "services/analysis_pipeline.py")
+
+
+def validation_git_guard(repo_root: Path) -> dict:
+    # Preserve P1-C's two explicit tracked-file exceptions, not a broad services exception.
+    return inspect_validator_git(repo_root, "services/target_need_contract_validation.py",
+                                 protect_all_tracked=True, allowed_tracked=ALLOWED_MODIFIED)
+
+
 P1B_TOTALS = {"PROXY_FEASIBLE": 1728, "DEMAND_UNVERIFIED": 7, "STRICT": 0}
 STATE_CLASS = {"20": "CHILLED_FRESH", "30": "FROZEN", "32": "FROZEN_SHELLED", "40": "DRIED", "00": "UNLABELLED", "0": "UNLABELLED"}
 COMBO_FORMULA = {oe.GENERATOR_FORMULA: tn.GENERATOR_PROXY, oe.BENCHMARK_FORMULA: tn.BENCHMARK_PROXY}
@@ -755,8 +765,7 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
                    if key in b_day.index}
     b_bridge = bridge[(bridge["scenario"] == "B_REAL_PLUS_TEST") & (bridge["date"] == TEST_DATE)].iloc[0].to_dict()
     a_counts = Counter(usable(a_valid)["contract_eligibility"])
-    changed = (oev._git(repo_root, "status", "--porcelain") or "").splitlines()
-    modified = sorted(line[3:].strip() for line in changed if not line.startswith("??"))
+    git_guard = validation_git_guard(repo_root)
     test_rows = intakes["B_REAL_PLUS_TEST"].rows
     test_issues = Counter(code.split(":")[0] for row in test_rows for code in (row["issues"] or "").split("|") if code)
     conflict_codes = {c["code"] for c in intakes["B_REAL_PLUS_TEST"].conflicts}
@@ -871,15 +880,15 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
         _check("FC1", "Forecast: external GENERALIZATION_VERDICT FAIL kept; M5 V2 gate passed with the P1-B signature",
                external.get("GENERALIZATION_VERDICT") == "FAIL" and bool(m5_gate.get("passed"))
                and (not p1b_forecast or m5_gate.get("config_signature") == p1b_forecast.get("m5_v2_config_signature"))),
-        _check("G1", f"tracked changes limited to {', '.join(ALLOWED_MODIFIED)}", set(modified) <= set(ALLOWED_MODIFIED), modified),
+        git_validation_check(git_guard, f"tracked changes limited to {', '.join(ALLOWED_MODIFIED)}; validator/policy protected"),
     ]
     after = oev._hashes(data_root, PROTECTED_BUNDLES)
     changed_bundles = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
     checks.append(_check("G2", "no existing data / bundle file changed during the run", not changed_bundles, changed_bundles))
-    failed = [c["check_id"] for c in checks if c["status"] == "FAIL"]
+    failed = [c["check_id"] for c in checks if c["status"] != "PASS"]
     verdicts = _verdicts(failed, a_counts)
     summary = {
-        "contract_version": tn.CONTRACT_VERSION, "git_head": oev._git(repo_root, "rev-parse", "HEAD"),
+        "contract_version": tn.CONTRACT_VERSION, "git_head": git_guard["actual_result"]["head"], "git_protection": git_guard,
         "data_root": str(data_root), "network_id": NETWORK_ID, "dataset_id": DATASET, "checks": checks, "failed_checks": failed,
         "verdicts": verdicts, "operator_files": paths, "test_date": TEST_DATE, "test_lanes": (result["test_input"] or {}).get("lanes"),
         "case_0716": case,
@@ -958,7 +967,7 @@ def _verdicts(failed: Sequence[str], a_counts: Mapping[str, int]) -> dict[str, d
     }
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data-root", type=Path, default=DATA_ROOT)
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -970,7 +979,8 @@ def main() -> None:
         tn.ROUTE_SHEET: args.route_evidence, tn.DEMAND_SHEET: args.demand_evidence, tn.INVENTORY_SHEET: args.inventory_evidence})
     print(json.dumps({"failed_checks": result["failed_checks"], "checks": result["checks"], "verdicts": result["verdicts"]},
                      ensure_ascii=False, indent=2, default=str))
+    return 0 if not result["failed_checks"] else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

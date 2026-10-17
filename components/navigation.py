@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import streamlit as st
 import html
+import os
 from copy import deepcopy
-from datetime import date
+from datetime import date, time
 from services.app_state import current_data_status, has_app_data
 
 MENU_ITEMS = [
@@ -16,6 +17,15 @@ MENU_ITEMS = [
 ]
 
 LEGACY_MENU_ITEMS = ["홈", "추천 실행", "경로 상세", "분석 및 검증", "데이터 관리"]
+
+_NON_PERSISTENT_INPUTS = {
+    "settings_save", "settings_seller_input_template", "strategy_compare_run",
+    "history_search_button", "history_current_recommendations", "settings_source_sample",
+    "settings_candidate_review", "candidate_opt_in", "candidate_load_scenario", "candidate_run",
+    "candidate_save", "candidate_validate_upload", "settings_auto_weight", "settings_dqn_mode",
+    "candidate_real_run", "candidate_uploaded_save", "candidate_compare_alternatives",
+    "candidate_inventory_upload",  # File widgets cannot be assigned through session_state, even an empty list.
+}
 
 MENU_ICONS = {
     "시뮬레이션": "⌂",
@@ -34,8 +44,15 @@ LEGACY_ACTIVE_MENU = {
 }
 
 
+def candidate_enabled() -> bool:
+    """Research entry point only; never enable by merely selecting a menu key."""
+    return os.environ.get("VARO_CANDIDATE_REVIEW") == "1" or st.session_state.get("_candidate_review_opt_in") is True
+
+
 def get_current_menu() -> str:
     current = st.session_state.get("current_menu")
+    if current == "후보 결과 검토" and candidate_enabled():
+        return current
     if current not in MENU_ITEMS and current not in LEGACY_MENU_ITEMS:
         st.session_state["current_menu"] = MENU_ITEMS[0]
     return st.session_state["current_menu"]
@@ -83,15 +100,17 @@ def _remember_inputs() -> None:
     signature = st.session_state.get("data_signature")
     memory = st.session_state.get("_ui_input_memory") or {}
     values = dict(memory.get("values") or {}) if memory.get("signature") == signature else {}
-    prefixes = ("seller_", "history_", "simulation_", "home_sim_", "home_speed_", "home_inventory_", "home_show_", "settings_", "strategy_", "rec_filter_", "route_detail_", "sensitivity_", "optimality_gap_", "integrated_validation_")
+    prefixes = ("seller_", "history_", "simulation_", "home_sim_", "home_speed_", "home_inventory_", "home_show_", "settings_", "strategy_", "rec_filter_", "route_detail_", "sensitivity_", "optimality_gap_", "integrated_validation_", "candidate_")
     dqn_inputs = {"dqn_single_training_data", "dqn_model_type", "dqn_single_episodes", "dqn_learning_rate", "dqn_candidate_count"}
-    actions = {"settings_save", "settings_seller_input_template", "strategy_compare_run", "history_search_button", "history_current_recommendations"}
+    actions = _NON_PERSISTENT_INPUTS
+    for key in actions:
+        values.pop(key, None)
     for key in st.session_state:
         value = st.session_state[key]
         if key in actions or "download" in key:
             continue
-        if (key.startswith(prefixes) or key in dqn_inputs) and isinstance(value, (str, int, float, bool, date, list, tuple)):
-            if not isinstance(value, (list, tuple)) or all(isinstance(v, (str, int, float, bool, date)) for v in value):
+        if (key.startswith(prefixes) or key in dqn_inputs) and isinstance(value, (str, int, float, bool, date, time, list, tuple)):
+            if not isinstance(value, (list, tuple)) or all(isinstance(v, (str, int, float, bool, date, time)) for v in value):
                 values[key] = deepcopy(value)
     st.session_state["_ui_input_memory"] = {"signature": signature, "values": values}
 
@@ -105,6 +124,8 @@ def _restore_inputs() -> None:
         st.session_state.pop("_ui_input_memory", None)
         return
     for key, value in (memory.get("values") or {}).items():
+        if key in _NON_PERSISTENT_INPUTS:
+            continue
         # Reassign even existing values to detach them from widget cleanup.
         # Preserve fresh browser input rather than overwriting it with memory.
         st.session_state[key] = deepcopy(st.session_state[key] if key in st.session_state else value)

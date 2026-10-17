@@ -183,7 +183,7 @@ class SimulationSamplePageTests(unittest.TestCase):
         return app, " ".join(element.value for element in app.markdown)
 
     def test_dual_dc_home_marks_via_dc_dashed_and_direct_solid(self):
-        # one DIRECT + one VIA_DC route must render one solid path and one dashed path
+        # DIRECT has one solid leg; VIA_DC has two data-backed dashed legs.
         curated = [
             {"route_id": "RT_DIRECT", "product_name": "직접상품", "source_id": "S01",
              "source_name": "S01", "target_id": "S02", "target_name": "S02",
@@ -195,8 +195,17 @@ class SimulationSamplePageTests(unittest.TestCase):
              "recommended_qty": 9, "expected_saving": 2000, "dqn_action": "미연결"},
         ]
         _, blob = self._render_dual_dc_home(varo_recommendations=curated, home_sim_display_mode="상위 3개")
-        self.assertEqual(blob.count('<path id="rp'), 2)
-        self.assertEqual(blob.count('stroke-dasharray="11 8"'), 1)  # only the VIA_DC route is dashed
+        paths = re.findall(r'<path id="rp[^>]+>', blob)
+        self.assertEqual(len(paths), 3)
+        direct = [p for p in paths if 'data-route="RT_DIRECT"' in p]
+        via = [p for p in paths if 'data-route="RT_VIA"' in p]
+        self.assertEqual(len(direct), 1)
+        self.assertEqual(len(via), 2)
+        self.assertNotIn('stroke-dasharray=', direct[0])
+        self.assertTrue(all('stroke-dasharray="11 8"' in p for p in via))
+        self.assertIn('data-from="S01" data-to="DC01"', via[0])
+        self.assertIn('data-from="DC01" data-to="S03"', via[1])
+        self.assertTrue(all('marker-end=' in p for p in paths))
 
     def test_full_route_toggle_is_off_by_default_and_caps_background_when_on(self):
         from pages.overview import _MAX_BACKGROUND_ROUTES
@@ -208,11 +217,21 @@ class SimulationSamplePageTests(unittest.TestCase):
         # 130-route workbook stays capped instead of drawing every pair
         self.assertLessEqual(background, 2 * _MAX_BACKGROUND_ROUTES)
 
-    def test_top3_paths_use_curves_wide_lanes_and_separate_vehicle_phases(self):
+    def test_top3_paths_use_connected_legs_wide_lanes_and_separate_vehicle_phases(self):
         _, parked_blob = self._render_dual_dc_home(home_sim_display_mode="상위 3개")
         for lane in ("-54", "0", "54"):
             self.assertIn(f'data-lane="{lane}"', parked_blob)
-        self.assertGreaterEqual(parked_blob.count(" Q "), 4)
+        paths = re.findall(r'<path id="rp[^>]+>', parked_blob)
+        route_ids = {re.search(r'data-route="([^"]+)"', p).group(1) for p in paths}
+        self.assertEqual(len(route_ids), 3)
+        self.assertTrue(all('marker-end=' in p and 'data-from=' in p and 'data-to=' in p for p in paths))
+        for route_id in route_ids:
+            legs = [p for p in paths if f'data-route="{route_id}"' in p]
+            self.assertIn(len(legs), (1, 2))
+            if len(legs) == 2:
+                hub_in = re.search(r'data-to="([^"]+)"', legs[0]).group(1)
+                hub_out = re.search(r'data-from="([^"]+)"', legs[1]).group(1)
+                self.assertEqual(hub_in, hub_out)
         parked = re.findall(r'class="v2-vehicle [^"]+" transform="translate\(([^)]+)\)', parked_blob)
         self.assertEqual(len(parked), 3)
         self.assertEqual(len(set(parked)), 3)

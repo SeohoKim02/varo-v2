@@ -20,6 +20,7 @@ import pandas as pd
 
 from services.release_regression import (compare_golden, compare_mapping, inspect_reference,
                                          readiness, semantic_digest, sha256, json_safe, STATUSES)
+from services.git_protection import inspect_git_protection
 
 REPO = Path(__file__).resolve().parents[1]
 MANIFEST = Path(__file__).with_name("release_reference_manifest.json")
@@ -30,6 +31,8 @@ QUICK_TESTS = (
     "test_seller_loss_promotion_gate.py", "test_seller_shadow_ledger.py", "test_sales_input_normalization.py",
     "test_canonical_data.py", "test_canonical_integrity.py", "test_target_need_contract.py", "test_release_validation.py",
     "test_final_decision_integration.py",
+    "test_git_protection.py",
+    "test_validation_git_policies.py",
 )
 RESULT_FILES = ("release_validation_summary.json", "release_validation_matrix.csv", "release_validation_failures.csv",
                 "golden_regression_by_day.csv", "golden_regression_by_strategy.csv", "validation_runtime.csv",
@@ -40,6 +43,14 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def m5_not_run_reason(mode):
+    if mode == "quick":
+        return "QUICK_DEFAULT_OMITS_M5_RERUN"
+    if mode == "full":
+        return "FULL_M5_RERUN_OPTION_NOT_REQUESTED"
+    raise ValueError("unknown release validation mode")
+
+
 def load(path):
     return json.loads(Path(path).read_text(encoding="utf-8-sig"))
 
@@ -48,7 +59,7 @@ def git(*args):
     result = subprocess.run(["git", *args], cwd=REPO, text=True, capture_output=True, encoding="utf-8", errors="replace")
     if result.returncode:
         raise OSError(result.stderr.strip())
-    return result.stdout.strip()
+    return result.stdout.rstrip("\r\n")
 
 
 def validator_inventory():
@@ -238,14 +249,19 @@ class Audit:
     def __init__(self, root, output, mode):
         self.root, self.output, self.mode = root, output, mode
         self.results, self.failures, self.golden_rows = [], [], []
-        self.head, self.dirty = git("rev-parse", "HEAD"), bool(git("status", "--porcelain"))
+        self.git_protection = inspect_git_protection(REPO)
+        context = self.git_protection["actual_result"]
+        self.head, self.dirty = context["head"], context["git_dirty"]
+        self.execution_version = context.get("execution_version", {})
         self.manifest = load(MANIFEST)
 
-    def check(self, key, name, fn=None, *, level="ACTUAL_RERUN", source=None):
+    def check(self, key, name, fn=None, *, level="ACTUAL_RERUN", source=None, not_run_reason=None):
         started, tick = now(), time.perf_counter()
         print(f"[{self.mode}] {key}: {name}", flush=True)
         try:
-            result = fn() if fn else {"status": "NOT_RUN", "difference": "NOT_COMPARABLE", "reason_codes": ["QUICK_SCOPE_EXCLUDES_ACTUAL_BENCHMARK"]}
+            result = fn() if fn else {"status": "NOT_RUN", "difference": "NOT_COMPARABLE",
+                                     "reason_codes": [not_run_reason or ("QUICK_SCOPE_EXCLUDES_ACTUAL_BENCHMARK"
+                                                      if self.mode == "quick" else "FULL_CHECK_NOT_EXECUTED")]}
             if not isinstance(result, dict) or result.get("status") not in STATUSES:
                 raise ValueError("VALIDATION_RESULT_CONTRACT_INVALID")
         except FileNotFoundError as error:
@@ -314,6 +330,7 @@ class Audit:
         semantic = [{k: r[k] for k in ("validation_id", "status", "difference", "actual_result", "reason_codes", "execution_level")}
                     for r in self.results]
         summary = {"mode": self.mode, "results": self.results, "readiness": gate, "runtime_seconds": seconds,
+                   "execution_version": self.execution_version,
                    "peak_memory_mb": None, "semantic_digest": semantic_digest(semantic),
                    "production_action_applied": False, "limitations": ["frozen validation is not a benchmark rerun",
                     "raw unread files protected by size/mtime metadata; referenced canonical/archive/model/DB files by SHA256",
@@ -353,12 +370,8 @@ def run_validation(root, mode="quick", *, output_dir=None, rerun_m5=False):
     audit.check("ENV", "protected input snapshot", snapshot)
     audit.check("REFERENCES", "pinned reference hashes", audit.references, level="REUSED_FROZEN_RESULT", source=str(root))
     audit.check("MODEL", "DQN seed17 saved model", model_check, level="READ_ONLY_CONTRACT")
-    from services import action_consistency_validation as acv
-    dirty = git("status", "--porcelain").splitlines()
-    changed = [line for line in dirty if any(line[3:].startswith(p) for p in acv.PROTECTED_PATHS)]
-    audit.check("GIT_PROTECTION", "T2 G1 protected working tree (separate from calculation)", lambda: {
-        "status": "BLOCKED" if changed else "PASS", "actual_result": changed,
-        "reason_codes": ["PROTECTED_CODE_UNCOMMITTED"] if changed else []}, level="GIT_PROTECTION")
+    audit.check("GIT_PROTECTION", "protected working tree (separate from calculation)",
+                lambda: audit.git_protection, level="GIT_PROTECTION")
     audit.check("DIFF_CHECK", "Git whitespace check", lambda: {"status": "PASS" if subprocess.run(["git", "diff", "--check"], cwd=REPO, capture_output=True).returncode == 0 else "FAIL"})
     with tempfile.TemporaryDirectory(prefix="varo-release-") as temp:
         scratch = Path(temp)
@@ -427,7 +440,8 @@ def run_validation(root, mode="quick", *, output_dir=None, rerun_m5=False):
             result = compare_mapping({k: expected[k] for k in columns}, {k: actual[k] for k in columns})
             result["actual_result"] = {"rerun": True, "decision": report["decision"]}
             return result
-        audit.check("M5_RERUN", "optional frozen-selected forecast actual replay", m5 if rerun_m5 else None)
+        audit.check("M5_RERUN", "optional frozen-selected forecast actual replay", m5 if rerun_m5 else None,
+                    not_run_reason=m5_not_run_reason(mode))
         def isolated_ledger():
             from services.seller_shadow_validation import run_validation as run
             destination = output / "shadow_rerun"
@@ -446,6 +460,8 @@ def run_validation(root, mode="quick", *, output_dir=None, rerun_m5=False):
                                   "content_hash_count": len(before), "metadata_file_count": len(raw_before)},
                 "reason_codes": ["PROTECTED_DATA_CHANGED"] if content_changes or metadata_changes else []}
     audit.check("PROTECTION_AFTER", "all protected files unchanged", unchanged, level="READ_ONLY_CONTRACT")
+    audit.check("GIT_PROTECTION_AFTER", "protected working tree after validation",
+                lambda: inspect_git_protection(REPO), level="GIT_PROTECTION")
     return audit.finish(round(time.perf_counter() - tick, 3))
 
 

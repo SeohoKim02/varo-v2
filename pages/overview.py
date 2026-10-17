@@ -33,6 +33,7 @@ from simulation.dynamic_network import (
     compute_dynamic_layout,
     normalize_route_type,
 )
+from simulation.network_geometry import boundary_point, route_legs, point_and_angle
 
 
 _DIRECT_ROUTE_COLOR = "#2563a6"
@@ -375,9 +376,10 @@ def _dc_node_svg(node: Mapping[str, object]) -> str:
     capacity = _number(view.get("capacity"))
     capacity_label = f"용량 {_qty(capacity)}" if capacity is not None else "용량 데이터 없음"
     return (
-        f'<g class="network-node dc-node" data-active="{str(active).lower()}" transform="translate({x:.2f} {y:.2f})">'
+        f'<g class="network-node dc-node" data-node="{_safe(node_id)}" data-active="{str(active).lower()}" transform="translate({x:.2f} {y:.2f})">'
         f'<title>{_safe(name)} · {via_label}</title>'
         f'<rect x="{left:.2f}" y="{top:.2f}" width="{width:.2f}" height="{height:.2f}" rx="10" fill="{fill}" stroke="{stroke}" stroke-width="{3 if active else 1.8}" />'
+        f'<path d="M {left+10} {top+22} L {left+20} {top+13} L {left+30} {top+22} M {left+13} {top+22} v 12 h 14 v -12" fill="none" stroke="{stroke}" stroke-width="2"/>'
         f'{_svg_label(name, "node-label dc-label", top + 24, 10)}'
         f'<text class="dc-node-id" x="0" y="{top + 46:.2f}" text-anchor="middle">{_safe(node_id)} · {_safe(via_label)}</text>'
         f'<text class="dc-node-work" x="0" y="{top + 69:.2f}" text-anchor="middle">추천 {int(view.get("active_count") or 0)}건 · {_qty(view.get("quantity"))}</text>'
@@ -393,7 +395,9 @@ def _store_node_svg(node: Mapping[str, object], total_stores: int) -> str:
     emphasized = bool(node.get("is_recommended"))
     show_label = bool(node.get("show_label", True))
     view = dict(node.get("inventory_view") or {})
-    detailed = bool(view.get("detail")) and emphasized
+    # Dense layouts use a compact card; the full inventory values remain in its
+    # title/detail view instead of overflowing a short node rectangle.
+    detailed = bool(view.get("detail")) and emphasized and height >= 126
     status = str(view.get("status") or "데이터 부족")
     background, _text_color, border = _STATE_STYLE.get(status, _STATE_STYLE["데이터 부족"])
     stroke = border if emphasized else "#c4ccd5"
@@ -408,7 +412,7 @@ def _store_node_svg(node: Mapping[str, object], total_stores: int) -> str:
     if not detailed:
         name_y = -2 if height >= 58 else 0
         return (
-            f'<g class="network-node store-node store-node-compact" transform="translate({x:.2f} {y:.2f})">'
+            f'<g class="network-node store-node store-node-compact" data-node="{_safe(node.get("node_id"))}" transform="translate({x:.2f} {y:.2f})">'
             f'<title>{_safe(title)}</title>'
             f'<rect x="{left:.2f}" y="{top:.2f}" width="{width:.2f}" height="{height:.2f}" rx="8" fill="{fill}" stroke="{stroke}" stroke-width="{2.5 if emphasized else 1.3}" />'
             f'{_svg_label(label, "node-label store-label", name_y, 8)}'
@@ -433,7 +437,7 @@ def _store_node_svg(node: Mapping[str, object], total_stores: int) -> str:
     ratio = 0.0 if stock is None or demand is None or demand <= 0 else min(1.0, max(0.0, stock / demand))
     bar_width = max(0.0, width - 28.0)
     return (
-        f'<g class="network-node store-node store-node-detailed" transform="translate({x:.2f} {y:.2f})">'
+        f'<g class="network-node store-node store-node-detailed" data-node="{_safe(node.get("node_id"))}" transform="translate({x:.2f} {y:.2f})">'
         f'<title>{_safe(title)}</title>'
         f'<rect x="{left:.2f}" y="{top:.2f}" width="{width:.2f}" height="{height:.2f}" rx="10" fill="{fill}" stroke="{stroke}" stroke-width="2.8" />'
         f'{_svg_label(_short_label(label, 9), "node-label store-label", top + 24, 9)}'
@@ -450,7 +454,7 @@ def _store_node_svg(node: Mapping[str, object], total_stores: int) -> str:
 def _truck_icon(
     color: str, truck_color: str, truck_soft: str, mode_label: str = "트럭",
     route_label: str = "", product_label: str = "", quantity_label: str = "",
-    stage_label: str = "",
+    stage_label: str = "", labels: bool = True,
 ) -> str:
     """Compact truck with user-facing route, product, quantity, and stage text."""
     detail = " · ".join(value for value in (mode_label, route_label, product_label, quantity_label, stage_label) if value)
@@ -462,10 +466,10 @@ def _truck_icon(
         f'<rect x="-19" y="-6" width="15" height="6" rx="1.5" fill="{truck_soft}" opacity="0.9"/>'
         f'<circle cx="-14" cy="11" r="4.2" fill="#ffffff" stroke="{truck_color}" stroke-width="2.3"/>'
         f'<circle cx="18" cy="11" r="4.2" fill="#ffffff" stroke="{truck_color}" stroke-width="2.3"/>'
-        f'<rect x="-34" y="-31" width="68" height="14" rx="7" fill="{color}" opacity="0.96"/>'
+        + (f'<rect x="-34" y="-31" width="68" height="14" rx="7" fill="{color}" opacity="0.96"/>'
         f'<text class="vehicle-route" x="0" y="-21" text-anchor="middle" fill="#ffffff">{_safe(route_label or mode_label)}</text>'
         f'<text class="vehicle-mode" x="0" y="28" text-anchor="middle" fill="{truck_color}">{_safe(quantity_label or mode_label)}</text>'
-        f'<text class="vehicle-stage" x="0" y="41" text-anchor="middle" fill="{truck_color}">{_safe(stage_label)}</text>'
+        f'<text class="vehicle-stage" x="0" y="41" text-anchor="middle" fill="{truck_color}">{_safe(stage_label)}</text>' if labels else "")
     )
 
 
@@ -483,7 +487,7 @@ def _segments_points(segments: Sequence[Mapping[str, object]], positions: dict[s
 
 
 def _edge_point(
-    center: tuple[float, float], toward: tuple[float, float], size: tuple[float, float], padding: float = 9.0,
+    center: tuple[float, float], toward: tuple[float, float], size: tuple[float, float], padding: float = 0.0,
 ) -> tuple[float, float]:
     dx, dy = toward[0] - center[0], toward[1] - center[1]
     if abs(dx) < 1e-9 and abs(dy) < 1e-9:
@@ -513,10 +517,8 @@ def _route_path_points(
         length = math.hypot(dx, dy) or 1.0
         offsets.append((-dy / length * lane_offset, dx / length * lane_offset))
     shifted = [(x + offsets[index][0], y + offsets[index][1]) for index, (x, y) in enumerate(points)]
-    start = _edge_point(points[0], points[1], dimensions.get(node_ids[0], (0.0, 0.0)))
-    end = _edge_point(points[-1], points[-2], dimensions.get(node_ids[-1], (0.0, 0.0)))
-    shifted[0] = (start[0] + offsets[0][0], start[1] + offsets[0][1])
-    shifted[-1] = (end[0] + offsets[-1][0], end[1] + offsets[-1][1])
+    shifted[0] = boundary_point(points[0], points[1], dimensions[node_ids[0]], lane_offset)
+    shifted[-1] = boundary_point(points[-1], points[-2], dimensions[node_ids[-1]], -lane_offset)
     return [(round(x, 2), round(y, 2)) for x, y in shifted]
 
 
@@ -616,7 +618,7 @@ def _network_markup_cached(
         seen: set[tuple[str, str]] = set()
         for route in all_routes[:_MAX_BACKGROUND_ROUTES]:
             try:
-                segments = build_route_segments(route, nodes)
+                segments = build_route_segments(route, nodes, require_explicit_dc=True)
             except ValueError:
                 continue
             for segment in segments:
@@ -635,76 +637,99 @@ def _network_markup_cached(
     route_paths: list[str] = []
     vehicles: list[str] = []
     skip_labels: list[str] = []
+    connection_warnings: list[str] = []
     for index, route in enumerate(sim_routes):
         try:
-            segments = build_route_segments(route, nodes)
-        except ValueError:
-            continue
-        lane_offset = _ROUTE_LANES[index % len(_ROUTE_LANES)] if len(sim_routes) > 1 else 0.0
-        points = _route_path_points(segments, positions, dimensions, lane_offset)
-        if not points:
+            segments = build_route_segments(route, nodes, require_explicit_dc=True)
+            lane_offset = _ROUTE_LANES[index % len(_ROUTE_LANES)] if len(sim_routes) > 1 else 0.0
+            legs = route_legs(segments, positions, dimensions, lane_offset)
+        except (ValueError, KeyError):
+            connection_warnings.append(f"경로 {index + 1}: 경로 정보 확인 필요")
             continue
         is_via = normalize_route_type(route) == "VIA_DC"
         color = _VIA_DC_ROUTE_COLOR if is_via else _DIRECT_ROUTE_COLOR
         selected = str(route.get("route_id")) == selected_id
         transition = transition_by_route.get(str(route.get("route_id")), {})
-        feasible = bool(transition.get("feasible", True))
-        bend_sign = -1.0 if index % 2 else 1.0
-        path_data = _route_path_d(points, bend_sign * (14.0 + abs(lane_offset) * 0.16))
-        dash = ' stroke-dasharray="11 8"' if is_via else ""
-        width = 5.2 if selected else 3.0
-        opacity = 1.0 if selected else 0.52
-        if not feasible:
-            opacity = 0.24
-        path_id = f"rp{index}"
-        route_paths.append(
-            f'<path id="{path_id}" data-lane="{lane_offset:.0f}" d="{path_data}" fill="none" stroke="{color}" '
-            f'stroke-width="{width}" stroke-opacity="{opacity}" stroke-linecap="round"{dash} />'
-        )
-        if not feasible:
-            px, py = _point_along_polyline(points, 0.5)
-            skip_labels.append(
-                f'<text class="route-skip-label" x="{px:.2f}" y="{py - 10:.2f}" text-anchor="middle">현재 상태에서 실행 불가</text>'
-            )
-            disabled_label = "" if display_mode == "단일 경로" else f"추천 {index + 1}"
-            disabled_truck = _truck_icon(
-                "#8b96a3", "#697481", "#edf0f3", "대기",
-                disabled_label, _short_label(route.get("product_name") or route.get("product_id"), 10),
-                "0개", "실행 불가",
-            )
-            vehicles.append(
-                f'<g class="v2-vehicle v2-vehicle-disabled" transform="translate({px:.2f} {py:.2f})">{disabled_truck}</g>'
-            )
-            continue
+        quantity = transition.get("applied_quantity", route.get("recommended_qty"))
+        feasible = bool(transition.get("feasible", True)) and (_number(quantity) or 0) > 0
+        opacity = (1.0 if selected else .75) if feasible else .35
         truck_color, truck_soft, truck_mode = _transport_style(route.get("transport_type"), route.get("route_type"))
-        route_label = "" if display_mode == "단일 경로" else f"추천 {index + 1}"
-        product_label = _short_label(route.get("product_name") or route.get("product_id"), 10)
-        quantity_label = _qty(transition.get("applied_quantity", route.get("recommended_qty")))
-        stage_label = "출고 → DC 경유 → 입고" if is_via else "출고 → 입고"
-        truck = _truck_icon(color, truck_color, truck_soft, truck_mode, route_label, product_label, quantity_label, stage_label)
-        vehicle_class = "v2-vehicle v2-vehicle-selected" if selected else "v2-vehicle v2-vehicle-muted"
-        if playing:
-            phase = index * speed_seconds / max(1, len(sim_routes))
-            key_points = _via_motion_points(points) if is_via else "0;1"
-            key_times = "0;0.43;0.57;1" if is_via else "0;1"
-            vehicles.append(
-                f'<g class="{vehicle_class}">{truck}'
-                f'<animateMotion dur="{speed_seconds:.1f}s" begin="-{phase:.1f}s" repeatCount="indefinite" rotate="0" '
-                f'keyPoints="{key_points}" keyTimes="{key_times}" calcMode="linear">'
-                f'<mpath xlink:href="#{path_id}"/></animateMotion></g>'
+        for leg_index, leg in enumerate(legs):
+            path_id = f"rp{index}-{leg_index}"
+            arrow_id = f"arrow{index}-{leg_index}"
+            points, path_data = leg["points"], leg["path"]
+            dash = ' stroke-dasharray="11 8"' if is_via else ""
+            width = 5.2 if selected else 3.0
+            route_paths.append(
+                f'<defs><marker id="{arrow_id}" viewBox="0 0 10 10" refX="10" refY="5" '
+                f'markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">'
+                f'<path d="M 0 0 L 10 5 L 0 10 Z" fill="{color}"/></marker></defs>'
+                f'<path id="{path_id}" data-route="{_safe(route.get("route_id"))}" '
+                f'data-from="{_safe(leg["from_node_id"])}" data-to="{_safe(leg["to_node_id"])}" '
+                f'data-lane="{lane_offset:.0f}" d="{path_data}" fill="none" stroke="{color}" '
+                f'stroke-width="{width}" stroke-opacity="{opacity}" stroke-linecap="butt" '
+                f'stroke-linejoin="round" marker-end="url(#{arrow_id})"{dash} />'
             )
+            px, py, angle = point_and_angle(points, .5)
+            label = f"경로 {index + 1} · {_qty(quantity)}" if feasible else f"경로 {index + 1} · 이동 없음"
+            label_y = py - 22 if math.cos(math.radians(angle)) < 0 else py + 26
+            skip_labels.append(
+                f'<text class="route-skip-label" x="{px:.2f}" y="{label_y:.2f}" '
+                f'text-anchor="middle">{_safe(label)}</text>')
+
+        # A route has one vehicle, including a stationary waiting vehicle when
+        # movement is infeasible. Via legs remain separate visible connections.
+        lengths = [sum(math.dist(a, b) for a, b in zip(leg["points"], leg["points"][1:])) for leg in legs]
+        parked_leg = max(range(len(legs)), key=lambda i: lengths[i])
+        px, py, angle = point_and_angle(legs[parked_leg]["points"], .5)
+        scale = min(1., min(lengths) / 100.)
+        vehicle_class = "v2-vehicle " + ("v2-vehicle-disabled" if not feasible else
+                                       "v2-vehicle-selected" if selected else "v2-vehicle-muted")
+        truck = f'<g transform="scale({scale:.3f}) translate(0 -16)">' + _truck_icon(
+            color if feasible else "#8b96a3", truck_color if feasible else "#697481", truck_soft,
+            truck_mode if feasible else "대기", f"경로 {index + 1}",
+            str(route.get("product_name") or ""), _qty(quantity),
+            "계획 이동" if feasible else "이동 없음", labels=False) + '</g>'
+        if playing and feasible:
+            # Trim vehicle motion only, not the visible route. Separate SVG
+            # subpaths jump across the warehouse without travelling through it.
+            motion_paths, motion_lengths = [], []
+            for leg, length in zip(legs, lengths):
+                margin = min(length * .42, 45 * scale)
+                start = point_and_angle(leg["points"], margin / length)[:2]
+                end = point_and_angle(leg["points"], 1 - margin / length)[:2]
+                inside, travelled = [], 0.
+                for a, b in zip(leg["points"], leg["points"][1:]):
+                    travelled += math.dist(a, b)
+                    if margin < travelled < length - margin:
+                        inside.append(b)
+                motion_paths.append("M " + " L ".join(f"{x:.2f} {y:.2f}" for x, y in [start, *inside, end]))
+                motion_lengths.append(length - 2 * margin)
+            phase = index * speed_seconds / max(1, len(sim_routes))
+            key_times, key_points, visibility = "0;1", "0;1", ""
+            if is_via:
+                junction = motion_lengths[0] / sum(motion_lengths)
+                key_times, key_points = "0;0.43;0.57;1", f"0;{junction:.8f};{junction:.8f};1"
+                visibility = (f'<animate attributeName="opacity" values="1;0;1;1" keyTimes="{key_times}" '
+                              f'calcMode="discrete" dur="{speed_seconds:.1f}s" begin="-{phase:.1f}s" repeatCount="indefinite"/>')
+            vehicles.append(
+                f'<g class="{vehicle_class}">{truck}{visibility}'
+                f'<animateMotion dur="{speed_seconds:.1f}s" begin="-{phase:.1f}s" repeatCount="indefinite" rotate="auto" '
+                f'path="{" ".join(motion_paths)}" keyPoints="{key_points}" keyTimes="{key_times}" calcMode="linear"/></g>')
         else:
-            parked_x, parked_y = _point_along_polyline(points, 0.28 + index * 0.18)
-            vehicles.append(f'<g class="{vehicle_class}" transform="translate({parked_x:.2f} {parked_y:.2f})">{truck}</g>')
+            vehicles.append(f'<g class="{vehicle_class}" transform="translate({px:.2f} {py:.2f}) rotate({angle:.2f})">{truck}</g>')
 
     node_shapes = [_dc_node_svg(node) for node in layout_dcs]
     node_shapes.extend(_store_node_svg(node, len(layout_stores)) for node in layout_stores)
     network_html = (
         '<div class="v2-network-shell">'
         + _route_summary_html(sim_routes, scenario, selected_id)
+        + "".join(f'<p role="status">{_safe(warning)}</p>' for warning in connection_warnings)
+        + '<p class="v2-card-caption">점포·물류센터 간 계획 이동 도식입니다. 실제 도로 경로나 이동 완료를 뜻하지 않습니다.</p>'
         + '<div class="v2-network-legend" aria-label="네트워크 범례">'
         '<span class="v2-legend-item"><span class="v2-legend-line v2-legend-line-direct"></span>실선: 직접 이동</span>'
         '<span class="v2-legend-item"><span class="v2-legend-line v2-legend-line-via"></span>점선: 물류센터 경유</span>'
+        '<span class="v2-legend-item">▭ 점포 · ⌂ 물류센터/창고 · 차량 아이콘: 계획 이동 · 화살표: 이동 방향</span>'
         '<span class="v2-legend-item"><span class="v2-state-dot state-excess"></span>초과재고</span>'
         '<span class="v2-legend-item"><span class="v2-state-dot state-normal"></span>적정재고</span>'
         '<span class="v2-legend-item"><span class="v2-state-dot state-shortage"></span>부족재고</span>'

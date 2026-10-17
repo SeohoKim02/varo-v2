@@ -18,7 +18,6 @@ import argparse
 import copy
 import json
 import random
-import subprocess
 import time
 import warnings
 from collections import Counter, defaultdict
@@ -35,6 +34,7 @@ from services import shared_feasibility_validation as sfv
 from services import seller_loss_promotion_gate as gate
 from services import suhyup_algorithm_revalidation as rv
 from services.real_data_adapters import DATA_ROOT
+from services.git_protection import PROTECTED_PATHS, inspect_git_protection
 from services.seller_decision_validation import _env
 from services.seller_loss_engine import STRATEGIES
 
@@ -733,23 +733,8 @@ def _examples(records: pd.DataFrame, minimum: int = 12) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
-def _git(repo_root: Path, *args: str) -> str | None:
-    try:
-        # rstrip only: porcelain lines start with a status column that may be a space
-        return subprocess.run(["git", *args], cwd=repo_root, capture_output=True, text=True, check=True).stdout.rstrip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
-
-
 def _check(check_id: str, description: str, ok: bool, detail: Any = None) -> dict[str, Any]:
     return {"check_id": check_id, "description": description, "status": "PASS" if ok else "FAIL", "detail": detail}
-
-
-PROTECTED_PATHS = ("services/shared_feasibility_selection.py", "services/seller_loss_engine.py", "services/seller_loss_inputs.py",
-                   "services/seller_loss_promotion_gate.py", "services/seller_shadow_ledger.py", "services/seller_shadow_outcomes.py",
-                   "services/vhs_score_engine.py", "services/demand_forecast_router.py", "services/demand_forecast_v2.py",
-                   "services/recommendation_adapter.py", "services/legacy_adapters", "services/pareto_service.py",
-                   "services/dqn_service.py", "services/suhyup_algorithm_revalidation.py", "pages", "components", "app_v2.py")
 
 
 def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: Path | None = None) -> dict[str, Any]:
@@ -767,8 +752,8 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
     selected = records[records["decision_state"] == ac.SELECTED_PLAN]
     alignment = records["legacy_alignment"].value_counts().to_dict()
     links_ok = records["links"].map(lambda text: all(value == "OK" for value in json.loads(text).values()))
-    changed = (_git(repo_root, "status", "--porcelain") or "").splitlines()
-    protected_changed = [line for line in changed if any(line[3:].startswith(path) for path in PROTECTED_PATHS)]
+    git_guard = inspect_git_protection(repo_root)
+    changed = git_guard["actual_result"]["changes"]
     t1_ok = t1[["route_ids_equal", "qty_equal", "cost_equal", "strict_status_equal", "legacy_violations_equal"]].all(axis=1)
     expected_regression_rows = 186 if suhyup["dqn_model_available"] else 155
     checks = [
@@ -811,23 +796,25 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
         _check("E2", "saved Suhyup varo_action equals the current production pipeline on 2026-07-31",
                e2e["saved_varo_action_equals_current_pipeline"] == e2e["saved_varo_action_compared"] == 20,
                f"{e2e['saved_varo_action_equals_current_pipeline']}/{e2e['saved_varo_action_compared']}"),
-        _check("G1", "no protected production module changed (selector, Seller Loss, ranking, forecast, adapters, UI)",
-               not protected_changed, protected_changed),
+        {"check_id": "G1", "description": "protected working tree, separate from calculation",
+         "status": git_guard["status"], "detail": git_guard},
     ]
-    failed = [item["check_id"] for item in checks if item["status"] == "FAIL"]
+    failed = [item["check_id"] for item in checks if item["status"] != "PASS"]
     observed = set(records["legacy_action"].dropna()) | {label for text in workbooks["legacy_action_counts"]
                                                          for label in json.loads(text) if label}
     unmapped = sorted(label for label in observed if ac.map_action_label(label)[1] == ac.UNMAPPABLE)
     checks.append(_check("A1", "every action label observed in Suhyup and the workbooks maps to a canonical code or a sentinel",
                          not unmapped, {"observed": sorted(observed), "unmapped": unmapped}))
-    failed = [item["check_id"] for item in checks if item["status"] == "FAIL"]
+    failed = [item["check_id"] for item in checks if item["status"] != "PASS"]
     readiness = {
         "A_contract_complete": "A1" not in failed, "B_linked_to_real_candidates": "S1" not in failed,
         "C_conflict_detection": "C1" not in failed, "D_korean_labels": bool(records["explanation_ko"].str.len().gt(0).all()),
         "E_parallel_validation": not {"S2", "S3", "S5", "W1", "E1"} & set(failed),
-        "F_production_action_unchanged": not {"W1", "E1", "G1"} & set(failed),
+        "F_production_action_unchanged": not {"W1", "E1"} & set(failed) and git_guard["status"] == "PASS",
     }
     verdict = "NOT_READY" if not all(readiness.values()) else "READY_WITH_LIMITATIONS"
+    if git_guard["status"] != "PASS":
+        verdict = git_guard["status"]
     summary_rows = [
         ("SUHYUP_31D", "candidates", len(records)), ("SUHYUP_31D", "days", len(by_day)),
         *[("SUHYUP_31D", f"legacy_action[{k}]", int(v)) for k, v in sorted(records["legacy_action"].value_counts().items())],
@@ -854,7 +841,8 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
     ]
     validation = {
         "contract_version": ac.CONTRACT_VERSION, "contract_signature": ac.contract_document()["signature"],
-        "git_head": _git(repo_root, "rev-parse", "HEAD"), "git_status_porcelain": changed,
+        "git_head": git_guard["actual_result"]["head"], "git_status_porcelain": changed,
+        "git_protection": git_guard,
         "data_root": str(data_root), "checks": checks, "failed_checks": failed,
         "readiness": {"criteria": readiness, "verdict": verdict,
                       "meaning": "contract, linking, detection, labels and parallel validation are complete; production action "
@@ -898,7 +886,7 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
     return validation
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data-root", type=Path, default=DATA_ROOT)
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -906,7 +894,8 @@ def main() -> None:
     result = run_validation(args.data_root, args.output_dir)
     print(json.dumps({"failed_checks": result["failed_checks"], "checks": result["checks"],
                       "readiness": result["readiness"]}, ensure_ascii=False, indent=2, default=str))
+    return 0 if not result["failed_checks"] else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

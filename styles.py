@@ -517,13 +517,13 @@ def apply_global_styles() -> None:
         .v2-network-svg .recommended-node {{ filter: drop-shadow(0 3px 5px rgba(216, 131, 120, 0.18)); }}
         .v2-network-svg .v2-vehicle {{ filter: drop-shadow(0 3px 5px rgba(30, 41, 59, 0.20)); }}
         .v2-network-svg .v2-vehicle-selected {{ opacity: 1; }}
-        .v2-network-svg .v2-vehicle-muted {{ opacity: 0.56; }}
+        .v2-network-svg .v2-vehicle-muted {{ opacity: 0.80; }}
         .v2-network-svg .v2-vehicle-disabled {{ opacity: 0.54; }}
         .v2-network-svg .vehicle-route {{ font-size: 9.4px; font-weight: 840; fill: #ffffff !important; }}
         .v2-network-svg .vehicle-mode {{ font-size: 9.2px; font-weight: 780; }}
         .v2-network-svg .vehicle-stage {{ font-size: 8.4px; font-weight: 720; }}
         .v2-network-svg .vehicle-type {{ font-size: 8px; font-weight: 800; fill: #ffffff; }}
-        .v2-network-svg .route-skip-label {{ font-size: 10px; font-weight: 760; fill: #8a4650; paint-order: stroke; stroke: #ffffff; stroke-width: 3px; }}
+        .v2-network-svg .route-skip-label {{ font-size: 16px; font-weight: 760; fill: #344154; paint-order: stroke; stroke: #ffffff; stroke-width: 4px; }}
         .v2-sim-route-summary {{
             display: grid;
             grid-template-columns: 0.8fr 1.15fr 1.8fr 1fr 1fr;

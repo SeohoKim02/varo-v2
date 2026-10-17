@@ -24,13 +24,14 @@ the engine (``build_panel`` .. ``score``) and the router never see a dataset nam
 """
 from __future__ import annotations
 
+from services.git_protection import inspect_validator_git, is_protected
+
 import argparse
 import hashlib
 import inspect
 import json
 import math
 import shutil
-import subprocess
 import tempfile
 import time
 import warnings
@@ -107,6 +108,16 @@ FROZEN_SOURCES = ("services/demand_forecast_router.py", "services/demand_forecas
                   "services/legacy_adapters/_local_modules/demand_forecast_analyzer.py")
 
 
+def validation_git_guard(repo_root: Path) -> dict:
+    return inspect_validator_git(repo_root, "services/external_forecast_validation.py", protected=FROZEN_SOURCES)
+
+
+def _code_validation_status(*checks: Mapping[str, Any]) -> str:
+    statuses = {check.get("record", {}).get("git_protection", {}).get("status", "UNKNOWN") for check in checks}
+    return next((status for status in ("ENVIRONMENT_ERROR", "BLOCKED", "UNKNOWN") if status in statuses),
+                "PASS" if statuses == {"PASS"} else "UNKNOWN")
+
+
 def _sha256_lf(path: Path) -> str:
     return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
@@ -117,11 +128,12 @@ def frozen_config_record() -> dict[str, Any]:
     from services.m5_forecast_v2_validation import gate_signature as m5_gate_signature
 
     config = core.make_config(router.V2_ROUTES)
-    try:
-        diff = subprocess.run(["git", "diff", "--quiet", "HEAD", "--", *FROZEN_SOURCES], cwd=PROJECT_ROOT, timeout=30).returncode
-        sources_match_head = diff == 0
-    except (OSError, subprocess.SubprocessError):
-        sources_match_head = None
+    git_guard = validation_git_guard(PROJECT_ROOT)
+    # Configuration evidence and audit-code cleanliness are distinct claims.
+    # Unknown Git evidence can never establish that frozen sources match HEAD.
+    sources_match_head = (None if git_guard["status"] == "ENVIRONMENT_ERROR" else
+                          not any(is_protected(p, FROZEN_SOURCES)
+                                  for p in git_guard["actual_result"]["changed_paths"]))
     return {
         "v2_config_signature": core.config_signature(config),
         "v2_config_signature_pinned_in_router": router.V2_CONFIG_SIGNATURE,
@@ -135,6 +147,7 @@ def frozen_config_record() -> dict[str, Any]:
         "m5_mostly_zero_rule_signature": rule_signature(),
         "source_sha256_lf": {name: _sha256_lf(PROJECT_ROOT / name) for name in FROZEN_SOURCES},
         "frozen_sources_match_git_head": sources_match_head,
+        "git_protection": git_guard,
         "v1_fingerprint_matches_baseline": core.v1_baseline_fingerprint()["source_sha256_lf"] == core.FORECAST_V1_BASELINE["source_sha256_lf"],
     }
 
@@ -145,7 +158,7 @@ def frozen_config_check(record: Mapping[str, Any] | None = None) -> dict[str, An
     differences = [key for key, value in FROZEN_REFERENCE.items() if json.loads(json.dumps(record[key])) != json.loads(json.dumps(value))]
     if record["v2_config_signature_pinned_in_router"] != FROZEN_REFERENCE["v2_config_signature"]:
         differences.append("v2_config_signature_pinned_in_router")
-    if record["frozen_sources_match_git_head"] is False:
+    if record["frozen_sources_match_git_head"] is not True:
         differences.append("frozen_sources_match_git_head")
     if not record["v1_fingerprint_matches_baseline"]:
         differences.append("v1_fingerprint_matches_baseline")
@@ -1351,6 +1364,7 @@ def _dataset_report(dataset, inputs, semantics, metrics, coverage, by_type, fram
                        "command": f"python -m services.external_forecast_validation --dataset {dataset}"},
         "FROZEN_CONFIG_UNCHANGED": bool(before["FROZEN_CONFIG_UNCHANGED"] and after["FROZEN_CONFIG_UNCHANGED"]),
         "frozen_config": {"before": before, "after": after},
+        "code_validation_status": _code_validation_status(before, after),
         "gate": {"gate_signature": freeze["gate_signature"], "frozen_at": freeze.get("frozen_at"), "freeze_file": GATE_FREEZE_FILE,
                  "evidence": evidence, "evaluation": evaluation},
         "verdict": evaluation["verdict"],
@@ -1544,6 +1558,8 @@ def write_summary(data_root: Path | str = DATA_ROOT, common_dir: Path | str | No
                        "generated_at": _now(), "git_commit": _git_commit(), "command": "python -m services.external_forecast_validation --summary"},
         "FROZEN_CONFIG_UNCHANGED": bool(check["FROZEN_CONFIG_UNCHANGED"] and all(r["FROZEN_CONFIG_UNCHANGED"] for r in reports.values())),
         "frozen_config": check["record"],
+        "code_validation_status": _code_validation_status(check, *[
+            snapshot for report in reports.values() for snapshot in report.get("frozen_config", {}).values()]),
         "gate": {"gate_signature": frozen["gate_signature"], "frozen_at": frozen.get("frozen_at"), "same_gate_in_every_report": gate_same,
                  "rule": EXTERNAL_GATE},
         "datasets": {d: {"verdict": r["verdict"], "improved": r["gate"]["evaluation"]["improved"],
@@ -1563,7 +1579,7 @@ def write_summary(data_root: Path | str = DATA_ROOT, common_dir: Path | str | No
     return _clean(summary)
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dataset", choices=sorted(LOADERS))
     parser.add_argument("--summary", action="store_true")
@@ -1573,16 +1589,21 @@ def main() -> None:
     args = parser.parse_args()
     if not args.dataset and not args.summary:
         parser.error("give --dataset and/or --summary")
+    code_checks = []
     if args.dataset:
         report = run_dataset(args.dataset, args.data_root, args.output_dir, args.common_dir)
+        code_checks.append(report.get("code_validation_status", "UNKNOWN"))
         print(json.dumps({"dataset": args.dataset, "verdict": report["verdict"], "FROZEN_CONFIG_UNCHANGED": report["FROZEN_CONFIG_UNCHANGED"],
+                          "code_validation_status": report.get("code_validation_status", "UNKNOWN"),
                           "gate": {c["criterion"]: c["pass"] for c in report["gate"]["evaluation"]["criteria"]},
                           "headline": {s: {m: v["wape"] for m, v in b["total_7d"].items()} for s, b in report["headline"].items()},
                           "runtime": {k: report["runtime"][k] for k in ("total_seconds", "peak_memory_mb")}}, ensure_ascii=False, indent=2))
     if args.summary:
         summary = write_summary(args.data_root, args.common_dir)
-        print(json.dumps({k: summary[k] for k in ("GENERALIZATION_VERDICT", "FROZEN_CONFIG_UNCHANGED", "datasets")}, ensure_ascii=False, indent=2))
+        code_checks.append(summary.get("code_validation_status", "UNKNOWN"))
+        print(json.dumps({k: summary[k] for k in ("GENERALIZATION_VERDICT", "FROZEN_CONFIG_UNCHANGED", "code_validation_status", "datasets")}, ensure_ascii=False, indent=2))
+    return 0 if code_checks and all(status == "PASS" for status in code_checks) else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

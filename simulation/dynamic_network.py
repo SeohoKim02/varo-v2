@@ -7,7 +7,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 DC = "DC"
 STORE = "STORE"
-SIMULATION_LAYOUT_VERSION = "dynamic-layout-2026-10-14.direct"
+SIMULATION_LAYOUT_VERSION = "dynamic-layout-2026-10-16.boundaries"
 
 ID_KEYS = ("node_id", "store_id", "dc_id", "id")
 NAME_KEYS = ("node_name", "store_name", "dc_name", "name")
@@ -480,6 +480,14 @@ def compute_dynamic_layout(
                 recommended, len(stores) <= 30 or emphasis or index % 3 == 0, angle,
             ))
 
+    # Apply the existing collision resolver to ring layouts too, using exactly
+    # the card dimensions rendered by the SVG (including selected cards).
+    if not geographic:
+        placed = dc_rows + store_rows
+        separated = _separate(deduped, {str(n["node_id"]): (n["x"], n["y"]) for n in placed},
+                              width, height, margin, recommended)
+        for node in placed:
+            node["x"], node["y"] = separated[str(node["node_id"])]
     warnings = ["점포 수가 많아 추천 관련 라벨을 우선 표시합니다."] if len(stores) >= 31 else []
     return DynamicLayout(
         True,
@@ -561,6 +569,7 @@ def resolve_route_dc_id(route: Mapping[str, object], nodes: Iterable[Mapping[str
 
 def build_route_segments(
     route: Mapping[str, object], nodes: Iterable[Mapping[str, object]],
+    *, require_explicit_dc: bool = False,
 ) -> list[dict[str, str]]:
     """Return one DIRECT segment or two segments through the row-specific DC."""
     source_id = _value(route, ("source_id", "from_id", "source_store_id"))
@@ -572,7 +581,19 @@ def build_route_segments(
         return [{"from_node_id": source_id, "to_node_id": target_id, "phase": "DIRECT"}]
     if route_type != "VIA_DC":
         raise ValueError(f"지원하지 않는 route_type입니다: {route.get('route_type')}")
-    dc_id = resolve_route_dc_id(route, nodes)
+    nodes = list(nodes)
+    if require_explicit_dc:
+        known = {_value(n, ID_KEYS) for n in nodes}
+        if source_id not in known or target_id not in known:
+            raise ValueError("경로 정보 확인 필요")
+        dcs = [n for n in nodes if classify_node(n) == DC]
+        explicit = _value(route, ("dc_id",))
+        matches = [n for n in dcs if (_value(n, ID_KEYS) == explicit if explicit else
+                   bool(_value(route, ("dc_name",))) and _value(n, NAME_KEYS) == _value(route, ("dc_name",)))]
+        dc_id = _value(matches[0], ID_KEYS) if len(matches) == 1 else None
+    else:
+        # Compatibility for existing non-display callers; UI never infers a hub.
+        dc_id = resolve_route_dc_id(route, nodes)
     if not dc_id:
         raise ValueError("DC 경유 경로에 사용할 DC를 확인할 수 없습니다.")
     return [

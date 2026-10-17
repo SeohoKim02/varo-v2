@@ -22,6 +22,8 @@ Outputs go to <data-root>/_INVENTORY_METRIC_INTEGRITY (local only, never into gi
 """
 from __future__ import annotations
 
+from services.git_protection import inspect_validator_git, git_validation_check
+
 import argparse
 import copy
 import json
@@ -995,9 +997,10 @@ def earlier_bundles(data_root: Path) -> dict[str, Any]:
     return out
 
 
-def _git_modified(repo_root: Path) -> list[str]:
-    status = oev._git(repo_root, "status", "--porcelain") or ""
-    return sorted(line[3:].strip() for line in status.splitlines() if line and not line.startswith("??"))
+def validation_git_guard(repo_root: Path) -> dict:
+    # Preserve T4: only this specific tracked integration file may change.
+    return inspect_validator_git(repo_root, "services/inventory_metric_integrity_validation.py",
+                                 protect_all_tracked=True, allowed_tracked=ALLOWED_MODIFIED)
 
 
 # ------------------------------------------------------------------------------------------------ run
@@ -1030,7 +1033,7 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
     golden = timed("golden_186", golden_186, data_root)
     t1 = timed("t1_rerun", t1_rerun, data_root)
     bundles = earlier_bundles(data_root)
-    modified = _git_modified(repo_root)
+    git_guard = validation_git_guard(repo_root)
 
     proxy_rows = proxy["rows"]
     e2e_rows = e2e["rows"]
@@ -1256,14 +1259,14 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
                and bundles["SELLER_LOSS"]["passed"] == 18, bundles["SELLER_LOSS"]),
         _check("R5", "Forecast: external GENERALIZATION FAIL kept; M5 V2 gate passed",
                bundles["FORECAST"]["external_verdict"] == "FAIL" and bool(bundles["FORECAST"]["m5_gate_passed"])),
-        _check("G1", f"tracked changes limited to {', '.join(ALLOWED_MODIFIED)}", set(modified) <= set(ALLOWED_MODIFIED), modified),
+        git_validation_check(git_guard, f"tracked changes limited to {', '.join(ALLOWED_MODIFIED)}; validator/policy protected"),
     ]
     after = oev._hashes(data_root, PROTECTED_BUNDLES)
     changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
     checks.append(_check("G2", "no data / canonical / bundle file changed during the run", not changed, changed))
-    failed = [c["check_id"] for c in checks if c["status"] == "FAIL"]
+    failed = [c["check_id"] for c in checks if c["status"] != "PASS"]
     summary = {
-        "contract_version": imi.CONTRACT_VERSION, "git_head": oev._git(repo_root, "rev-parse", "HEAD"),
+        "contract_version": imi.CONTRACT_VERSION, "git_head": git_guard["actual_result"]["head"], "git_protection": git_guard,
         "data_root": str(data_root), "checks": checks, "failed_checks": failed,
         "signal_types": imi.SIGNAL_TYPES, "gate_statuses": imi.GATE_STATUSES, "turnover_bases": imi.TURNOVER_BASES,
         "turnover_statuses": list(imi.TURNOVER_STATUSES), "day_states": imi.DAY_STATES,
@@ -1347,7 +1350,7 @@ def run_validation(data_root: Path, output_dir: Path | None = None, repo_root: P
     return summary
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data-root", type=Path, default=DATA_ROOT)
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -1357,7 +1360,8 @@ def main() -> None:
     print(json.dumps({"failed_checks": result["failed_checks"], "checks": result["checks"],
                       "readiness": result["readiness"], "runtime": result["runtime"]},
                      ensure_ascii=False, indent=2, default=_json_default))
+    return 0 if not result["failed_checks"] else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

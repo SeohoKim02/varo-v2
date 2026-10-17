@@ -46,19 +46,19 @@ def render_settings_page() -> None:
             display_mode = st.selectbox(
                 "기본 표시 방식",
                 display_options,
-                index=display_options.index(st.session_state.get("home_sim_display_mode", "단일 경로")),
+                index=None if "settings_display_mode" in st.session_state else display_options.index(st.session_state.get("home_sim_display_mode", "단일 경로")),
                 key="settings_display_mode",
             )
             speed = st.selectbox(
                 "기본 시뮬레이션 속도",
                 speed_options,
-                index=speed_options.index(st.session_state.get("simulation_speed", "보통")),
+                index=None if "settings_speed" in st.session_state else speed_options.index(st.session_state.get("simulation_speed", "보통")),
                 key="settings_speed",
             )
             inventory_view = st.selectbox(
                 "기본 재고 표시",
                 inventory_options,
-                index=inventory_options.index(st.session_state.get("home_sim_inventory_view", "전후 비교")),
+                index=None if "settings_inventory_view" in st.session_state else inventory_options.index(st.session_state.get("home_sim_inventory_view", "전후 비교")),
                 key="settings_inventory_view",
             )
     with sections[1]:
@@ -76,17 +76,17 @@ def render_settings_page() -> None:
             model_columns = st.columns(3, gap="small")
             episodes = int(model_columns[0].number_input(
                 "기본 Episodes", min_value=20, max_value=500,
-                value=int(st.session_state.get("settings_default_episodes", 80)), step=10,
+                value=None if "settings_episodes" in st.session_state else int(st.session_state.get("settings_default_episodes", 80)), step=10,
                 key="settings_episodes",
             ))
             rate = float(model_columns[1].number_input(
                 "Learning Rate", min_value=0.0001, max_value=0.0100,
-                value=float(st.session_state.get("settings_default_learning_rate", 0.001)),
+                value=None if "settings_learning_rate" in st.session_state else float(st.session_state.get("settings_default_learning_rate", 0.001)),
                 step=0.0001, format="%.4f", key="settings_learning_rate",
             ))
             candidates = int(model_columns[2].number_input(
                 "기본 후보 수", min_value=3, max_value=500,
-                value=int(st.session_state.get("settings_default_candidate_count", 20)), step=1,
+                value=None if "settings_candidate_count" in st.session_state else int(st.session_state.get("settings_default_candidate_count", 20)), step=1,
                 key="settings_candidate_count",
             ))
 
@@ -130,3 +130,10 @@ def render_settings_page() -> None:
             _render_quality_check(data)
         with st.expander("결과 다운로드", expanded=False):
             _render_downloads()
+
+    from components.navigation import candidate_enabled, _navigate_to
+    if candidate_enabled():
+        with st.expander("후보 기능 검토", expanded=False):
+            st.caption("기존 분석을 유지한 채 새 계산 결과를 별도로 검토합니다. 실제 운영에는 적용하지 않습니다.")
+            st.button("새 의사결정 결과 검토", key="settings_candidate_review", on_click=_navigate_to,
+                      args=("후보 결과 검토",))

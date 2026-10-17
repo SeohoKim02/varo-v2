@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-STATUSES = {"PASS", "FAIL", "BLOCKED", "NOT_RUN", "INSUFFICIENT_DATA", "ENVIRONMENT_ERROR"}
+STATUSES = {"PASS", "FAIL", "BLOCKED", "NOT_RUN", "INSUFFICIENT_DATA", "ENVIRONMENT_ERROR", "UNKNOWN"}
 VOLATILE = {"started_at", "finished_at", "duration", "runtime", "seconds", "generated_at", "output_path", "pytest_summary", "database"}
 
 
@@ -133,11 +133,18 @@ def inspect_reference(path, expected_hash):
 
 def readiness(results, mode):
     counts = {status: sum(r["status"] == status for r in results) for status in sorted(STATUSES)}
-    blocked = any(counts[s] for s in ("FAIL", "BLOCKED", "ENVIRONMENT_ERROR"))
+    counts["UNKNOWN"] += sum(r["status"] not in STATUSES for r in results) + int(not results)
+    blocked = any(counts[s] for s in ("FAIL", "BLOCKED", "ENVIRONMENT_ERROR", "UNKNOWN"))
     incomplete = any(counts[s] for s in ("NOT_RUN", "INSUFFICIENT_DATA"))
     frozen = any(r.get("execution_level") == "REUSED_FROZEN_RESULT" for r in results)
     code = "BLOCKED" if blocked else "READY_WITH_LIMITATIONS" if incomplete or mode == "quick" or frozen else "READY"
-    return {"code_regression": code, "regression_verdict": "FAIL" if counts["FAIL"] else "BLOCKED" if blocked else "PASS",
+    verdict = ("FAIL" if counts["FAIL"] else "ENVIRONMENT_ERROR" if counts["ENVIRONMENT_ERROR"] else
+               "BLOCKED" if counts["BLOCKED"] else "UNKNOWN" if counts["UNKNOWN"] else "NOT_RUN" if incomplete else "PASS")
+    executed_calculations = [r for r in results if r.get("execution_level") == "ACTUAL_RERUN"
+                             and not r.get("validation_id", "").startswith("GIT_PROTECTION") and r["status"] != "NOT_RUN"]
+    calculation_verdict = ("NOT_RUN" if not executed_calculations else "PASS" if
+                           all(r["status"] == "PASS" for r in executed_calculations) else "NOT_READY")
+    return {"code_regression": code, "regression_verdict": verdict, "calculation_regression": calculation_verdict,
             "operational_evidence": "BLOCKED", "seller_actual_application": "BLOCKED",
             "demo": "BLOCKED" if blocked else "READY_WITH_LIMITATIONS", "overall": code,
             "production_action_applied": False, "production_approval": False,
