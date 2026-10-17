@@ -14,6 +14,7 @@ from services.analysis_pipeline import run_analysis_pipeline
 from services.data_loader import load_excel_data
 from services.dqn_service import ACTION_LABELS, data_signature_from_recommendations
 from services.sample_catalog import SAMPLE_WORKBOOKS, SampleWorkbook, sample_path
+from services.local_paths import balanced_samples_dir
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,8 @@ SAMPLE_DIR_CANDIDATES = (
     PROJECT_ROOT / "data" / "dqn_samples",
     PROJECT_ROOT / "Varo_DQN_training_samples_10pack",
 )
-BALANCED_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "dqn_balanced_samples"
+# Compatibility export only. Writers resolve the configured root at call time.
+BALANCED_OUTPUT_DIR = balanced_samples_dir()
 BALANCE_POLICY = "feature_rank_round_robin_v1"
 
 
@@ -239,10 +241,11 @@ def save_balanced_recommendations(
     balance_policy: str = BALANCE_POLICY,
 ) -> Path:
     """Persist a generated balanced copy without changing any source workbook."""
-    BALANCED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    destination = balanced_samples_dir()
+    destination.mkdir(parents=True, exist_ok=True)
     safe_sample = re.sub(r"[^0-9A-Za-z_-]+", "_", str(sample_id or "current")).strip("_") or "current"
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    path = BALANCED_OUTPUT_DIR / (
+    path = destination / (
         f"dqn_balanced_{safe_sample}_{int(store_count)}stores_{int(dc_count)}dc_{stamp}.xlsx"
     )
     generated_at = datetime.now().isoformat(timespec="seconds")

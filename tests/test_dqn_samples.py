@@ -16,11 +16,12 @@ from services.dqn_samples import (
     load_sample_recommendations,
 )
 from services.dqn_service import data_signature_from_recommendations
+from services.local_paths import output_root
 
 
 class DqnSampleTests(unittest.TestCase):
     def test_generated_balanced_samples_stay_under_dqn_output(self):
-        self.assertTrue(BALANCED_OUTPUT_DIR.resolve().is_relative_to((PROJECT_ROOT / "outputs").resolve()))
+        self.assertEqual(BALANCED_OUTPUT_DIR.resolve(), (output_root() / "dqn_balanced_samples").resolve())
         self.assertEqual(BALANCED_OUTPUT_DIR.name, "dqn_balanced_samples")
 
     def test_catalog_exposes_samples_01_through_10(self):

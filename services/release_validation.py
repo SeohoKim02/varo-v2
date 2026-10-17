@@ -37,6 +37,7 @@ QUICK_TESTS = (
 RESULT_FILES = ("release_validation_summary.json", "release_validation_matrix.csv", "release_validation_failures.csv",
                 "golden_regression_by_day.csv", "golden_regression_by_strategy.csv", "validation_runtime.csv",
                 "reference_integrity.json", "release_readiness.json")
+TEST_TIMEOUT_SECONDS = 900
 
 
 def now():
@@ -289,21 +290,30 @@ class Audit:
         return result
 
     def tests(self, scratch):
-        args = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+        # Preserve the last running node and thread stacks if a native/UI test stalls.
+        args = [sys.executable, "-m", "pytest", "-vv", "-o", "faulthandler_timeout=60", "-p", "no:cacheprovider"]
         if self.mode == "quick": args.extend(str(Path("tests") / n) for n in QUICK_TESTS)
         env = dict(os.environ, VARO_OUTPUT_ROOT=str(scratch / "model_outputs"), PYTHONDONTWRITEBYTECODE="1", TMP=str(scratch), TEMP=str(scratch))
         start = time.perf_counter()
+        timed_out = False
         with (self.output / "pytest.log").open("w", encoding="utf-8") as handle:
-            process = subprocess.run(args, cwd=REPO, env=env, stdout=handle, stderr=subprocess.STDOUT)
+            try:
+                process = subprocess.run(args, cwd=REPO, env=env, stdout=handle, stderr=subprocess.STDOUT,
+                                         timeout=TEST_TIMEOUT_SECONDS)
+                exit_code = process.returncode
+            except subprocess.TimeoutExpired:
+                timed_out, exit_code = True, None
+                handle.write(f"\nPYTEST_TIMEOUT after {TEST_TIMEOUT_SECONDS}s; result is not a pass.\n")
         log = (self.output / "pytest.log").read_text(encoding="utf-8")
         count = re.search(r"(\d+) passed", log)
         passed = int(count.group(1)) if count else None
         skip = bool(re.search(r"\b\d+ (?:skipped|xfailed|xpassed|failed|error|warnings?)\b", log))
-        ok = process.returncode == 0 and passed is not None and not skip and (self.mode != "full" or passed >= 1338)
-        return {"status": "PASS" if ok else "FAIL", "actual_result": {"exit_code": process.returncode, "passed": passed,
+        ok = not timed_out and exit_code == 0 and passed is not None and not skip and (self.mode != "full" or passed >= 1338)
+        return {"status": "PASS" if ok else "FAIL", "actual_result": {"exit_code": exit_code, "passed": passed,
+                "timed_out": timed_out, "timeout_seconds": TEST_TIMEOUT_SECONDS,
                 "pytest_summary": log.splitlines()[-1] if log.splitlines() else None, "duration": round(time.perf_counter() - start, 2),
                 "production_model_training": False, "note": "existing unit tests may train tiny fixtures in managed scratch"},
-                "reason_codes": [] if ok else ["PYTEST_OR_COLLECTION_REGRESSION"]}
+                "reason_codes": [] if ok else ["PYTEST_TIMEOUT" if timed_out else "PYTEST_OR_COLLECTION_REGRESSION"]}
 
     def references(self):
         rows = [{"path": path, "expected": digest, **inspect_reference(self.root / path, digest)}

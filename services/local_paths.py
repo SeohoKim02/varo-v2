@@ -25,5 +25,9 @@ def dqn_output_dir() -> Path:
     return output_root() / "dqn"
 
 
+def balanced_samples_dir() -> Path:
+    return output_root() / "dqn_balanced_samples"
+
+
 def simulation_history_dir() -> Path:
     return output_root() / "simulation_history"

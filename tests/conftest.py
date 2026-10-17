@@ -9,21 +9,27 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 _scratch = None
+_previous_output_root = None
 
 
 def pytest_configure(config):
-    global _scratch
+    global _scratch, _previous_output_root
     configured = os.environ.get("VARO_OUTPUT_ROOT")
     production = Path(__file__).resolve().parents[1] / "outputs"
-    configured_path = Path(configured).resolve() if configured else None
-    if not configured or configured_path == production.resolve() or configured_path == (production / "dqn").resolve():
+    configured_path = Path(configured.strip()).expanduser().resolve() if configured and configured.strip() else None
+    if configured_path is None or configured_path.is_relative_to(production.resolve()):
+        _previous_output_root = configured
         _scratch = TemporaryDirectory(prefix="varo-pytest-runtime-")
         os.environ["VARO_OUTPUT_ROOT"] = _scratch.name
 
 
 def pytest_unconfigure(config):
-    global _scratch
+    global _scratch, _previous_output_root
     if _scratch is not None:
-        os.environ.pop("VARO_OUTPUT_ROOT", None)
+        if _previous_output_root is None:
+            os.environ.pop("VARO_OUTPUT_ROOT", None)
+        else:
+            os.environ["VARO_OUTPUT_ROOT"] = _previous_output_root
         _scratch.cleanup()
         _scratch = None
+        _previous_output_root = None
