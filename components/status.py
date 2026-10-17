@@ -57,6 +57,8 @@ def user_status_label(value: object, default: str = "-") -> str:
     text = str(value)
     if text in USER_STATUS_LABELS:
         return USER_STATUS_LABELS[text]
+    if text.upper() in USER_STATUS_LABELS:
+        return USER_STATUS_LABELS[text.upper()]
     if re.search(r"[A-Za-z]+_[A-Za-z_]+|Traceback|\w+(?:Error|Exception)", text) or re.fullmatch(r"[A-Z][A-Z0-9 ]+", text):
         logging.getLogger("varo.ui").warning("Unmapped status: %s", text)
         return "상태 확인 필요"

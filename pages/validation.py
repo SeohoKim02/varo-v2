@@ -12,7 +12,7 @@ from pathlib import Path
 
 from components.cards import render_empty_state, render_page_header, render_section_header
 from components.status import badge_html, user_status_label
-from components.user_feedback import diagnostic_details, report_error
+from components.user_feedback import analysis_label, diagnostic_details, report_error, user_text
 from services import export_service, v2_summaries
 from services.analysis_pipeline import run_analysis_pipeline
 from services.app_state import current_result_basis
@@ -179,7 +179,7 @@ def _as_number(value):
 
 
 _VHS_COMPARISON_HEADERS = {
-    "route_id": "route_id", "product_name": "상품",
+    "route_id": "경로 번호", "product_name": "상품",
     "source_name": "출발 점포", "target_name": "도착 점포",
     "uploaded_vhs": "업로드 VHS", "recalculated_vhs": "재계산 VHS",
     "difference": "차이", "basis": "기준",
@@ -222,7 +222,7 @@ def _render_vhs(pipeline: dict) -> None:
         "현재 운영 기준은 재계산 VHS이며, 일부 구성요소는 입력 컬럼 부족 시 중립값(50)이 적용됩니다."
     )
     with st.expander("계산 기준", expanded=False):
-        st.caption(f"재계산 함수: {analysis.get('calculation_function') or analysis.get('connected_function', '-')}")
+        diagnostic_details("VHS calculation source", analysis.get('calculation_function') or analysis.get('connected_function'))
         st.caption("현재 운영 기준은 재계산 VHS이며 추가 모델 보정 없이 계산합니다.")
 
     neutral = pipeline.get("vhs_neutral_analysis") or v2_summaries.vhs_neutral_summary(pipeline)
@@ -246,6 +246,12 @@ def _render_vhs_weights(pipeline: dict) -> None:
     weight_rows = analysis.get("weight_rows") or []
     if weight_rows:
         table = pd.DataFrame(weight_rows)
+        if "component" in table:
+            table["component"] = table["component"].map(lambda value: _WEIGHT_LABELS.get(value, user_text(value, "보조 평가 기준")))
+        if "used" in table:
+            table["used"] = table["used"].map(lambda value: "사용" if value else "미사용")
+        if "fallback_reason" in table:
+            table["fallback_reason"] = table["fallback_reason"].map(lambda value: user_text(value, "입력 자료와 적용 조건을 확인해 주세요.") if pd.notna(value) and str(value).strip() else "-")
         rename = {
             "component": "구성 요소",
             "used": "사용 여부",
@@ -256,14 +262,14 @@ def _render_vhs_weights(pipeline: dict) -> None:
             "min_weight": "최소",
             "max_weight": "최대",
             "average_score": "평균 점수",
-            "fallback_reason": "fallback",
+            "fallback_reason": "대체 적용 사유",
         }
         columns = [column for column in rename if column in table.columns]
         st.dataframe(table[columns].rename(columns=rename), hide_index=True, width="stretch")
-        st.caption("자동 가중치는 현재 데이터 분포, 결측률, 분산 신호를 반영하고 min/max 제한 후 합계 1.0으로 정규화합니다.")
+        st.caption("자동 가중치는 현재 데이터 분포와 누락 정도를 반영하며, 정해진 범위 안에서 합계가 1이 되도록 적용합니다.")
         return
     rows = [
-        {"구성 요소": key, "평균 적용 가중치": value, "평균 기여 점수": contributions.get(key, "-")}
+        {"구성 요소": _WEIGHT_LABELS.get(key, user_text(key, "보조 평가 기준")), "평균 적용 가중치": value, "평균 기여 점수": contributions.get(key, "-")}
         for key, value in sorted(weights.items(), key=lambda item: item[1], reverse=True)
     ]
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
@@ -275,7 +281,7 @@ def _render_vhs_weights(pipeline: dict) -> None:
 
 
 _SENSITIVITY_HEADERS = {
-    "route_id": "route_id", "product_name": "상품",
+    "route_id": "경로 번호", "product_name": "상품",
     "sensitivity_cost": "비용 민감도", "sensitivity_distance": "거리 민감도",
     "sensitivity_quantity": "수량 민감도", "sensitivity_vhs": "VHS 민감도",
     "overall_sensitivity": "종합 민감도", "stability_note": "안정성 비고",
@@ -1016,10 +1022,10 @@ def _render_dqn_artifacts(display: dict | None, predictions: dict) -> None:
                 width="stretch",
             )
         if model_path:
-            st.caption(f"모델 경로: {model_path}")
+            diagnostic_details("saved DQN model path", model_path)
         rows = read_training_comparison_rows()
         if rows:
-            st.caption(f"누적 학습 비교 기록 {len(rows):,}건 · dqn_training_comparison.csv")
+            st.caption(f"누적 학습 비교 기록 {len(rows):,}건")
             st.dataframe(pd.DataFrame(rows[-20:]), hide_index=True, width="stretch", height=220)
     ratio = concentration.get("dominant_ratio")
     if ratio is not None and float(ratio) >= ACTION_CONCENTRATION_LIMIT:
@@ -1235,7 +1241,7 @@ def _render_confidence(pipeline: dict) -> None:
     analysis = pipeline.get("confidence_analysis") or {}
     rows = [
         {
-            "route_id": item.get("route_id"), "상품": item.get("product_name"),
+            "경로 번호": item.get("route_id"), "상품": item.get("product_name"),
             "신뢰도": item.get("confidence_score"), "추천 등급": item.get("recommendation_grade"),
             "DQN": "미연결",
         }
@@ -1253,7 +1259,7 @@ def _render_confidence(pipeline: dict) -> None:
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     st.caption("등급: 높음 80 이상 / 보통 60 이상 / 낮음 60 미만")
     with st.expander("계산 기준", expanded=False):
-        st.caption(f"계산 함수: {analysis.get('calculation_function', 'vhs_confidence.add_confidence_columns')}")
+        diagnostic_details("confidence calculation source", analysis.get('calculation_function'))
         st.caption("외부 모델 가점 없이 입력 데이터 기준으로 계산합니다.")
 
 
@@ -1271,12 +1277,12 @@ def _render_report_summary(pipeline: dict) -> None:
         if uploaded_avg is not None and recalc_avg is not None else "-"
     )
     status_label = {"success": "성공 (핵심 알고리즘 재계산)", "partial": "일부 보류"}.get(
-        pipeline.get("status"), pipeline.get("status", "-")
+        pipeline.get("status"), user_status_label(pipeline.get("status"))
     )
     dqn_summary = dqn_result_summary(st.session_state.get("dqn_training_result"), recommendations)
     rows = [
         ("적용 파일", st.session_state.get("uploaded_filename") or "-"),
-        ("데이터 기준", pipeline.get("result_basis", "-")),
+        ("데이터 기준", user_text(pipeline.get("result_basis"), "입력 자료 기준")),
         ("분석 상태", status_label),
         ("추천 결과 수", len(recommendations)),
         ("처리 대상 재고", f"{float(summary.get('total_recommended_qty') or 0):,.0f}"),
@@ -1292,9 +1298,9 @@ def _render_report_summary(pipeline: dict) -> None:
         ("보류 알고리즘 수 (원본)", len(pipeline.get("deferred_algorithms") or [])),
         ("V2 요약 기능 수 (연결)", len(pipeline.get("v2_summary_functions") or [])),
         ("VHS 중립값 적용 구성요소", (pipeline.get("vhs_neutral_analysis") or {}).get("neutral_components", "-")),
-        ("DQN", f"{dqn_summary['status']} · {dqn_summary['reflection_mode']}"),
+        ("DQN", f"{user_status_label(dqn_summary['status'])} · {user_text(dqn_summary['reflection_mode'], '반영 조건 확인 필요')}"),
         ("다운로드", "추천 CSV · 추천 Excel · 분석결과 Excel · 검증리포트 Excel (4종)"),
-        ("자동 테스트", "회귀·계약 테스트로 검증 (py -m unittest discover -s tests)"),
+        ("자동 테스트", "기존 기능과 데이터 처리 규칙을 자동 검증합니다."),
     ]
     st.dataframe(
         pd.DataFrame([{"항목": key, "값": "-" if value is None else str(value)} for key, value in rows]),
@@ -1312,7 +1318,12 @@ def _render_validation_report(pipeline: dict) -> None:
         render_section_header(st, "데이터 검증 메시지", "V2 자체 데이터 검증 결과입니다.")
         st.markdown(badge_html(report.status, _badge_variant(report.status)), unsafe_allow_html=True)
         if report.messages:
-            st.dataframe(pd.DataFrame([message.to_dict() for message in report.messages]), hide_index=True, width="stretch")
+            diagnostic_details("data validation messages", [message.to_dict() for message in report.messages])
+            st.dataframe(pd.DataFrame([{
+                "상태": user_status_label(message.to_dict().get("level")),
+                "자료": "전체 파일" if message.to_dict().get("sheet") == "workbook" else user_text(message.to_dict().get("sheet"), "입력 자료"),
+                "안내": user_text(message.to_dict().get("message"), "입력 자료의 필수 항목과 형식을 확인해 주세요."),
+            } for message in report.messages]), hide_index=True, width="stretch")
 
     connected = pipeline.get("connected_algorithms") or []
     deferred = pipeline.get("deferred_algorithms") or []
@@ -1320,19 +1331,24 @@ def _render_validation_report(pipeline: dict) -> None:
     optimality = (pipeline.get("validation_report") or {}).get("optimality_gap") or {}
     render_section_header(st, "알고리즘 연결 상태", "현재 사용할 수 있는 분석과 보류 항목입니다.")
     cols = st.columns(4, gap="small")
-    cols[0].metric("연결 함수", len(connected))
+    cols[0].metric("연결된 분석", len(connected))
     cols[1].metric("보류 항목", len(deferred))
     cols[2].metric("추천 결과", len(st.session_state.get("varo_recommendations") or []))
     cols[3].metric("비교 가능 후보", optimality.get("comparable_candidate_count", 0))
     if connected:
         with st.expander("연결된 알고리즘", expanded=False):
-            st.dataframe(pd.DataFrame({"함수": connected}), hide_index=True, width="stretch")
+            diagnostic_details("connected algorithms", connected)
+            counts = pd.Series([analysis_label(item) for item in connected]).value_counts()
+            st.dataframe(pd.DataFrame({"분석 항목": counts.index, "연결 기능 수": counts.values}), hide_index=True, width="stretch")
     if deferred:
         st.caption("보류 항목은 추가 입력 기준이 필요한 보조 기능이며 핵심 추천 결과에는 영향을 주지 않습니다.")
         with st.expander("보류된 알고리즘", expanded=False):
-            st.dataframe(pd.DataFrame(deferred), hide_index=True, width="stretch")
+            diagnostic_details("deferred algorithms", deferred)
+            st.dataframe(pd.DataFrame([{"분석 항목": analysis_label(item.get("algorithm")),
+                "확인할 내용": user_text(item.get("reason"), "계산에 필요한 입력과 사용 조건을 확인해 주세요.")}
+                for item in deferred]), hide_index=True, width="stretch")
     if warnings:
-        st.warning("\n".join(f"- {warning}" for warning in warnings))
+        st.warning("\n".join(f"- {user_text(warning, '일부 분석에 필요한 자료가 부족하거나 계산 조건을 확인해야 합니다.')}" for warning in warnings))
 
     v2_functions = pipeline.get("v2_summary_functions") or []
     render_section_header(st, "보류 분석과 V2 요약", "현재 제공 범위와 추가 입력이 필요한 항목입니다.")
@@ -1364,16 +1380,13 @@ def _render_validation_report(pipeline: dict) -> None:
     sources = (pipeline.get("validation_report") or {}).get("calculation_sources") or {}
     if sources:
         with st.expander("계산 출처", expanded=False):
-            st.dataframe(
-                pd.DataFrame([{"항목": key, "계산 출처": value} for key, value in sources.items()]),
-                hide_index=True,
-                width="stretch",
-            )
+            diagnostic_details("calculation sources", sources)
+            st.caption("현재 입력 자료를 기준으로 계산했습니다. 세부 계산 근거는 내려받은 검증 리포트에서 확인할 수 있습니다.")
 
     recommendations = st.session_state.get("varo_recommendations") or []
     promotion_rows = [
         {
-            "route_id": item.get("route_id"),
+            "경로 번호": item.get("route_id"),
             "상품": item.get("product_name"),
             "재배치 예상 절감액": item.get("expected_saving"),
             "프로모션 예상 효과": item.get("promotion_effect"),
@@ -1395,20 +1408,20 @@ def _render_validation_report(pipeline: dict) -> None:
                 continue
             inventory_rows.append({
                 "영역": group_name,
-                "분석": key,
-                "상태": value.get("status", "연결" if value else "보류"),
-                "함수": value.get("function", "-"),
-                "계산 지표": ", ".join(value.get("output_columns") or []) or "-",
-                "입력 부족": ", ".join(value.get("missing_input_columns") or []) or "없음",
+                "분석": analysis_label(key),
+                "상태": user_status_label(value.get("status", "연결" if value else "보류")),
+                "계산 지표 수": len(value.get("output_columns") or []),
+                "추가 입력 항목 수": len(value.get("missing_input_columns") or []),
             })
     with st.expander("수요·폐기·재고 분석 연결 상태", expanded=False):
         if inventory_rows:
+            diagnostic_details("inventory calculation sources", {"demand": pipeline.get("demand_analysis"), "risk": pipeline.get("risk_analysis")})
             st.dataframe(pd.DataFrame(inventory_rows), hide_index=True, width="stretch")
         else:
             render_empty_state(st, "연결 상태를 확인할 수 없습니다", compact=True)
 
     upload_report = st.session_state.get("upload_report") or {}
-    st.caption(f"최종 상태: {pipeline.get('status', '미연결')} · 결과 기준: {pipeline.get('result_basis', '-')}")
+    st.caption(f"최종 상태: {user_status_label(pipeline.get('status', '미연결'))} · 결과 기준: {user_text(pipeline.get('result_basis'), '입력 자료 기준')}")
 
     render_section_header(st, "리포트 다운로드", "검증 결과와 분석 결과를 파일로 내려받습니다.")
     cols = st.columns([1, 1, 2], gap="small")

@@ -1,6 +1,7 @@
 [client]
 showSidebarNavigation = false
 showErrorDetails = "none"
+toolbarMode = "viewer"
 
 [theme]
 base = "light"
