@@ -109,3 +109,24 @@ def test_release_runner_keeps_normal_pass_contract(tmp_path, monkeypatch):
     assert result["status"] == "PASS"
     assert result["actual_result"]["timed_out"] is False
     assert result["actual_result"]["passed"] == 2143
+
+
+@pytest.mark.parametrize("diagnostic", [
+    "Windows fatal exception: access violation",
+    "Fatal Python error: invalid thread state",
+    "Exception ignored in thread started by: <bound method Thread._bootstrap>",
+], ids=["windows-native-fault", "python-runtime-fault", "thread-bootstrap-fault"])
+def test_release_rejects_native_fault_even_with_zero_exit_and_pass_summary(tmp_path, monkeypatch, diagnostic):
+    audit = object.__new__(rv.Audit)
+    audit.output, audit.mode = tmp_path, "full"
+    def completed(args, **kwargs):
+        kwargs["stdout"].write(f"tests/test_example.py::test_running {diagnostic}\n2143 passed in 1.00s\n")
+        return subprocess.CompletedProcess(args, 0)
+    monkeypatch.setattr(rv.subprocess, "run", completed)
+    result = audit.tests(tmp_path / "scratch")
+    assert result["status"] == "FAIL"
+    assert result["reason_codes"] == ["PYTEST_NATIVE_FAILURE"]
+    assert result["actual_result"]["passed"] == 2143
+    assert result["actual_result"]["exit_code"] == 0
+    assert result["actual_result"]["native_failure_markers"] == [diagnostic.split(":", 1)[0] + ":"]
+    assert diagnostic in (tmp_path / "pytest.log").read_text(encoding="utf-8")

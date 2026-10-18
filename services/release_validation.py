@@ -33,6 +33,7 @@ QUICK_TESTS = (
     "test_final_decision_integration.py",
     "test_git_protection.py",
     "test_validation_git_policies.py",
+    "test_validation_runtime_isolation.py", "test_validation_apptest_lifecycle.py",
 )
 RESULT_FILES = ("release_validation_summary.json", "release_validation_matrix.csv", "release_validation_failures.csv",
                 "golden_regression_by_day.csv", "golden_regression_by_strategy.csv", "validation_runtime.csv",
@@ -308,12 +309,21 @@ class Audit:
         count = re.search(r"(\d+) passed", log)
         passed = int(count.group(1)) if count else None
         skip = bool(re.search(r"\b\d+ (?:skipped|xfailed|xpassed|failed|error|warnings?)\b", log))
-        ok = not timed_out and exit_code == 0 and passed is not None and not skip and (self.mode != "full" or passed >= 1338)
+        # Windows native faults can be logged even when pytest later exits zero.
+        # Keep that evidence and fail closed instead of trusting only its summary.
+        native_failures = [marker for marker in (
+            "Windows fatal exception:", "Fatal Python error:", "Exception ignored in thread started by:"
+        ) if marker in log]
+        ok = not timed_out and not native_failures and exit_code == 0 and passed is not None and not skip and (self.mode != "full" or passed >= 1338)
+        reasons = (["PYTEST_TIMEOUT"] if timed_out else []) + (["PYTEST_NATIVE_FAILURE"] if native_failures else [])
+        if not ok and not reasons:
+            reasons = ["PYTEST_OR_COLLECTION_REGRESSION"]
         return {"status": "PASS" if ok else "FAIL", "actual_result": {"exit_code": exit_code, "passed": passed,
                 "timed_out": timed_out, "timeout_seconds": TEST_TIMEOUT_SECONDS,
+                "native_failure_markers": native_failures,
                 "pytest_summary": log.splitlines()[-1] if log.splitlines() else None, "duration": round(time.perf_counter() - start, 2),
                 "production_model_training": False, "note": "existing unit tests may train tiny fixtures in managed scratch"},
-                "reason_codes": [] if ok else ["PYTEST_TIMEOUT" if timed_out else "PYTEST_OR_COLLECTION_REGRESSION"]}
+                "reason_codes": reasons}
 
     def references(self):
         rows = [{"path": path, "expected": digest, **inspect_reference(self.root / path, digest)}
