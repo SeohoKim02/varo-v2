@@ -395,7 +395,11 @@ def render_candidate_review_page():
         st.info("별도 후보 검토 화면에서 먼저 검토 시작에 동의해 주세요.")
         return
     render_page_header(st, "후보 의사결정 검토", "기존 분석을 바꾸지 않고 새로운 처리 계획을 비교합니다.")
-    mode = st.radio("자료 선택", ["가상 사례", "실제 자료 검토"], horizontal=True, key="candidate_data_mode")
+    mode = st.radio("자료 선택", ["가상 사례", "실제 자료 검토", "추가 연구"], horizontal=True, key="candidate_data_mode")
+    if mode == "추가 연구":
+        from components.research_upgrade_view import render_research_upgrade
+        render_research_upgrade()
+        return
     if mode == "가상 사례": _render_scenarios()
     else: _render_real_intake()
     _render_history()
